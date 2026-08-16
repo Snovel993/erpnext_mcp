@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One section of a periodic report: what it is called, where its numbers come from, and whether the report can be called finished without it. `data_source` names a tool on this site rather than describing a spreadsheet, which is what lets a report skeleton be generated with each section already pointing at the thing that fills it.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_name",
+  "sequence",
+  "required",
+  "label_en",
+  "label_es",
+  "data_source",
+  "description"
+ ],
+ "fields": [
+  {
+   "description": "The section's key — 'Results of Operations', 'Liquidity and Capital Resources', 'Segment Information'. Stable, because it is what a generated skeleton is keyed on across periods.",
+   "fieldname": "section_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Section Name",
+   "reqd": 1
+  },
+  {
+   "default": "50",
+   "description": "Order in the report. Lower first. The default leaves room either side so inserting a section between two others does not mean renumbering the set.",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Sequence"
+  },
+  {
+   "default": "1",
+   "description": "Whether the report is incomplete without it. An optional section that nobody wrote is a choice; a required one that nobody wrote is a gap, and the skeleton generator reports the two differently.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "description": "The heading as it prints, in English. Falls back to the section name when empty.",
+   "fieldname": "label_en",
+   "fieldtype": "Data",
+   "label": "Label (EN)"
+  },
+  {
+   "description": "The heading in Spanish, for a reader who works in it. Empty means the English is served and the gap is REPORTED rather than hidden — see the Reporting Template docstring on why a half-translated document is worse than an untranslated one.",
+   "fieldname": "label_es",
+   "fieldtype": "Data",
+   "label": "Label (ES)"
+  },
+  {
+   "description": "WHICH TOOL ON THIS SITE FILLS THIS SECTION — 'get_cash_flow_summary', 'compute_all_kpis', 'generate_segment_report'. Named rather than described, so generate_quarterly_report_skeleton can hand somebody a section that already says where its numbers come from. Free text on purpose: a source that is a spreadsheet or a person is a real answer and refusing to record it would just mean it went unrecorded.",
+   "fieldname": "data_source",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Data Source"
+  },
+  {
+   "description": "What this section is for, and what belongs in it.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Reporting Template Section",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}

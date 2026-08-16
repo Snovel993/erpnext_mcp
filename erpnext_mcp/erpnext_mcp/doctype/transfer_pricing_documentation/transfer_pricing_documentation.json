@@ -1,0 +1,267 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "The arm's-length case for one related-party transaction, written down before anybody asks for it. A payment to the manager's own trucking LLC is not wrong; a payment to the manager's own trucking LLC that nobody can price against the market is what a related-party finding actually is. This record holds the price, the reference the price was tested against, and the sentence explaining why the two agree — which is the whole of what IRC §482 and the disclosure schedules ask an operation to have kept.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "related_party",
+  "transaction_type",
+  "identity_col",
+  "period_start",
+  "period_end",
+  "status",
+  "superseded_by",
+  "amount_section",
+  "amount",
+  "currency",
+  "amount_col",
+  "pricing_method",
+  "market_rate_reference",
+  "justification_section",
+  "justification",
+  "comparables",
+  "evidence_section",
+  "supporting_document",
+  "evidence_col",
+  "prepared_by",
+  "prepared_on",
+  "reviewed_by",
+  "reviewed_on",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "TPD-.YYYY.-.####",
+   "print_hide": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Which entity's transaction this documents. Required — an arm's-length case belongs to the books it defends.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The counterparty, as a row in the related-party register rather than as free text. A Link and not a Data field on purpose: this is what lets a transaction found in the ledger be matched to its documentation without anybody spelling a name the same way twice.",
+   "fieldname": "related_party",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Related Party",
+   "options": "Related Party",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What kind of dealing this is. A CLOSED LIST because it is what a transaction is matched on — two spellings of 'Management Fee' would let one documented arrangement look undocumented and the finding would be raised against a farm that had done the work.",
+   "fieldname": "transaction_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Transaction Type",
+   "options": "Purchase of Goods\nSale of Goods\nServices Received\nServices Provided\nLease — Land\nLease — Equipment\nLease — Housing\nLoan Received\nLoan Made\nManagement Fee\nCost Sharing\nGuarantee\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "First day this documentation covers. A transfer pricing case is made for a PERIOD rather than for a single invoice — one memo covering a season of hauling is how the work is actually done, and requiring one per invoice is how a control gets abandoned.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period Start",
+   "reqd": 1
+  },
+  {
+   "description": "Last day this documentation covers, inclusive.",
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period End",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "description": "DRAFT DOES NOT COVER A TRANSACTION, and the distinction is the point of the field. A started-but-unfinished memo is a different finding from no memo at all, and the control says which — 'the documentation exists and is unfinished' is a morning's work, 'nothing was ever written' is a season's.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nComplete\nSuperseded",
+   "reqd": 1
+  },
+  {
+   "description": "The later memo that replaces this one. Set when a period is re-documented — nothing is deleted, because the transactions the old memo defended are still in the ledger and a prior year's schedule still needs the case as it stood.",
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Superseded By",
+   "options": "Transfer Pricing Documentation"
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "The Price"
+  },
+  {
+   "description": "What the arrangement is worth over the period covered. The control compares the transactions it finds against this: a memo written for $12,000 of hauling does not document $140,000 of it, and saying so is the difference between documentation and paperwork.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Documented Amount",
+   "options": "currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "amount_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How the price was tested. The names are the recognised methods under IRC §482 and the OECD guidelines, so a memo written here uses the vocabulary the examiner already reads in.",
+   "fieldname": "pricing_method",
+   "fieldtype": "Select",
+   "label": "Pricing Method",
+   "options": "Comparable Uncontrolled Price\nResale Price\nCost Plus\nComparable Profits / TNMM\nProfit Split\nOther"
+  },
+  {
+   "description": "WHAT THE PRICE WAS TESTED AGAINST, specifically enough that somebody else could look it up: 'three quotes from independent haulers, Yakima, March 2026', 'USDA custom rates survey, Pacific Northwest, 2025', 'the rate we charge the two unrelated growers on the same route'. Required, because a justification with no reference behind it is an opinion.",
+   "fieldname": "market_rate_reference",
+   "fieldtype": "Small Text",
+   "label": "Market Rate Reference",
+   "reqd": 1
+  },
+  {
+   "fieldname": "justification_section",
+   "fieldtype": "Section Break",
+   "label": "The Case"
+  },
+  {
+   "description": "Why this price is the price an unrelated party would have paid. Written for somebody who was not there — an examiner, a lender, an auditor three years later — and the one field on this record that nothing can compute.",
+   "fieldname": "justification",
+   "fieldtype": "Text",
+   "label": "Arm's-Length Justification",
+   "reqd": 1
+  },
+  {
+   "description": "The comparable arrangements relied on, one per line, with their prices.",
+   "fieldname": "comparables",
+   "fieldtype": "Small Text",
+   "label": "Comparables"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence and Provenance"
+  },
+  {
+   "description": "The signed agreement, the quote file, the rate survey — whatever is on the site already. Quotes and surveys that are not can be attached to this record.",
+   "fieldname": "supporting_document",
+   "fieldtype": "Link",
+   "label": "Supporting Document",
+   "options": "Governance Document"
+  },
+  {
+   "fieldname": "evidence_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "prepared_by",
+   "fieldtype": "Link",
+   "label": "Prepared By",
+   "options": "User"
+  },
+  {
+   "fieldname": "prepared_on",
+   "fieldtype": "Date",
+   "label": "Prepared On"
+  },
+  {
+   "description": "Who checked it. A memo the preparer also reviewed is not reviewed, and the related-party disclosure report reports that separately rather than counting it as done.",
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewed_on",
+   "fieldtype": "Date",
+   "label": "Reviewed On"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Transfer Pricing Documentation",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "related_party,transaction_type,period_start,period_end",
+ "sort_field": "period_start",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

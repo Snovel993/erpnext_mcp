@@ -775,7 +775,37 @@
   "allow_update_biological_asset",
   "allow_record_biological_asset_valuation",
   "allow_create_standard_cost",
-  "allow_update_standard_cost"
+  "allow_update_standard_cost",
+  "ipo_phase456_section",
+  "allow_get_related_party_transactions",
+  "allow_list_related_party_disclosures",
+  "allow_generate_related_party_disclosure",
+  "allow_get_transfer_pricing_doc",
+  "allow_list_transfer_pricing_docs",
+  "allow_generate_access_control_report",
+  "allow_get_change_management_log",
+  "allow_list_change_management_logs",
+  "allow_get_change_management_report",
+  "allow_get_backup_record",
+  "allow_list_backup_records",
+  "allow_get_reporting_template",
+  "allow_list_reporting_templates",
+  "allow_generate_mda_data_feed",
+  "allow_generate_segment_report",
+  "allow_get_disclosure_checklist",
+  "allow_list_disclosure_checklists",
+  "allow_generate_quarterly_report_skeleton",
+  "allow_flag_related_party_transaction",
+  "allow_create_transfer_pricing_doc",
+  "allow_update_transfer_pricing_doc",
+  "allow_create_change_management_log",
+  "allow_create_backup_record",
+  "allow_record_backup_test",
+  "allow_create_reporting_template",
+  "allow_update_reporting_template",
+  "allow_create_disclosure_checklist",
+  "allow_update_disclosure_checklist",
+  "allow_complete_disclosure_item"
  ],
  "fields": [
   {
@@ -5882,6 +5912,215 @@
    "fieldname": "allow_update_standard_cost",
    "fieldtype": "Check",
    "label": "Update Standard Cost"
+  },
+  {
+   "description": "IPO readiness Phases 4 to 6, the governance domain. RELATED PARTIES: which transactions were with them, whether each was priced at arm's length on paper, and what the year-end schedule says. ITGC: who holds which permissions and when somebody last looked, what changed and who approved it, and whether a backup has ever actually been restored from. REPORTING: the shape of a periodic report, the numbers a management discussion is written from, and the checklist that says a filing is finished. The reads default ON and none of them ever refuses — that is what lets an operation see exactly what enforcement would do before switching it on. Every write is off until an operator turns it on. All five control points ship ADVISORY.",
+   "fieldname": "ipo_phase456_section",
+   "fieldtype": "Section Break",
+   "label": "Governance, ITGC and Disclosure (v0.81.0)"
+  },
+  {
+   "default": "1",
+   "description": "Every transaction in a window that was with somebody on the related-party register, each stamped with whether an arm's-length case covers it. A name match is always labelled as one and anything that resolved to nothing is reported rather than dropped — the commonest way a related-party schedule is wrong is a relationship nobody wrote down.",
+   "fieldname": "allow_get_related_party_transactions",
+   "fieldtype": "Check",
+   "label": "Get Related Party Transactions"
+  },
+  {
+   "default": "1",
+   "description": "The disclosure register: every relationship that has to be disclosed, what was transacted with it, and the gaps behind each — no governing document, no Supplier linked, undocumented transactions, every memo still a draft.",
+   "fieldname": "allow_list_related_party_disclosures",
+   "fieldtype": "Check",
+   "label": "List Related Party Disclosures"
+  },
+  {
+   "default": "1",
+   "description": "The related-party schedule for a period, with the pricing methods relied on. A WORKING PAPER: nothing is filed, stored or attached.",
+   "fieldname": "allow_generate_related_party_disclosure",
+   "fieldtype": "Check",
+   "label": "Generate Related Party Disclosure"
+  },
+  {
+   "default": "1",
+   "description": "One transfer pricing memo in full, plus the transactions in its period it actually covers.",
+   "fieldname": "allow_get_transfer_pricing_doc",
+   "fieldtype": "Check",
+   "label": "Get Transfer Pricing Doc"
+  },
+  {
+   "default": "1",
+   "description": "The memos on file, split by status, naming the Complete ones reviewed by the person who wrote them — which is not a review.",
+   "fieldname": "allow_list_transfer_pricing_docs",
+   "fieldtype": "Check",
+   "label": "List Transfer Pricing Docs"
+  },
+  {
+   "default": "1",
+   "description": "Who has what, computed now and STORED NOWHERE: every login, its roles, what those roles reach, last login. A permissions snapshot in a table is wrong the moment somebody adds a role.",
+   "fieldname": "allow_generate_access_control_report",
+   "fieldtype": "Check",
+   "label": "Generate Access Control Report"
+  },
+  {
+   "default": "1",
+   "description": "One recorded system change in full.",
+   "fieldname": "allow_get_change_management_log",
+   "fieldtype": "Check",
+   "label": "Get Change Management Log"
+  },
+  {
+   "default": "1",
+   "description": "The change log, newest first, calling out changes with no approver and changes approved by their own author.",
+   "fieldname": "allow_list_change_management_logs",
+   "fieldtype": "Check",
+   "label": "List Change Management Logs"
+  },
+  {
+   "default": "1",
+   "description": "The change control picture for a period — volume, approval rate, what is outstanding — and how much of the log this app wrote about its own calls versus how much somebody typed.",
+   "fieldname": "allow_get_change_management_report",
+   "fieldtype": "Check",
+   "label": "Get Change Management Report"
+  },
+  {
+   "default": "1",
+   "description": "One backup event, with whether its test restore met the recovery time objective.",
+   "fieldname": "allow_get_backup_record",
+   "fieldtype": "Check",
+   "label": "Get Backup Record"
+  },
+  {
+   "default": "1",
+   "description": "Backups on file with the verification picture: how many have ever been restored from, which have never been tested.",
+   "fieldname": "allow_list_backup_records",
+   "fieldtype": "Check",
+   "label": "List Backup Records"
+  },
+  {
+   "default": "1",
+   "description": "One report shape in full, labels in the caller's language, with the untranslated ones named.",
+   "fieldname": "allow_get_reporting_template",
+   "fieldtype": "Check",
+   "label": "Get Reporting Template"
+  },
+  {
+   "default": "1",
+   "description": "What report shapes this site has, without pulling every section of every one.",
+   "fieldname": "allow_list_reporting_templates",
+   "fieldtype": "Check",
+   "label": "List Reporting Templates"
+  },
+  {
+   "default": "1",
+   "description": "The figures a Management Discussion and Analysis is written FROM. Not a draft: the evidence pack, honest about every source it could not read.",
+   "fieldname": "allow_generate_mda_data_feed",
+   "fieldtype": "Check",
+   "label": "Generate MD&A Data Feed"
+  },
+  {
+   "default": "1",
+   "description": "Revenue, expense and result by cost centre with ASC 280's ten-per-cent test APPLIED AND SHOWN — never decided, because whether these are operating segments is a judgement no query can make.",
+   "fieldname": "allow_generate_segment_report",
+   "fieldtype": "Check",
+   "label": "Generate Segment Report"
+  },
+  {
+   "default": "1",
+   "description": "One checklist in full, with what enforcement would say about finalising it as it stands.",
+   "fieldname": "allow_get_disclosure_checklist",
+   "fieldtype": "Check",
+   "label": "Get Disclosure Checklist"
+  },
+  {
+   "default": "1",
+   "description": "Checklists on file, including any marked Filed while required disclosures were outstanding.",
+   "fieldname": "allow_list_disclosure_checklists",
+   "fieldtype": "Check",
+   "label": "List Disclosure Checklists"
+  },
+  {
+   "default": "1",
+   "description": "The pieces assembled: sections, their sources, the figures where this site could produce them, and every gap. Contains no prose and never will.",
+   "fieldname": "allow_generate_quarterly_report_skeleton",
+   "fieldtype": "Check",
+   "label": "Generate Quarterly Report Skeleton"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Run one dealing through the transfer pricing control and file what it finds. Advisory reports and lets the work through; Enforced reaches the same finding, writes the same alert, and refuses.",
+   "fieldname": "allow_flag_related_party_transaction",
+   "fieldtype": "Check",
+   "label": "Flag Related Party Transaction"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Record the arm's-length case for one related-party arrangement: the price, what it was tested against, and why the two agree. Arrives as a DRAFT, and a draft covers nothing.",
+   "fieldname": "allow_create_transfer_pricing_doc",
+   "fieldtype": "Check",
+   "label": "Create Transfer Pricing Doc"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a memo, including promoting it to Complete — which is refused while the justification, the market rate reference or the pricing method is empty.",
+   "fieldname": "allow_update_transfer_pricing_doc",
+   "fieldtype": "Check",
+   "label": "Update Transfer Pricing Doc"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Record one system change. An approver who is the person who made the change is refused outright; a one-person finance function records that honestly as Not Required with the compensating control in the notes.",
+   "fieldname": "allow_create_change_management_log",
+   "fieldtype": "Check",
+   "label": "Create Change Management Log"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Record that a backup ran. It arrives unverified and stays that way until somebody actually restores from it.",
+   "fieldname": "allow_create_backup_record",
+   "fieldtype": "Check",
+   "label": "Create Backup Record"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Record a test restore — the event that turns a backup job into a control. Only a Pass verifies; 'Not Tested' is refused as a result.",
+   "fieldname": "allow_record_backup_test",
+   "fieldtype": "Check",
+   "label": "Record Backup Test"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Define the shape of a periodic report: its sections, in order, and which tool on this site fills each.",
+   "fieldname": "allow_create_reporting_template",
+   "fieldtype": "Check",
+   "label": "Create Reporting Template"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a template. Sections are restated whole rather than merged, because the only stable row key is the section name and that is what a rename changes.",
+   "fieldname": "allow_update_reporting_template",
+   "fieldtype": "Check",
+   "label": "Update Reporting Template"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Open the checklist for one filing: which disclosures it must make, what requires each, and who owes it.",
+   "fieldname": "allow_create_disclosure_checklist",
+   "fieldtype": "Check",
+   "label": "Create Disclosure Checklist"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change a checklist. Moving it to Complete or Filed is a claim, and it is the moment the completeness control is consulted — before anything is written.",
+   "fieldname": "allow_update_disclosure_checklist",
+   "fieldtype": "Check",
+   "label": "Update Disclosure Checklist"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Settle one disclosure. Not Applicable is a completed state and REQUIRES a reason — the reason is the disclosure; Outstanding is not settled and neither is In Progress.",
+   "fieldname": "allow_complete_disclosure_item",
+   "fieldtype": "Check",
+   "label": "Complete Disclosure Item"
   }
  ],
  "index_web_pages_for_search": 0,

@@ -1,0 +1,172 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "The SHAPE of a periodic report, as data: which sections a 10-Q has, in what order, filled from where. A farm that has never filed one needs the structure before it needs the numbers, and adding a section its lender started asking for must not be a code release. THE SECTIONS ARE A CHILD TABLE rather than a JSON blob because they are queried — the skeleton generator walks them, the completeness check counts them — and a blob would mean parsing to answer 'which sections are required'.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "company",
+  "report_type",
+  "enabled",
+  "identity_col",
+  "label_en",
+  "label_es",
+  "regulatory_basis",
+  "description_section",
+  "description_en",
+  "description_es",
+  "sections_section",
+  "sections",
+  "meta_section",
+  "shipped_default",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The template's name, and part of its docname — '10-Q Sections', 'Lender Quarterly Package'. Short and stable: a Disclosure Checklist points at it.",
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1
+  },
+  {
+   "description": "Whose report this is. Required, and part of the docname — two entities on one site file separately and a template shared between them would be a template neither could edit without changing the other's report.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What cadence this template is for. A CLOSED LIST because it is what the skeleton generator matches on when somebody asks for 'the quarterly template' without naming one.",
+   "fieldname": "report_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Type",
+   "options": "Annual\nQuarterly\nMonthly\nAd Hoc",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "1",
+   "description": "A disabled template is not offered and is not used by a generated skeleton. It is how a report nobody files any more is withdrawn WITHOUT deleting a template that finished reports still point at.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The report's title as it prints, in English. Falls back to the template name when empty.",
+   "fieldname": "label_en",
+   "fieldtype": "Data",
+   "label": "Label (EN)"
+  },
+  {
+   "description": "The title in Spanish. Empty means English is served and the gap is reported — never a half-translated document.",
+   "fieldname": "label_es",
+   "fieldtype": "Data",
+   "label": "Label (ES)"
+  },
+  {
+   "description": "What requires this report — 'SEC Form 10-Q, Part I Item 2', 'credit agreement §6.1(b)', 'nothing, we do it for ourselves'. The last is a real and useful answer.",
+   "fieldname": "regulatory_basis",
+   "fieldtype": "Data",
+   "label": "Regulatory Basis"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Small Text",
+   "label": "Description (EN)"
+  },
+  {
+   "fieldname": "description_es",
+   "fieldtype": "Small Text",
+   "label": "Description (ES)"
+  },
+  {
+   "fieldname": "sections_section",
+   "fieldtype": "Section Break",
+   "label": "Sections"
+  },
+  {
+   "description": "The report's sections, in order, each naming where its numbers come from.",
+   "fieldname": "sections",
+   "fieldtype": "Table",
+   "label": "Sections",
+   "options": "Reporting Template Section"
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "0",
+   "description": "Set on the templates this app seeds. An operator's own edits to a shipped template are never overwritten by a later migrate — the seeder writes only where nothing exists.",
+   "fieldname": "shipped_default",
+   "fieldtype": "Check",
+   "label": "Shipped Default",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Reporting Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "template_name,report_type,company",
+ "sort_field": "template_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

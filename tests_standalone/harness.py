@@ -474,6 +474,8 @@ ERPNEXT_SCHEMA = {
 		# "this site does not record last login" for a field every real site has
 		# — which is the double being wrong rather than the app, and it would
 		# have made the dormant-login flags untestable.
+		"last_login",
+		"last_active",
 	],
 	# ── v0.17.0: the permission tables the six mobile roles are written into ──
 	#
@@ -1540,6 +1542,13 @@ APP_DOCTYPES = {
 	# been restored from); and the two reporting shapes — which SECTIONS a
 	# report has, and which DISCLOSURES a filing must make, which are
 	# deliberately different objects. See `tools/disclosure.py` for why.
+	"Transfer Pricing Documentation": "transfer_pricing_documentation",
+	"Change Management Log": "change_management_log",
+	"Backup Record": "backup_record",
+	"Reporting Template": "reporting_template",
+	"Reporting Template Section": "reporting_template_section",
+	"Disclosure Checklist": "disclosure_checklist",
+	"Disclosure Checklist Item": "disclosure_checklist_item",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

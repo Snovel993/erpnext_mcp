@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One disclosure a filing has to make, and whether it has been made. NOT APPLICABLE IS A COMPLETED STATE AND OUTSTANDING IS NOT — the whole value of a checklist is that somebody decided about every line, and 'we have no segments to report' is a decision while an empty row is an omission. The two must never look the same.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "disclosure_item",
+  "status",
+  "required",
+  "label_es",
+  "requirement_reference",
+  "assigned_to",
+  "evidence_section",
+  "completed_by",
+  "completed_on",
+  "evidence_reference",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What has to be disclosed — 'Related party transactions', 'Subsequent events', 'Going concern assessment'. The item's key, and what a completion names.",
+   "fieldname": "disclosure_item",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Disclosure Item",
+   "reqd": 1
+  },
+  {
+   "default": "Outstanding",
+   "description": "OUTSTANDING is the only state the completeness control counts as a gap. `Not Applicable` is completed — somebody looked and decided — and `In Progress` is honest about work started, but neither is Outstanding and neither blocks a filing.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Outstanding\nIn Progress\nComplete\nNot Applicable",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether the filing can be finalised without it. An optional item left outstanding is a choice; a required one is what the control refuses on.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "description": "The item in Spanish, for a preparer who works in it. Empty means English is served and the gap is reported rather than hidden.",
+   "fieldname": "label_es",
+   "fieldtype": "Data",
+   "label": "Item (ES)"
+  },
+  {
+   "description": "What requires it — 'ASC 850', 'Reg S-K Item 303', 'SOX §302 certification'. This is the column an auditor reads first.",
+   "fieldname": "requirement_reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Requirement Reference"
+  },
+  {
+   "description": "Who owes this one. The commonest reason a disclosure is omitted is not refusal — it is that nobody was assigned.",
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "label": "Assigned To",
+   "options": "User"
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "fieldname": "completed_by",
+   "fieldtype": "Link",
+   "label": "Completed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "Completed On",
+   "read_only": 1
+  },
+  {
+   "description": "Where the disclosure actually is — the working paper, the note number, the tool that produced it ('generate_related_party_disclosure'). A completed item that points at nothing is a tick.",
+   "fieldname": "evidence_reference",
+   "fieldtype": "Small Text",
+   "label": "Evidence Reference"
+  },
+  {
+   "description": "For a Not Applicable, this is where the reason goes — and the reason is the disclosure.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Disclosure Checklist Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}

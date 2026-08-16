@@ -1,0 +1,225 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One backup event, and — the part that makes it a control — whether anybody has ever restored from it. An unverified backup is a belief. The failure it exists to prevent is discovered exactly once, at the worst possible moment, and the sentence is always the same: the job had been green for months and the restore did not work. So this record holds the job AND the test restore, and the recovery objectives the pair is measured against.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "backup_type",
+  "status",
+  "identity_col",
+  "started_at",
+  "completed_at",
+  "location",
+  "offsite",
+  "size_section",
+  "size_mb",
+  "retention_days",
+  "size_col",
+  "rpo_hours",
+  "rto_hours",
+  "restore_section",
+  "test_restore_result",
+  "test_restore_on",
+  "test_restore_by",
+  "restore_col",
+  "restore_duration_minutes",
+  "test_restore_notes",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "BKP-.YYYY.-.#####",
+   "print_hide": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What was copied. `Offsite Replica` is kept distinct from `Full` because a full backup sitting on the same machine as the data answers a disk failure and nothing else — and the difference is exactly what a continuity question asks about.",
+   "fieldname": "backup_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Backup Type",
+   "options": "Full\nIncremental\nDatabase\nFiles\nOffsite Replica",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Success",
+   "description": "How the job ended. `Partial` is its own value rather than a shade of Success: a backup that skipped what it could not read is a backup missing exactly the files that were in use, which is the set that matters.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Success\nPartial\nFailed\nIn Progress",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Started At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At"
+  },
+  {
+   "description": "Where the copy actually is — a bucket, a NAS path, a drive somebody takes home. Specific enough that a person under pressure could go and get it.",
+   "fieldname": "location",
+   "fieldtype": "Data",
+   "label": "Location",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Whether this copy is somewhere the primary site's fire would not reach.",
+   "fieldname": "offsite",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Offsite"
+  },
+  {
+   "fieldname": "size_section",
+   "fieldtype": "Section Break",
+   "label": "Size and Objectives"
+  },
+  {
+   "fieldname": "size_mb",
+   "fieldtype": "Float",
+   "label": "Size (MB)",
+   "precision": "2"
+  },
+  {
+   "description": "How long this copy is kept before it is rotated out.",
+   "fieldname": "retention_days",
+   "fieldtype": "Int",
+   "label": "Retention (Days)"
+  },
+  {
+   "fieldname": "size_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "RECOVERY POINT OBJECTIVE, in hours: how much work the operation has decided it can afford to lose. It is a decision, not a measurement — and writing it down is what lets a backup cadence be judged against something other than a feeling.",
+   "fieldname": "rpo_hours",
+   "fieldtype": "Int",
+   "label": "RPO (Hours)"
+  },
+  {
+   "description": "RECOVERY TIME OBJECTIVE, in hours: how long the operation has decided it can be down. The test restore below is what says whether the objective is real.",
+   "fieldname": "rto_hours",
+   "fieldtype": "Int",
+   "label": "RTO (Hours)"
+  },
+  {
+   "fieldname": "restore_section",
+   "fieldtype": "Section Break",
+   "label": "Test Restore — What Makes This A Control"
+  },
+  {
+   "default": "Not Tested",
+   "description": "NOT TESTED IS THE DEFAULT AND IS NOT A FAILURE — it is the honest state of most backups most of the time. It is also what the verification control counts: a window with no Pass in it is the finding, regardless of how many jobs ran green.",
+   "fieldname": "test_restore_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Test Restore Result",
+   "options": "Not Tested\nPass\nPartial\nFail"
+  },
+  {
+   "fieldname": "test_restore_on",
+   "fieldtype": "Date",
+   "label": "Test Restore On"
+  },
+  {
+   "fieldname": "test_restore_by",
+   "fieldtype": "Link",
+   "label": "Test Restore By",
+   "options": "User"
+  },
+  {
+   "fieldname": "restore_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How long the restore actually took, in minutes. This is the number that answers the RTO — an objective of four hours and a restore that took nine is a finding nobody would otherwise have.",
+   "fieldname": "restore_duration_minutes",
+   "fieldtype": "Int",
+   "label": "Restore Duration (Minutes)"
+  },
+  {
+   "description": "What was restored, where to, and what was checked afterwards. A restore nobody verified the contents of is a file copy.",
+   "fieldname": "test_restore_notes",
+   "fieldtype": "Text",
+   "label": "Test Restore Notes"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Backup Record",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "backup_type,status,started_at,location",
+ "sort_field": "started_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

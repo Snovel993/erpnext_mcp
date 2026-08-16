@@ -3,6 +3,115 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.81.0 — 2026-08-16 — the control that can be switched off
+
+IPO readiness, phases four to six: the governance domain. Seven doctypes,
+twenty-nine tools, five control points — every one of them bypassable, which is
+the design rather than a concession.
+
+### Advisory and Enforced differ in one column
+
+A control that can only refuse gets switched off in its first busy week; one that
+can only report is one an auditor discounts. So both strictnesses run through a
+single code path, and they evaluate, reach the same finding and file the same
+alert. **Only the last column differs** — whether the work is let through.
+
+An operation that spends a season in Advisory ends it holding exactly the
+register of findings it would hold had it been enforcing, which turns switching
+enforcement on from a gamble into a decision somebody makes having already read
+the list of what it would have stopped. Everything ships Advisory. The switch is
+a `Compliance Rule` row, and flipping it version-copies the rule, so the date
+enforcement began is on the record.
+
+### Phase 4 — related parties
+
+`Related Party` has answered a question about *state* since v0.30.0. Three
+questions follow that no register can answer: which transactions were with those
+parties, whether each was priced at arm's length on paper, and what the schedule
+says at year end.
+
+**The match is never a guess.** A payment becomes a related-party transaction by
+the register row's `supplier` link, not a string comparison. A name match is
+offered as a clearly labelled second signal and never as the primary one, and
+every counterparty that resolved to nothing comes back in `unmatched_parties`
+with its total — because the commonest way such a schedule is wrong is not a
+mispriced dealing but a relationship nobody wrote down.
+
+`Transfer Pricing Documentation` requires `market_rate_reference`, since a
+justification with no reference behind it is an opinion. Draft covers nothing —
+a started-but-unfinished memo is a different finding from no memo at all.
+Promoting to Complete with no justification is refused, that being the one
+failure mode a documentation control cannot survive. An amount more than ten per
+cent over the memo is its own finding. `covers_row()` is the single definition of
+"documented" on the site, so the gate, the register and the year-end schedule
+cannot grow separate opinions.
+
+### Phase 5 — the three ITGCs
+
+`generate_access_control_report` reads User, Has Role and the permission tables
+at the moment it is called and **stores nothing** — a permissions snapshot is
+wrong the moment somebody adds a role, and a stale one is worse than none because
+it is the document an operator hands an auditor while believing it. What is
+stored is that a review happened. Custom DocPerm shadows DocPerm rather than
+adding to it, and where `last_login` is absent the report says so.
+
+The change log is populated from this app's own dispatcher path rather than a
+`doc_events` hook, keeping the promise in `hooks.py` that removing this app gives
+a site back exactly as it was. Rows carry `source = MCP Tool` or `Manual`, and
+`get_change_management_report` **reports the split rather than hiding it**. One
+hard rule, in the controller as well as the tool: an approver who is the person
+who made the change is not an approver. `Not Required` is a decision and counted
+as one; a change whose approval nobody can find is not.
+
+`Backup Record` holds the job **and** the test restore, because an unverified
+backup is a belief. `Not Tested` is the default and is not a failure; `Partial`
+does not verify; a `Fail` is the most valuable row in the table. An undated
+verification is refused. RTO becomes a measurement rather than a promise.
+
+### Phase 6 — reporting and disclosure
+
+A section and a disclosure are deliberately not one table: folding them together
+would mean either a report with sixty headings or a disclosure that could exist
+only where somebody had already written a section for it — which is precisely how
+a disclosure gets omitted.
+
+**Nothing here files anything, and no generator writes prose.** Every one returns
+a working paper: headings, the tool behind each, and the figures where this site
+could produce them. `generate_mda_data_feed` attempts every source and names
+every failure in `unavailable` with its reason, because a generator that raised
+on its first missing input would never be run at all.
+
+ASC 280's ten per cent test is applied per cost centre with its working shown,
+plus the 75 % coverage check — and returns no verdict, because whether the
+orchard and the packing line are genuinely different operating segments is a
+judgement about how the business is managed. Postings with no cost centre belong
+to no segment and are reported separately.
+
+`Not Applicable` settles a checklist item and **requires a reason** — the reason
+*is* the disclosure — while `In Progress` does not settle it, because work
+started is not a decision reached.
+
+### The five control points
+
+`related_party_transfer_pricing`, `access_review`, `change_approval`,
+`backup_verification` and `disclosure_completeness`, each seeded as a Compliance
+Rule in Advisory. A gate is never swept: it is consulted at the moment somebody
+tries to do the thing, before anything is written.
+
+### Bilingual, where it applies
+
+Section headings and disclosure items carry `label_es`, and a missing translation
+serves English and reports the gap in `untranslated`. The ledger-facing records —
+transfer pricing memos, change logs, backup records — are not translated, which
+is a decision: they are read in the language of the filing, and translating half
+of a financial statement would be worse than translating none of it.
+
+### Migration
+
+`bench --site <site> migrate`. Nothing is overwritten, no existing tool changes
+behaviour, and no field is added to any doctype this app did not create. An
+operator who never enables a switch sees no difference at all.
+
 ## 0.80.0 — 2026-08-16 — one desk, three tiers of paper
 
 Sixteen tools, five doctypes, five mobile routes. Shipping paperwork for local,

@@ -1,0 +1,227 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One change to the system, who made it, who approved it, and how to undo it. This is the IT general control an auditor tests by sampling — pick five changes, show me who approved each — and an operation that cannot answer for one of the five has failed the control for all of them. Most rows here are written by this app about itself: a permission granted, a compliance rule enabled, a tool switch flipped. The ones somebody types are the changes made outside it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "change_type",
+  "title",
+  "identity_col",
+  "change_date",
+  "changed_by",
+  "risk_level",
+  "source",
+  "detail_section",
+  "description",
+  "reference_doctype",
+  "reference_name",
+  "mcp_action_log",
+  "approval_section",
+  "approval_status",
+  "approved_by",
+  "approved_on",
+  "approval_col",
+  "rollback_plan",
+  "tested",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "CHG-.YYYY.-.#####",
+   "print_hide": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What KIND of change. A closed list because the change management report groups on it, and because the categories are what an auditor's sample is drawn from — 'show me five permission changes' is a question the list has to be able to answer.",
+   "fieldname": "change_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Change Type",
+   "options": "Configuration\nDocType Schema\nPermission\nRole Assignment\nUser Account\nIntegration\nCompliance Rule\nTool Switch\nData Correction\nInfrastructure\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What changed, in one line somebody scanning a year of these can read.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When it happened — not when it was written down. The two differ for anything recorded after the fact, and the report says so rather than quietly treating the record's creation as the event.",
+   "fieldname": "change_date",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Change Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "changed_by",
+   "fieldtype": "Link",
+   "label": "Changed By",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Low",
+   "description": "How much is riding on it. Drives nothing automatically — it is what makes a sample of five changes a sample somebody chose rather than the first five in the table.",
+   "fieldname": "risk_level",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Risk Level",
+   "options": "Low\nMedium\nHigh"
+  },
+  {
+   "default": "Manual",
+   "description": "Where the row came from. `MCP Tool` rows are written by this app about its own privileged calls and are the ones an auditor can trust were not curated; `Manual` rows are somebody typing up a change made elsewhere, which is the honest label for them.",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "Manual\nMCP Tool\nMigration\nDesk\nExternal"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "What Changed"
+  },
+  {
+   "description": "The change in enough detail that somebody who was not there could tell what the system did before and does now.",
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype"
+  },
+  {
+   "description": "The audit row for the call that made this change, when this app made it. It is what turns 'somebody says they changed a permission' into 'the server recorded this call, with these arguments, at this time'.",
+   "fieldname": "mcp_action_log",
+   "fieldtype": "Link",
+   "label": "MCP Action Log",
+   "options": "MCP Action Log"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "default": "Pending",
+   "description": "NOT REQUIRED IS A DECISION AND IS RECORDED AS ONE. A change that needed nobody's approval is a defensible answer; a change whose approval nobody can find is not, and the two must not look the same in a sample.",
+   "fieldname": "approval_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Approval Status",
+   "options": "Pending\nApproved\nRejected\nNot Required"
+  },
+  {
+   "description": "Who approved it. The control refuses this being the same person who made the change — that is the whole of what change approval means, and a farm where one person does both records it as a known exception rather than by naming themselves twice.",
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User"
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
+  },
+  {
+   "fieldname": "approval_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How this would be undone if it went wrong. Asked at the moment it is cheap to answer, because the moment it is needed is the moment nobody can think.",
+   "fieldname": "rollback_plan",
+   "fieldtype": "Text",
+   "label": "Rollback Plan"
+  },
+  {
+   "default": "0",
+   "description": "Whether the change was tested before it went live.",
+   "fieldname": "tested",
+   "fieldtype": "Check",
+   "label": "Tested"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Change Management Log",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "change_type,title,changed_by,change_date",
+ "sort_field": "change_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -62,6 +62,7 @@ from .tools import (
 	costing,
 	dimensions,
 	discipline,
+	disclosure,
 	dispatch,
 	docvalidation,
 	employee,
@@ -84,6 +85,7 @@ from .tools import (
 	insurance,
 	investment_report,
 	irrigation,
+	itgc,
 	kpi,
 	kpidefs,
 	maintenance,
@@ -105,6 +107,7 @@ from .tools import (
 	read,
 	realestate,
 	receipts,
+	related_party_controls,
 	reports,
 	revenue,
 	rules,
@@ -20967,6 +20970,774 @@ TOOLS = {
 			"uom": _field(_STRING, "What that quantity counts. Label only."),
 		},
 		title="Absorption cost report",
+	),
+	# ── v0.81.0: IPO readiness, the governance domain ────────────────────────
+	# Phase 4 — related parties and transfer pricing.
+	"get_related_party_transactions": _tool(
+		related_party_controls.get_related_party_transactions,
+		"Every transaction in a window that was with somebody on the related-party "
+		"register, folded one row per voucher, each stamped with whether an "
+		"arm's-length case covers it. Read-only, and it never refuses — even where "
+		"the control is Enforced, which is what lets an operation see what "
+		"enforcement would do before switching it on.\n\n"
+		"THE MATCH IS NEVER A GUESS. A ledger party becomes a related party by the "
+		"register row's `supplier` LINK (match: supplier_link) or, failing that, by "
+		"an exact case-folded name match (match: name) — always labelled, so a "
+		"caller can tell which conclusions were inferred. Everything that resolved "
+		"to neither is in `unmatched_parties` with its total rather than dropped: "
+		"the commonest way a related-party schedule is wrong is not a mispriced "
+		"dealing, it is a relationship nobody wrote down.\n\n"
+		"COVERAGE IS ONE OF FOUR VALUES, and the distinctions are different work: "
+		"`documented`, `draft_only` (a memo exists and is unfinished), "
+		"`amount_exceeds_documentation` (a memo for $12,000 does not document "
+		"$140,000), `undocumented` (nothing was ever written).",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the window, YYYY-MM-DD. Default one year before to_date."),
+			"to_date": _field(_STRING, "End of the window, inclusive. Default today."),
+			"related_party": _field(_STRING, "Only dealings with this Related Party docname."),
+			"min_amount": _field(_NUMBER, "Only transactions at or above this amount."),
+			"undocumented_only": _field(_BOOLEAN, "Only the ones with no arm's-length case behind them."),
+			"include_arms_length_vendors": _field(
+				_BOOLEAN,
+				"Include plain Vendor relationships, which are not disclosable and are excluded "
+				"by default.",
+			),
+			"limit": _LIMIT,
+		},
+		title="Get related party transactions",
+		available=_needs_doctype("Related Party", "Transfer Pricing Documentation"),
+		requires="the Related Party and Transfer Pricing Documentation DocTypes — run `bench migrate`",
+	),
+	"flag_related_party_transaction": _tool(
+		related_party_controls.flag_related_party_transaction,
+		"MUTATING (default OFF). Run one dealing through the transfer pricing "
+		"control and file what it finds. The only thing it changes is the compliance "
+		"calendar.\n\n"
+		"ADVISORY reports the finding, writes the alert and LETS THE WORK THROUGH. "
+		"ENFORCED reaches the same finding, writes the same alert, and refuses — "
+		"naming what would make the call succeed. An operation that spends a season "
+		"in Advisory ends it holding exactly the register of findings it would hold "
+		"had it been enforcing, which is what makes switching enforcement on a "
+		"decision rather than a gamble.\n\n"
+		"NAME THE DEALING EITHER WAY: voucher_type + voucher_no for something "
+		"already in the ledger, or related_party + amount + posting_date for "
+		"something being considered before it is booked.",
+		{
+			"company": _COMPANY,
+			"voucher_type": _field(_STRING, "Purchase Invoice, Payment Entry, Journal Entry …"),
+			"voucher_no": _field(_STRING, "The document already in the ledger."),
+			"related_party": _field(
+				_STRING, "For a dealing not yet booked: the Related Party docname it would be with."
+			),
+			"amount": _field(_NUMBER, "For a dealing not yet booked: what it would be worth."),
+			"posting_date": _field(_STRING, "For a dealing not yet booked: when. Default today."),
+			"reference": _field(_STRING, "A label for a proposed dealing, carried into the finding."),
+		},
+		mutating=True,
+		title="Flag a related party transaction",
+		available=_needs_doctype("Related Party", "Transfer Pricing Documentation"),
+		requires="the Related Party and Transfer Pricing Documentation DocTypes — run `bench migrate`",
+	),
+	"list_related_party_disclosures": _tool(
+		related_party_controls.list_related_party_disclosures,
+		"The disclosure register: every relationship that has to be disclosed, what "
+		"was transacted with it in the window, and the GAPS behind each — no "
+		"governing document, no Supplier linked, undocumented transactions, every "
+		"memo still a draft. Read-only.\n\n"
+		"DISCLOSABLE RELATIONSHIPS ONLY: every capacity except a plain arm's-length "
+		"Vendor. Ended relationships are listed by default, because the transactions "
+		"they explain are still in the ledger and a prior period's schedule still "
+		"needs to know who was who at the time.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the window for the transaction figures."),
+			"to_date": _field(_STRING, "End of the window, inclusive."),
+			"include_ended": _field(_BOOLEAN, "Include relationships that have ended. Default true."),
+			"limit": _LIMIT,
+		},
+		title="List related party disclosures",
+		available=_needs_doctype("Related Party", "Transfer Pricing Documentation"),
+		requires="the Related Party and Transfer Pricing Documentation DocTypes — run `bench migrate`",
+	),
+	"generate_related_party_disclosure": _tool(
+		related_party_controls.generate_related_party_disclosure,
+		"The related-party schedule for a period: who the company dealt with among "
+		"its own, how much, by voucher type, and whether each dealing has an "
+		"arm's-length case behind it — with the pricing methods relied on. "
+		"Read-only.\n\n"
+		"IT IS A WORKING PAPER. Nothing is filed, stored or attached: it is what "
+		"somebody writes the disclosure note from.\n\n"
+		"IT REPORTS WHAT IT CANNOT SEE. Counterparties that did not resolve to the "
+		"register come back in `unmatched_parties` with their totals, and registered "
+		"parties with no transactions are named separately — a schedule that "
+		"silently dropped either would foot correctly and be wrong.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the period, YYYY-MM-DD. Default one year before to_date."),
+			"to_date": _field(_STRING, "End of the period, inclusive. Default today."),
+		},
+		title="Generate a related party disclosure",
+		available=_needs_doctype("Related Party", "Transfer Pricing Documentation"),
+		requires="the Related Party and Transfer Pricing Documentation DocTypes — run `bench migrate`",
+	),
+	"create_transfer_pricing_doc": _tool(
+		related_party_controls.create_transfer_pricing_doc,
+		"MUTATING (default OFF). Record the arm's-length case for one related-party "
+		"arrangement: the price, what it was tested against, and why the two agree.\n\n"
+		"THE PERIOD IS THE UNIT, not the invoice. One memo covering a season of "
+		"hauling is how the work is actually done; a memo per invoice is how a "
+		"control gets abandoned in week two.\n\n"
+		"IT ARRIVES AS A DRAFT unless you say otherwise, AND A DRAFT COVERS NOTHING. "
+		"That is deliberate: a started-but-unfinished memo is a different finding "
+		"from no memo at all. Promote it with update_transfer_pricing_doc once the "
+		"justification, the market rate reference and the pricing method are all in "
+		"it — Complete is refused while any of the three is empty.",
+		{
+			"company": _COMPANY,
+			"related_party": _field(
+				_STRING,
+				"The Related Party docname. Must already be registered — a memo about somebody "
+				"the site does not know is related documents nothing.",
+			),
+			"transaction_type": _field(
+				_STRING,
+				"Purchase of Goods, Sale of Goods, Services Received, Services Provided, "
+				"Lease — Land / Equipment / Housing, Loan Received, Loan Made, Management Fee, "
+				"Cost Sharing, Guarantee or Other.",
+			),
+			"period_start": _field(_STRING, "First day this documentation covers, YYYY-MM-DD."),
+			"period_end": _field(_STRING, "Last day it covers, inclusive."),
+			"amount": _field(
+				_NUMBER,
+				"What the arrangement is worth over the period. Transactions beyond this plus a "
+				"10% tolerance are reported as exceeding what the memo documents.",
+			),
+			"market_rate_reference": _field(
+				_STRING,
+				"WHAT THE PRICE WAS TESTED AGAINST, specifically enough to look up: 'three quotes "
+				"from independent haulers, Yakima, March 2026'.",
+			),
+			"justification": _field(
+				_STRING, "Why this is the price an unrelated party would have paid."
+			),
+			"pricing_method": _field(
+				_STRING,
+				"Comparable Uncontrolled Price, Resale Price, Cost Plus, Comparable Profits / "
+				"TNMM, Profit Split or Other.",
+			),
+			"comparables": _field(_STRING, "The comparable arrangements relied on, one per line."),
+			"status": _field(_STRING, "Draft (default), Complete or Superseded."),
+			"currency": _field(_STRING, "Currency of the documented amount."),
+			"supporting_document": _field(_STRING, "A Governance Document already on the site."),
+			"prepared_by": _field(_STRING, "Who wrote it. Defaults to the calling user."),
+			"prepared_on": _field(_STRING, "When it was written. Default today."),
+			"reviewed_by": _field(
+				_STRING, "Who checked it. A memo the preparer also reviewed is reported as not independently reviewed."
+			),
+			"reviewed_on": _field(_STRING, "When it was reviewed."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("related_party", "transaction_type", "period_start", "period_end"),
+		mutating=True,
+		title="Create transfer pricing documentation",
+		available=_needs_doctype("Related Party", "Transfer Pricing Documentation"),
+		requires="the Related Party and Transfer Pricing Documentation DocTypes — run `bench migrate`",
+	),
+	"get_transfer_pricing_doc": _tool(
+		related_party_controls.get_transfer_pricing_doc,
+		"One transfer pricing memo in full, plus the transactions in its period that "
+		"it actually covers and what they total. Where the period's dealings exceed "
+		"what the memo documents, it says so with both figures. Read-only.",
+		{
+			"transfer_pricing_doc": _field(_STRING, "The docname, e.g. 'TPD-2026-0004'."),
+		},
+		required=("transfer_pricing_doc",),
+		title="Get transfer pricing documentation",
+		available=_needs_doctype("Transfer Pricing Documentation"),
+		requires="the Transfer Pricing Documentation DocType — run `bench migrate`",
+	),
+	"list_transfer_pricing_docs": _tool(
+		related_party_controls.list_transfer_pricing_docs,
+		"The memos on file, newest period first, split by status — and which of the "
+		"Complete ones were reviewed by the person who wrote them, which is not a "
+		"review. Read-only.",
+		{
+			"company": _COMPANY,
+			"related_party": _field(_STRING, "Only memos about this party."),
+			"status": _field(_STRING, "Draft, Complete or Superseded."),
+			"transaction_type": _field(_STRING, "Only memos about this kind of dealing."),
+			"limit": _LIMIT,
+		},
+		title="List transfer pricing documentation",
+		available=_needs_doctype("Transfer Pricing Documentation"),
+		requires="the Transfer Pricing Documentation DocType — run `bench migrate`",
+	),
+	"update_transfer_pricing_doc": _tool(
+		related_party_controls.update_transfer_pricing_doc,
+		"MUTATING (default OFF). Change a memo: its period, its amount, its case, its "
+		"reviewer, or its status.\n\n"
+		"PROMOTING TO Complete IS THE ONE THAT MATTERS — it is what makes the memo "
+		"cover transactions, and it is refused while the justification, the market "
+		"rate reference or the pricing method is empty. Otherwise the control would "
+		"be satisfied by the act of claiming to have done the work.",
+		{
+			"transfer_pricing_doc": _field(_STRING, "The docname."),
+			"transaction_type": _field(_STRING, "New transaction type."),
+			"period_start": _field(_STRING, "New first day covered."),
+			"period_end": _field(_STRING, "New last day covered."),
+			"amount": _field(_NUMBER, "New documented amount."),
+			"pricing_method": _field(_STRING, "New pricing method."),
+			"market_rate_reference": _field(_STRING, "New market rate reference."),
+			"justification": _field(_STRING, "New arm's-length justification."),
+			"comparables": _field(_STRING, "New comparables."),
+			"status": _field(_STRING, "Draft, Complete or Superseded."),
+			"superseded_by": _field(_STRING, "The later memo replacing this one. Empty string clears it."),
+			"currency": _field(_STRING, "New currency."),
+			"supporting_document": _field(_STRING, "New Governance Document. Empty string clears it."),
+			"prepared_by": _field(_STRING, "New preparer."),
+			"prepared_on": _field(_STRING, "New preparation date."),
+			"reviewed_by": _field(_STRING, "New reviewer. Empty string clears it."),
+			"reviewed_on": _field(_STRING, "New review date."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("transfer_pricing_doc",),
+		mutating=True,
+		title="Update transfer pricing documentation",
+		available=_needs_doctype("Transfer Pricing Documentation"),
+		requires="the Transfer Pricing Documentation DocType — run `bench migrate`",
+	),
+	# Phase 5 — IT general controls.
+	"generate_access_control_report": _tool(
+		itgc.generate_access_control_report,
+		"Who has what, computed now: every login, its roles, the doctypes those "
+		"roles can read and write, last login where the site records it, and which "
+		"users hold privileged roles. Read-only, and it never refuses.\n\n"
+		"IT STORES NOTHING, DELIBERATELY. A permissions snapshot in a table is wrong "
+		"the moment somebody adds a role, and a stale one is worse than none because "
+		"it is the document an operator hands an auditor while believing it. What IS "
+		"worth storing is that a review happened — record that with "
+		"create_change_management_log(change_type='Permission'), which is what the "
+		"access review control reads.\n\n"
+		"CUSTOM DOCPERM SHADOWS DOCPERM rather than adding to it, which is Frappe's "
+		"own rule: a report that merged the two would show permissions the site does "
+		"not actually grant. Where the User doctype has no `last_login` column the "
+		"report says so — 'absent' and 'nobody has logged in' are the same empty "
+		"field and opposite sentences.",
+		{
+			"company": _field(
+				_STRING,
+				"Whose access review clock to read. The user list itself is site-wide — Frappe "
+				"logins are not per-company.",
+			),
+			"include_disabled": _field(_BOOLEAN, "Include disabled logins. Default false."),
+			"privileged_only": _field(_BOOLEAN, "Only users holding a privileged role."),
+			"review_period_days": _field(_INTEGER, "How long a review stays fresh. Default 90."),
+			"stale_login_days": _field(_INTEGER, "Flag a login dormant after this many days. Default 90."),
+			"limit": _LIMIT,
+		},
+		title="Generate an access control report",
+		available=_needs_doctype("Change Management Log"),
+		requires="the Change Management Log DocType — run `bench migrate`",
+	),
+	"create_change_management_log": _tool(
+		itgc.create_change_management_log,
+		"MUTATING (default OFF). Record one system change: what, who made it, who "
+		"approved it, and how it would be undone.\n\n"
+		"AN APPROVER WHO IS THE PERSON WHO MADE THE CHANGE IS NOT AN APPROVER, and "
+		"that is refused outright. A farm where one person genuinely does both "
+		"records it honestly: approval_status='Not Required' with the compensating "
+		"control in `notes`. A documented exception is defensible; a self-approval is "
+		"a finding.\n\n"
+		"THE GATE IS CONSULTED BEFORE ANYTHING IS WRITTEN. Under Advisory a change "
+		"with no approver is recorded and reported; under Enforcement it is refused "
+		"and nothing is written at all.",
+		{
+			"company": _COMPANY,
+			"change_type": _field(
+				_STRING,
+				"Configuration, DocType Schema, Permission, Role Assignment, User Account, "
+				"Integration, Compliance Rule, Tool Switch, Data Correction, Infrastructure or "
+				"Other. The first eight are where an approver is expected.",
+			),
+			"title": _field(_STRING, "What changed, in one line."),
+			"description": _field(
+				_STRING, "The change in enough detail that somebody who was not there could tell what it did."
+			),
+			"changed_by": _field(_STRING, "Who made it. Defaults to the calling user."),
+			"change_date": _field(
+				_STRING, "When it HAPPENED, not when it was written down. Default now."
+			),
+			"approved_by": _field(_STRING, "Who approved it. Must not be the person who made it."),
+			"approved_on": _field(_STRING, "When it was approved. Cannot precede the change."),
+			"approval_status": _field(_STRING, "Pending, Approved, Rejected or Not Required."),
+			"risk_level": _field(_STRING, "Low, Medium or High."),
+			"source": _field(_STRING, "Manual (default), MCP Tool, Migration, Desk or External."),
+			"reference_doctype": _field(_STRING, "What the change was to, if it was to a record."),
+			"reference_name": _field(_STRING, "Which record."),
+			"mcp_action_log": _field(_STRING, "The audit row for the call that made it, if this app made it."),
+			"rollback_plan": _field(_STRING, "How this would be undone."),
+			"tested": _field(_BOOLEAN, "Whether it was tested before going live."),
+			"notes": _field(_STRING, "Anything else — including why an approval was Not Required."),
+		},
+		required=("change_type", "title", "description"),
+		mutating=True,
+		title="Create a change management log",
+		available=_needs_doctype("Change Management Log"),
+		requires="the Change Management Log DocType — run `bench migrate`",
+	),
+	"get_change_management_log": _tool(
+		itgc.get_change_management_log,
+		"One recorded change in full, including whether its approver was its own "
+		"author and whether its type is one where an approver is expected. Read-only.",
+		{
+			"change_management_log": _field(_STRING, "The docname, e.g. 'CHG-2026-00012'."),
+		},
+		required=("change_management_log",),
+		title="Get a change management log",
+		available=_needs_doctype("Change Management Log"),
+		requires="the Change Management Log DocType — run `bench migrate`",
+	),
+	"list_change_management_logs": _tool(
+		itgc.list_change_management_logs,
+		"The change log, newest first, with the two things an auditor samples for "
+		"called out: changes where an approver was expected and none is recorded, and "
+		"changes approved by their own author. Read-only.",
+		{
+			"company": _COMPANY,
+			"change_type": _field(_STRING, "Only this kind of change."),
+			"approval_status": _field(_STRING, "Pending, Approved, Rejected or Not Required."),
+			"risk_level": _field(_STRING, "Low, Medium or High."),
+			"source": _field(_STRING, "Manual, MCP Tool, Migration, Desk or External."),
+			"changed_by": _field(_STRING, "Only changes made by this user."),
+			"from_date": _field(_STRING, "Only changes on or after this date."),
+			"to_date": _field(_STRING, "Only changes on or before this date."),
+			"limit": _LIMIT,
+		},
+		title="List change management logs",
+		available=_needs_doctype("Change Management Log"),
+		requires="the Change Management Log DocType — run `bench migrate`",
+	),
+	"get_change_management_report": _tool(
+		itgc.get_change_management_report,
+		"The change control picture for a period: volume by type and risk, the "
+		"approval rate, what is outstanding, high-risk changes nobody tested, and "
+		"changes with no rollback plan. Read-only, and it never refuses.\n\n"
+		"IT REPORTS HOW MUCH OF THE LOG IS SELF-ATTESTED, which is the first "
+		"question worth asking about a change log. Rows this app wrote about its own "
+		"privileged calls carry a link to the MCP Action Log row for that call and "
+		"could not have been curated after the fact; rows typed by hand are "
+		"somebody's account of a change made elsewhere. The split is reported rather "
+		"than hidden.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the period. Default 90 days before to_date."),
+			"to_date": _field(_STRING, "End of the period, inclusive. Default today."),
+		},
+		title="Get a change management report",
+		available=_needs_doctype("Change Management Log"),
+		requires="the Change Management Log DocType — run `bench migrate`",
+	),
+	"create_backup_record": _tool(
+		itgc.create_backup_record,
+		"MUTATING (default OFF). Record that a backup ran: what kind, when, where it "
+		"went, how it ended, and the recovery objectives it is measured against.\n\n"
+		"A BACKUP NOBODY HAS RESTORED FROM IS A BELIEF. This record arrives "
+		"unverified and stays that way until somebody actually pulls it back and "
+		"records that with record_backup_test — which, and not the job status, is "
+		"what the verification control counts.",
+		{
+			"company": _COMPANY,
+			"backup_type": _field(
+				_STRING,
+				"Full, Incremental, Database, Files or Offsite Replica. The last is distinct "
+				"because a full backup on the same machine as the data answers a disk failure "
+				"and nothing else.",
+			),
+			"status": _field(_STRING, "Success (default), Partial, Failed or In Progress."),
+			"started_at": _field(_STRING, "When the job started. Default now."),
+			"completed_at": _field(_STRING, "When it finished. Required in effect for a Success."),
+			"location": _field(
+				_STRING, "Where the copy is — specific enough that somebody under pressure could go and get it."
+			),
+			"offsite": _field(_BOOLEAN, "Whether it is somewhere the primary site's fire would not reach."),
+			"size_mb": _field(_NUMBER, "Size in megabytes."),
+			"retention_days": _field(_INTEGER, "How long this copy is kept."),
+			"rpo_hours": _field(_INTEGER, "Recovery point objective: how much work the operation can afford to lose."),
+			"rto_hours": _field(_INTEGER, "Recovery time objective: how long it can be down."),
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("backup_type", "location"),
+		mutating=True,
+		title="Create a backup record",
+		available=_needs_doctype("Backup Record"),
+		requires="the Backup Record DocType — run `bench migrate`",
+	),
+	"get_backup_record": _tool(
+		itgc.get_backup_record,
+		"One backup event in full, with its duration and — where a test restore has "
+		"been recorded against it — whether the restore met the recovery time "
+		"objective. Read-only.\n\n"
+		"THE RTO IS THE NUMBER SOMEBODY PROMISED; the restore duration is the number "
+		"the system actually did. Where they disagree, this says so.",
+		{
+			"backup_record": _field(_STRING, "The docname, e.g. 'BKP-2026-00031'."),
+		},
+		required=("backup_record",),
+		title="Get a backup record",
+		available=_needs_doctype("Backup Record"),
+		requires="the Backup Record DocType — run `bench migrate`",
+	),
+	"list_backup_records": _tool(
+		itgc.list_backup_records,
+		"Backups on file, newest first, with the verification picture: how many have "
+		"ever been restored from, which have never been tested, when the last "
+		"passing restore was. Read-only, and it never refuses.\n\n"
+		"THE VERIFICATION WINDOW IS ASKED OF THE WHOLE COMPANY, not of the page "
+		"returned — a filtered list showing ten failed jobs must not report the "
+		"control as clear because the passing restore is on another page.",
+		{
+			"company": _COMPANY,
+			"backup_type": _field(_STRING, "Full, Incremental, Database, Files or Offsite Replica."),
+			"status": _field(_STRING, "Success, Partial, Failed or In Progress."),
+			"test_restore_result": _field(_STRING, "Not Tested, Pass, Partial or Fail."),
+			"offsite_only": _field(_BOOLEAN, "Only copies held offsite."),
+			"from_date": _field(_STRING, "Only jobs started on or after this date."),
+			"to_date": _field(_STRING, "Only jobs started on or before this date."),
+			"verification_window_days": _field(
+				_INTEGER, "How long a passing restore stays fresh. Default 30."
+			),
+			"limit": _LIMIT,
+		},
+		title="List backup records",
+		available=_needs_doctype("Backup Record"),
+		requires="the Backup Record DocType — run `bench migrate`",
+	),
+	"record_backup_test": _tool(
+		itgc.record_backup_test,
+		"MUTATING (default OFF). Record a test restore against a backup — the event "
+		"that turns a job into a control.\n\n"
+		"ONLY A `Pass` VERIFIES. `Partial` is a finding with a silver lining, not a "
+		"verification, and the window still counts the copy as untested. A `Fail` is "
+		"the most valuable row in the table: it was found on a day somebody chose "
+		"rather than a day chosen for them.\n\n"
+		"'Not Tested' IS REFUSED as a result — it is the absence of a test and is "
+		"already the default. An undated result is refused too: it could not be "
+		"counted by any window.",
+		{
+			"backup_record": _field(_STRING, "Which backup was restored from."),
+			"test_restore_result": _field(_STRING, "Pass, Partial or Fail."),
+			"test_restore_on": _field(_STRING, "When it was done. Default today; the future is refused."),
+			"test_restore_by": _field(_STRING, "Who did it. Defaults to the calling user."),
+			"restore_duration_minutes": _field(
+				_INTEGER, "How long it took. This is what answers the recovery time objective."
+			),
+			"test_restore_notes": _field(
+				_STRING, "What was restored, where to, and what was checked afterwards."
+			),
+		},
+		required=("backup_record", "test_restore_result"),
+		mutating=True,
+		title="Record a backup test",
+		available=_needs_doctype("Backup Record"),
+		requires="the Backup Record DocType — run `bench migrate`",
+	),
+	# Phase 6 — reporting and disclosure.
+	"create_reporting_template": _tool(
+		disclosure.create_reporting_template,
+		"MUTATING (default OFF). Define the shape of a periodic report: its sections, "
+		"in order, and which tool on this site fills each.\n\n"
+		"NAMING THE DATA SOURCE IS THE POINT. A section that says "
+		"'get_cash_flow_summary' is one generate_quarterly_report_skeleton can hand "
+		"back already carrying its numbers; a section with no source is one a person "
+		"writes, which is a real and common answer.\n\n"
+		"THE DOCNAME CARRIES THE COMPANY ABBREVIATION, because two entities on one "
+		"site file separately and a template shared between them is one neither can "
+		"edit without changing the other's report.",
+		{
+			"company": _COMPANY,
+			"template_name": _field(_STRING, "Short and stable — '10-Q Sections', 'Lender Quarterly Package'."),
+			"report_type": _field(_STRING, "Annual, Quarterly, Monthly or Ad Hoc."),
+			"sections": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The sections, in order: a list of names, or of objects like {"section_name": '
+				'"Liquidity and Capital Resources", "data_source": "get_cash_flow_summary", '
+				'"label_es": "Liquidez", "required": true, "sequence": 20}.',
+			),
+			"label_en": _field(_STRING, "The report's title as it prints. Defaults to the template name."),
+			"label_es": _field(
+				_STRING,
+				"The title in Spanish. Where it is empty the English is served and the gap is "
+				"REPORTED rather than hidden.",
+			),
+			"regulatory_basis": _field(
+				_STRING, "What requires this report — 'SEC Form 10-Q', 'credit agreement §6.1(b)'."
+			),
+			"description_en": _field(_STRING, "What the report is for."),
+			"description_es": _field(_STRING, "The same in Spanish."),
+			"enabled": _field(_BOOLEAN, "Default true. False withdraws it without deleting it."),
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("template_name", "report_type", "sections"),
+		mutating=True,
+		title="Create a reporting template",
+		available=_needs_doctype("Reporting Template"),
+		requires="the Reporting Template DocType — run `bench migrate`",
+	),
+	"get_reporting_template": _tool(
+		disclosure.get_reporting_template,
+		"One report shape in full, sections in order, labels in the caller's "
+		"language — with the untranslated ones named rather than silently served in "
+		"English. Read-only.",
+		{
+			"reporting_template": _field(_STRING, "The docname, e.g. '10-Q Sections - OML'."),
+			"language": _field(_STRING, "ISO code. 'es' serves Spanish where it exists."),
+		},
+		required=("reporting_template",),
+		title="Get a reporting template",
+		available=_needs_doctype("Reporting Template"),
+		requires="the Reporting Template DocType — run `bench migrate`",
+	),
+	"list_reporting_templates": _tool(
+		disclosure.list_reporting_templates,
+		"What report shapes this site has, without pulling every section of every "
+		"one. Read-only.",
+		{
+			"company": _COMPANY,
+			"report_type": _field(_STRING, "Annual, Quarterly, Monthly or Ad Hoc."),
+			"include_disabled": _field(_BOOLEAN, "Include withdrawn templates."),
+			"language": _field(_STRING, "ISO code."),
+			"limit": _LIMIT,
+		},
+		title="List reporting templates",
+		available=_needs_doctype("Reporting Template"),
+		requires="the Reporting Template DocType — run `bench migrate`",
+	),
+	"update_reporting_template": _tool(
+		disclosure.update_reporting_template,
+		"MUTATING (default OFF). Change a template's labels, its regulatory basis, "
+		"whether it is offered, or its whole section list.\n\n"
+		"SECTIONS ARE RESTATED WHOLE, never merged. A partial update would need a "
+		"stable row key and the only candidate is the section name — which is "
+		"exactly what somebody renaming a section is changing. Passing an empty list "
+		"is refused: to withdraw a template, set enabled=false.",
+		{
+			"reporting_template": _field(_STRING, "The docname."),
+			"report_type": _field(_STRING, "Annual, Quarterly, Monthly or Ad Hoc."),
+			"sections": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The complete new section list. Replaces the existing one outright.",
+			),
+			"label_en": _field(_STRING, "New title."),
+			"label_es": _field(_STRING, "New Spanish title. Empty string clears it."),
+			"regulatory_basis": _field(_STRING, "New basis."),
+			"description_en": _field(_STRING, "New description."),
+			"description_es": _field(_STRING, "New Spanish description."),
+			"enabled": _field(_BOOLEAN, "Whether it is offered."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("reporting_template",),
+		mutating=True,
+		title="Update a reporting template",
+		available=_needs_doctype("Reporting Template"),
+		requires="the Reporting Template DocType — run `bench migrate`",
+	),
+	"generate_mda_data_feed": _tool(
+		disclosure.generate_mda_data_feed,
+		"The figures a Management Discussion and Analysis is written FROM: KPIs, cash "
+		"movement, budget variance, compliance posture, segment cut and the "
+		"related-party position, each carrying the window it was measured over. "
+		"Read-only, and nothing is stored.\n\n"
+		"NOT A DRAFT MD&A. It is the evidence pack — somebody writes the discussion. "
+		"This app's job is to make sure the numbers in it came from the ledger.\n\n"
+		"IT IS HONEST ABOUT ITS HOLES. Every source is attempted and every failure is "
+		"named in `unavailable` with its reason. A generator that raised on its first "
+		"missing input is one nobody on a farm mid-setup could ever run; a feed that "
+		"pretended to completeness would be the dangerous kind.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the period. Default 90 days before to_date."),
+			"to_date": _field(_STRING, "End of the period, inclusive. Default today."),
+		},
+		title="Generate an MD&A data feed",
+		available=_always,
+	),
+	"generate_segment_report": _tool(
+		disclosure.generate_segment_report,
+		"Revenue, expense and result by cost centre, with ASC 280's ten-per-cent test "
+		"applied per segment and ITS WORKING SHOWN, plus the 75% coverage check. "
+		"Read-only.\n\n"
+		"APPLIED, NOT DECIDED. Whether these cost centres are genuinely different "
+		"operating segments is a judgement about how the business is managed and how "
+		"the chief operating decision maker reviews it. No query can make that call "
+		"and this does not pretend to — it reports which segments cross the "
+		"threshold and why.\n\n"
+		"POSTINGS WITH NO COST CENTRE belong to no segment and are reported "
+		"separately, which is why the segments can sum to less than the company. A "
+		"large figure there means the segment cut is describing part of the business.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the period. Default one year before to_date."),
+			"to_date": _field(_STRING, "End of the period, inclusive. Default today."),
+			"threshold_pct": _field(_INTEGER, "The reportability threshold, as a percentage. Default 10."),
+		},
+		title="Generate a segment report",
+		available=_always,
+	),
+	"create_disclosure_checklist": _tool(
+		disclosure.create_disclosure_checklist,
+		"MUTATING (default OFF). Open the checklist for one filing: which disclosures "
+		"it must make, what requires each, and who owes it.\n\n"
+		"ASSIGN THEM. The commonest reason a disclosure is omitted is not that "
+		"somebody refused it — it is that nobody owed it, and unassigned outstanding "
+		"items are named back to you.",
+		{
+			"company": _COMPANY,
+			"filing_type": _field(
+				_STRING,
+				"10-K, 10-Q, 8-K, Annual Report, Lender Package, Board Package, Tax Return or "
+				"Other. The non-SEC ones are there because an operation years from a 10-K still "
+				"files things that require disclosures.",
+			),
+			"period_start": _field(_STRING, "First day of the period being reported on."),
+			"period_end": _field(_STRING, "Last day, inclusive."),
+			"items": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The disclosures: a list of names, or of objects like {"disclosure_item": '
+				'"Related party transactions", "requirement_reference": "ASC 850", "required": '
+				'true, "assigned_to": "cfo@farm.example", "label_es": "Transacciones con partes '
+				'relacionadas"}.',
+			),
+			"status": _field(_STRING, "Open (default), In Progress, Complete or Filed."),
+			"due_date": _field(_STRING, "When it has to be filed."),
+			"fiscal_year": _field(_STRING, "The Fiscal Year this belongs to."),
+			"reporting_template": _field(_STRING, "The report shape this filing follows, if there is one."),
+			"prepared_by": _field(_STRING, "Who is preparing it. Defaults to the calling user."),
+			"reviewed_by": _field(
+				_STRING, "Who reviewed it. A checklist the preparer also reviewed is reported as not independently reviewed."
+			),
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("filing_type", "period_start", "period_end", "items"),
+		mutating=True,
+		title="Create a disclosure checklist",
+		available=_needs_doctype("Disclosure Checklist"),
+		requires="the Disclosure Checklist DocType — run `bench migrate`",
+	),
+	"get_disclosure_checklist": _tool(
+		disclosure.get_disclosure_checklist,
+		"One checklist in full, with what enforcement would say about finalising it "
+		"as it stands. Read-only, and it never refuses.",
+		{
+			"disclosure_checklist": _field(_STRING, "The docname, e.g. 'DISC-2026-0003'."),
+			"language": _field(_STRING, "ISO code. 'es' serves Spanish item labels where they exist."),
+		},
+		required=("disclosure_checklist",),
+		title="Get a disclosure checklist",
+		available=_needs_doctype("Disclosure Checklist"),
+		requires="the Disclosure Checklist DocType — run `bench migrate`",
+	),
+	"list_disclosure_checklists": _tool(
+		disclosure.list_disclosure_checklists,
+		"Checklists on file, most recent period first, with completion percentages — "
+		"and the ones marked Filed while required disclosures were still outstanding. "
+		"Under advisory that list is exactly what an operation reads before deciding "
+		"whether to enforce. Read-only.",
+		{
+			"company": _COMPANY,
+			"filing_type": _field(_STRING, "Only this kind of filing."),
+			"status": _field(_STRING, "Open, In Progress, Complete or Filed."),
+			"fiscal_year": _field(_STRING, "Only this fiscal year."),
+			"open_only": _field(_BOOLEAN, "Exclude anything already filed."),
+			"limit": _LIMIT,
+		},
+		title="List disclosure checklists",
+		available=_needs_doctype("Disclosure Checklist"),
+		requires="the Disclosure Checklist DocType — run `bench migrate`",
+	),
+	"update_disclosure_checklist": _tool(
+		disclosure.update_disclosure_checklist,
+		"MUTATING (default OFF). Change a checklist's status, dates, reviewer or item "
+		"list.\n\n"
+		"MOVING IT TO Complete OR Filed IS A CLAIM, and it is the moment the "
+		"completeness control is consulted — before anything is written. Under "
+		"Advisory the move is allowed and the outstanding items are reported; under "
+		"Enforcement it is refused and the checklist stays exactly as it was.",
+		{
+			"disclosure_checklist": _field(_STRING, "The docname."),
+			"status": _field(_STRING, "Open, In Progress, Complete or Filed."),
+			"period_start": _field(_STRING, "New first day of the period."),
+			"period_end": _field(_STRING, "New last day."),
+			"due_date": _field(_STRING, "New due date."),
+			"filed_on": _field(_STRING, "When it was actually filed."),
+			"fiscal_year": _field(_STRING, "New Fiscal Year. Empty string clears it."),
+			"reporting_template": _field(_STRING, "New Reporting Template. Empty string clears it."),
+			"prepared_by": _field(_STRING, "New preparer."),
+			"reviewed_by": _field(_STRING, "New reviewer. Empty string clears it."),
+			"items": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The complete new item list. Replaces the existing one outright.",
+			),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("disclosure_checklist",),
+		mutating=True,
+		title="Update a disclosure checklist",
+		available=_needs_doctype("Disclosure Checklist"),
+		requires="the Disclosure Checklist DocType — run `bench migrate`",
+	),
+	"complete_disclosure_item": _tool(
+		disclosure.complete_disclosure_item,
+		"MUTATING (default OFF). Settle one disclosure on a checklist.\n\n"
+		"`Not Applicable` IS A COMPLETED STATE and `Outstanding` IS NOT — that "
+		"distinction is the whole value of a checklist. 'We have no reportable "
+		"segments' is a DECISION; an empty row is an omission, and the two must never "
+		"look alike. A Not Applicable therefore REQUIRES a reason: the reason is the "
+		"disclosure.\n\n"
+		"`In Progress` does not settle an item, because work started is not a "
+		"decision reached. Reopening one clears who completed it, so nobody's name "
+		"stays on something no longer done.",
+		{
+			"disclosure_checklist": _field(_STRING, "The checklist docname."),
+			"disclosure_item": _field(_STRING, "The item, as it is named on the checklist."),
+			"status": _field(_STRING, "Complete (default), Not Applicable, In Progress or Outstanding."),
+			"evidence_reference": _field(
+				_STRING,
+				"Where the disclosure actually is — the working paper, the note number, the tool "
+				"that produced it. A completed item that points at nothing is a tick.",
+			),
+			"notes": _field(_STRING, "Required for Not Applicable: why it does not apply."),
+			"completed_by": _field(_STRING, "Who settled it. Defaults to the calling user."),
+		},
+		required=("disclosure_checklist", "disclosure_item"),
+		mutating=True,
+		title="Complete a disclosure item",
+		available=_needs_doctype("Disclosure Checklist"),
+		requires="the Disclosure Checklist DocType — run `bench migrate`",
+	),
+	"generate_quarterly_report_skeleton": _tool(
+		disclosure.generate_quarterly_report_skeleton,
+		"The pieces assembled: a report's sections with their headings, the tool "
+		"behind each, the figures where this site could produce them, the disclosure "
+		"checklist beside them, and every gap between. Read-only, and nothing is "
+		"stored or submitted.\n\n"
+		"IT CONTAINS NO PROSE AND NEVER WILL. A management discussion that arrived "
+		"pre-written is the one nobody reads before it is filed — sections with no "
+		"runnable source come back marked `to_be_written_by_a_person`, which is the "
+		"honest label for them.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Start of the period. Default 90 days before to_date."),
+			"to_date": _field(_STRING, "End of the period, inclusive. Default today."),
+			"reporting_template": _field(
+				_STRING, "Which shape to follow. Omit and the enabled Quarterly template is used."
+			),
+			"report_type": _field(_STRING, "Which cadence's template to pick when none is named. Default Quarterly."),
+			"disclosure_checklist": _field(_STRING, "The checklist for this filing, if one is open."),
+			"language": _field(_STRING, "ISO code for section headings and disclosure items."),
+		},
+		title="Generate a quarterly report skeleton",
+		available=_always,
 	),
 }
 

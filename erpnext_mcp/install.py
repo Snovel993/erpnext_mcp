@@ -179,6 +179,46 @@ def after_migrate() -> None:
 	_receipt_intelligence_fields()
 	_wizard_definitions()
 	_trade_documents()
+	_reporting_templates()
+
+
+def _reporting_templates() -> None:
+	"""Seed the three shipped report shapes, per company. v0.81.0.
+
+	A 10-K's sections, a 10-Q's, and an MD&A on its own — each section already
+	naming the tool on this site that fills it, which is what lets
+	`generate_quarterly_report_skeleton` hand somebody a section that knows where
+	its numbers come from.
+
+	NEVER OVERWRITES ONE AN OPERATOR HAS EDITED, and that is the point of the
+	doctype rather than a nicety. The whole reason a report's shape is data is so
+	a farm can add the section its lender started asking for without waiting for a
+	release; a migration that reset those edits every upgrade would make "config
+	not code" a slogan instead of a property.
+
+	Runs on install AND after every migrate, so a site upgrading from any earlier
+	version gets the three on its next migrate rather than needing a patch.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import disclosure
+
+		report = disclosure.install_reporting_templates()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the reporting templates were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} reporting template(s) — the shape of a "
+			"periodic report is now a record, so its sections, their order, their Spanish and the "
+			"tool each is filled from are editable with update_reporting_template and no code "
+			"release. list_reporting_templates has the register. AN EDITED TEMPLATE IS NEVER "
+			"OVERWRITTEN by a later migrate."
+		)
+	if report.get("failed"):
+		print(f"erpnext_mcp: {len(report['failed'])} reporting template(s) could not be seeded: {report['failed']}")
 
 
 def _trade_documents() -> None:

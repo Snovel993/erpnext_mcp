@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 606 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 635 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 290 read tools are **on** by default and can be switched off individually. A
+All 308 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13791,3 +13791,146 @@ a phone in a yard would make the gate worth nothing. Same argument that keeps
 require one of **System Manager, Farm Manager, Compliance Officer, Sales Manager
 or Accounts Manager**. A commercial invoice is a customs declaration and a
 phytosanitary certificate is a claim about a pest; neither is anonymous.
+
+## Governance, ITGC and disclosure (v0.81.0)
+
+Twenty-nine tools, seven doctypes, five control points — IPO readiness Phases 4
+to 6. Every control is **bypassable**, and that is the design: same code, same
+data trail, two strictnesses.
+
+```
+                 evaluates   reaches a finding   files the alert   lets it through
+ADVISORY            yes            yes                 yes               yes
+ENFORCED            yes            yes                 yes               no
+```
+
+Nothing differs but the last column. An operation that spends a season in
+Advisory ends it holding **exactly the register of findings it would hold had it
+been enforcing** — which is what turns switching enforcement on from a gamble
+into a decision made with the evidence already in hand. Everything ships
+Advisory; the switch is `enforcement_mode` on a Compliance Rule, flipped with
+`update_compliance_rule`.
+
+### The five control points
+
+| Control point | Refuses, when enforced |
+| --- | --- |
+| `related_party_transfer_pricing` | Booking a related-party transaction with no documentation covering it |
+| `access_review` | Granting access when the last review is older than the review period |
+| `change_approval` | Recording a system change with no approver, or with its own author as approver |
+| `backup_verification` | Declaring recovery readiness with no verified restore in the window |
+| `disclosure_completeness` | Marking a filing complete with required disclosures outstanding |
+
+### Phase 4 — related parties
+
+| Tool | What it does |
+| --- | --- |
+| `get_related_party_transactions` | Every dealing in a window with somebody on the register, one row per voucher, stamped with whether an arm's-length case covers it |
+| `flag_related_party_transaction` | Runs one dealing through the control. Advisory reports and allows; Enforced refuses. **Mutating** — it writes compliance alerts |
+| `list_related_party_disclosures` | The disclosure register and the gaps behind each relationship |
+| `generate_related_party_disclosure` | The period's schedule: parties, totals, coverage, and what could not be resolved |
+| `create_transfer_pricing_doc` | The arm's-length case: the price, the reference it was tested against, why they agree |
+| `get_transfer_pricing_doc` | One memo, plus the transactions it actually covers |
+| `list_transfer_pricing_docs` | The memos on file, and which Complete ones were reviewed by their own author |
+| `update_transfer_pricing_doc` | Change one — including the promotion to Complete, which is what makes it cover anything |
+
+**The match is never a guess.** A ledger party becomes a related party by the
+register row's `supplier` **link** (`match: supplier_link`) or, failing that, by
+an exact case-folded name match (`match: name`) — always labelled. Everything
+that resolved to neither comes back in `unmatched_parties` with its total, rather
+than being dropped: the commonest way a related-party schedule is wrong is not a
+mispriced dealing, it is a relationship nobody wrote down.
+
+**Coverage is one of four values**, because the remedies are different work:
+`documented`; `draft_only` (a memo exists, unfinished); `amount_exceeds_
+documentation` (a memo for $12,000 does not document $140,000 — 10% tolerance);
+`undocumented` (nothing was ever written). `covers_row()` is the single
+definition of "documented" on the site, called by the gate, the register and the
+year-end schedule alike, so none can grow its own opinion.
+
+### Phase 5 — IT general controls
+
+| Tool | What it does |
+| --- | --- |
+| `generate_access_control_report` | Who has what, computed now and **stored nowhere**: logins, roles, what those roles reach, last login |
+| `create_change_management_log` | One system change: what, who, who approved, how to undo |
+| `get_change_management_log` / `list_change_management_logs` | One change; the log, with unapproved and self-approved rows called out |
+| `get_change_management_report` | Volume, approval rate, high-risk untested changes — and how much of the log is self-attested |
+| `create_backup_record` | A backup ran: kind, when, where, how it ended, and the RPO/RTO it is measured against |
+| `get_backup_record` / `list_backup_records` | One event with its RTO verdict; the fleet with its verification picture |
+| `record_backup_test` | A test restore — the event that turns a job into a control |
+
+**Access is computed, never stored.** A permissions snapshot in a table is wrong
+the moment somebody adds a role, and a stale one is worse than none because it is
+the document an operator hands an auditor while believing it. What *is* stored is
+that a review happened: a `Change Management Log` row of type `Permission`.
+
+**No `doc_events`.** `hooks.py` promises this app installs none, and hanging a
+hook on every Custom DocPerm write would break that promise for every site. The
+change log is populated from this app's own dispatcher path instead; those rows
+carry `source = MCP Tool` and a link to the MCP Action Log row for the call.
+`get_change_management_report` reports the self-attested split rather than hiding
+it, because "how much of your change log did you write about yourself" is the
+first question worth asking about a change log.
+
+**An approver who is the person who made the change is not an approver** —
+refused in the tool *and* the controller, so a Desk row obeys it too. A
+one-person finance function records that honestly as `Not Required` with the
+compensating control in the notes: a documented exception is defensible, a
+self-approval is a finding.
+
+**A green job log is not a verification.** `Not Tested` is the default and is not
+a failure; `Partial` does not verify; a `Fail` is the most valuable row in the
+table, found on a day somebody chose rather than a day chosen for them. An
+undated result is refused — it could not be counted by any window.
+
+### Phase 6 — reporting and disclosure
+
+| Tool | What it does |
+| --- | --- |
+| `create_reporting_template` / `get_` / `list_` / `update_reporting_template` | The SHAPE of a periodic report: sections, in order, each naming the tool that fills it |
+| `generate_mda_data_feed` | The figures an MD&A is written **from**, each carrying its window |
+| `generate_segment_report` | Revenue, expense and result by cost centre, with ASC 280's test applied and its working shown |
+| `create_disclosure_checklist` / `get_` / `list_` / `update_disclosure_checklist` | Which DISCLOSURES a filing must make, and who decided |
+| `complete_disclosure_item` | Settle one — made, or decided not to apply |
+| `generate_quarterly_report_skeleton` | The pieces assembled: headings, sources, figures, and every gap |
+
+A section and a disclosure are **deliberately different objects**. "Results of
+Operations" is a section that may carry four disclosures or none; folding them
+together would mean either a report with sixty headings, or a disclosure that
+could exist only where somebody had already written a section for it — which is
+precisely how a disclosure gets omitted.
+
+**Nothing here files anything.** Every generator returns a working paper, and the
+skeleton contains **no prose and never will**: a management discussion that
+arrived pre-written is the one nobody reads before it is filed. Sections with no
+runnable source come back marked `to_be_written_by_a_person`.
+
+**A feed is honest about its holes.** `generate_mda_data_feed` attempts every
+source and names every failure in `unavailable` with its reason. A generator that
+raised on its first missing input is one nobody on a farm mid-setup could ever
+run, and would therefore never be run at all.
+
+**Segments are applied and shown, not decided.** The ten-per-cent test is
+computed per cost centre with its working, plus the 75% coverage check. Whether
+these cost centres are genuinely different *operating segments* is a judgement
+about how the business is managed and how the chief operating decision maker
+reviews it — no query can make that call. Postings with no cost centre belong to
+no segment and are reported separately, which is why the segments can sum to less
+than the company.
+
+**`Not Applicable` is a decision; `Outstanding` is not.** The whole value of a
+checklist is that somebody decided about every line. So Not Applicable settles an
+item and **requires a reason** — the reason *is* the disclosure — while
+`In Progress` does not settle it, because work started is not a decision reached.
+Reopening an item clears who completed it.
+
+### Bilingual, where it applies
+
+Section headings and disclosure items carry `label_es`, and the three shipped
+templates (`10-K Sections`, `10-Q Sections`, `MD&A`) ship with theirs. A missing
+translation serves the English and reports the gap in `untranslated` — the
+posture `list_wizard_definitions` has taken since v0.79.0. The ledger-facing
+records are not translated, and that is a decision: they are read by accountants
+and auditors in the language of the filing, and translating half of a financial
+statement would be worse than translating none of it.

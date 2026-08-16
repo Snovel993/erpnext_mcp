@@ -230,6 +230,72 @@ CONTROL_POINTS = {
 	# that reads it would put a row in the register saying this site tracks
 	# something nothing anywhere consults, which is the failure this module's
 	# docstring calls the worst one available.
+	"access_review": ControlPoint(
+		key="access_review",
+		title="Privileged access has not been reviewed within the review period",
+		purpose=(
+			"Access accumulates. The bookkeeper who covered payroll for one season keeps "
+			"the role for four more years, the packing-house temp still has a login, and "
+			"nobody decided any of it — which is the point: an access list is not wrong at "
+			"any moment, it is wrong by drift. A periodic review is the only control that "
+			"catches a permission nobody would grant today and nobody remembers granting."
+		),
+		citation="COBIT 2019 DSS05.04 (Managed Identity and Logical Access); COSO 2013 Principle 11; SOX §404",
+		blocks="granting or widening access when the last review is older than the review period",
+	),
+	"backup_verification": ControlPoint(
+		key="backup_verification",
+		title="No verified backup or test restore within the required window",
+		purpose=(
+			"An unverified backup is a belief, not a control. The failure it exists to "
+			"prevent is discovered exactly once, at the worst possible moment, and the "
+			"discovery is always the same sentence: the job had been green for months and "
+			"the restore did not work. What makes a backup a control is a RESTORE somebody "
+			"actually performed and dated — which is why this control reads the test "
+			"restore and not the job log."
+		),
+		citation="COBIT 2019 DSS04.07 (Managed Continuity); COSO 2013 Principle 11; SOX §404",
+		blocks="declaring recovery readiness when no backup has been verified inside the required window",
+	),
+	"change_approval": ControlPoint(
+		key="change_approval",
+		title="A system change was recorded with nobody named as its approver",
+		purpose=(
+			"Change management is the ITGC an auditor tests by sampling: pick five changes, "
+			"show me who approved each. An operation that cannot answer for one of the five "
+			"has not failed that change — it has failed the control, for every change. The "
+			"record has to name a person, and the person has to not be the one who made it."
+		),
+		citation="COBIT 2019 BAI06.01 (Managed IT Changes); COSO 2013 Principle 11; SOX §404",
+		blocks="recording a system change with no approver, or with the person who made it as its own approver",
+	),
+	"disclosure_completeness": ControlPoint(
+		key="disclosure_completeness",
+		title="A filing is being finalised with required disclosures outstanding",
+		purpose=(
+			"A disclosure checklist exists because the omission is never the disclosure "
+			"somebody refused to make — it is the one nobody was assigned. Completeness is "
+			"therefore a control about the LIST rather than about any item on it, and the "
+			"moment it has to be read is the moment somebody calls the filing done, because "
+			"after that the checklist is a historical document."
+		),
+		citation="SEC Regulation S-K; SOX §302 (Disclosure Controls and Procedures)",
+		blocks="marking a filing complete while required disclosure items are still outstanding",
+	),
+	"related_party_transfer_pricing": ControlPoint(
+		key="related_party_transfer_pricing",
+		title="A related-party transaction has no arm's-length documentation behind it",
+		purpose=(
+			"A payment to the manager's own trucking LLC is not wrong. A payment to the "
+			"manager's own trucking LLC that nobody priced against the market is the "
+			"finding — and it is found years later, by somebody who was not there, with the "
+			"burden of proof reversed. The documentation is cheap on the day of the dealing "
+			"and nearly impossible to reconstruct afterwards, which is the entire argument "
+			"for a control at the transaction rather than a review at year end."
+		),
+		citation="IRC §482 and Treas. Reg. §1.482-1 (arm's length standard); ASC 850 (Related Party Disclosures)",
+		blocks="booking a related-party transaction with no transfer pricing documentation covering it",
+	),
 }
 
 

@@ -1,0 +1,199 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "The disclosures one filing has to make, and which of them have been made. A disclosure checklist exists because the omission is never the disclosure somebody refused to make — it is the one nobody was assigned. Completeness is therefore a control about the LIST rather than about any item on it, and the moment it has to be read is the moment somebody calls the filing done, because after that the checklist is a historical document.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "filing_type",
+  "status",
+  "identity_col",
+  "period_start",
+  "period_end",
+  "due_date",
+  "fiscal_year",
+  "template_section",
+  "reporting_template",
+  "prepared_by",
+  "template_col",
+  "reviewed_by",
+  "filed_on",
+  "items_section",
+  "items",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "DISC-.YYYY.-.####",
+   "print_hide": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "What is being filed. `Lender Package` and `Board Package` are here beside the SEC forms deliberately: an operation years away from a 10-K still files things that require disclosures, and the discipline is the same one.",
+   "fieldname": "filing_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Filing Type",
+   "options": "10-K\n10-Q\n8-K\nAnnual Report\nLender Package\nBoard Package\nTax Return\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Open",
+   "description": "FILED IS THE TERMINAL STATE and the one the completeness control guards. Getting there with required items Outstanding is what it refuses under enforcement and reports under advisory.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nIn Progress\nComplete\nFiled",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period Start",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Period End",
+   "reqd": 1
+  },
+  {
+   "description": "When it has to be filed. Drives nothing automatically here — it is what makes a list of open checklists sortable by what is actually urgent.",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "label": "Due Date"
+  },
+  {
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "label": "Fiscal Year",
+   "options": "Fiscal Year"
+  },
+  {
+   "fieldname": "template_section",
+   "fieldtype": "Section Break",
+   "label": "Preparation"
+  },
+  {
+   "description": "The report shape this filing follows, if there is one. A checklist and a template are different objects on purpose: the template is which SECTIONS a report has, the checklist is which DISCLOSURES it must make, and a section can carry several disclosures or none.",
+   "fieldname": "reporting_template",
+   "fieldtype": "Link",
+   "label": "Reporting Template",
+   "options": "Reporting Template"
+  },
+  {
+   "fieldname": "prepared_by",
+   "fieldtype": "Link",
+   "label": "Prepared By",
+   "options": "User"
+  },
+  {
+   "fieldname": "template_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Who reviewed the filing. A checklist the preparer also reviewed is not reviewed, and the completeness report says so rather than counting it as done.",
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "filed_on",
+   "fieldtype": "Date",
+   "label": "Filed On"
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Disclosures"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Disclosure Checklist Item"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Disclosure Checklist",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "filing_type,period_end,status",
+ "sort_field": "period_end",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
