@@ -12214,16 +12214,32 @@ TOOLS = {
 	),
 	"import_state_tax_table": _tool(
 		state_tax.import_state_tax_table,
-		"MUTATING (default OFF). Bulk import state income tax brackets. Each "
-		"bracket specifies filing_status, bracket_floor, bracket_ceiling, "
-		"base_tax, and marginal_rate. Oregon needs these; Washington does not.",
+		"MUTATING (default OFF). Bulk import state income tax brackets for a tax "
+		"year. Each bracket specifies filing_status, bracket_floor, "
+		"bracket_ceiling, base_tax, and marginal_rate. Oregon needs these; "
+		"Washington has no income tax and needs none. This is how a new tax year "
+		"is loaded without a code release — Oregon publishes its brackets in "
+		"December and they take effect in January. BRACKETS ARE ANNUAL DOLLARS: "
+		"the engine annualizes each period's gross before looking one up. The "
+		"whole payload is validated — coverage from zero, no gaps, no overlaps, "
+		"exactly one open-ended top bracket — before anything is written.",
 		{
 			"state": _field(_STRING, "OR or WA."),
 			"tax_year": _field(_INTEGER, "Tax year."),
 			"brackets": _field(
 				{"type": "array", "items": _OBJECT},
-				"Array of bracket objects with: filing_status, bracket_floor, "
-				"bracket_ceiling (null for top), base_tax, marginal_rate.",
+				"Array of bracket objects with: filing_status (Single, Married "
+				"Filing Jointly, or Head of Household), bracket_floor, "
+				"bracket_ceiling (null for the top bracket), base_tax, "
+				"marginal_rate (as a percentage — 9.9 for 9.9%).",
+			),
+			"replace": _field(
+				_BOOLEAN,
+				"Clear this state's existing brackets for the tax year and rewrite "
+				"them. Default false, which REFUSES when the year already has rows "
+				"rather than duplicating them — two overlapping tables for one year "
+				"change what is withheld without failing. Pass true to correct a "
+				"year already imported.",
 			),
 		},
 		required=("state", "tax_year", "brackets"),

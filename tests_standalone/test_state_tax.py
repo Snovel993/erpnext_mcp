@@ -1027,3 +1027,125 @@ class ImportStateTaxTable(StateTaxTestCase):
         })
         self.assertEqual(data["count"], 1)
         self.assertEqual(float(data["brackets"][0]["marginal_rate"]), 10.0)
+
+
+# ── Claim 13: the advertised contract matches the handler ─────────────
+
+
+class TheSchemaMatchesTheHandler(StateTaxTestCase):
+    """Every argument the handler reads is one the schema lets a caller send.
+
+    THIS IS THE TEST THAT WAS MISSING. `import_state_tax_table` shipped in
+    v0.91.0 reading a `replace` argument that its inputSchema did not declare,
+    and nothing caught it: the count assertions count entries rather than look
+    inside them, and the tool's own tests call the handler through the
+    dispatcher, which does not validate arguments against the schema. So a
+    lenient caller got through, the suite went green, and a client that
+    generates its call from `tools/list` — the documented contract, carrying
+    `additionalProperties: false` — could never send it. The tool's refusal on
+    an already-imported year meanwhile said "Pass replace=true", naming a
+    parameter the schema forbids.
+
+    The arguments are read out of the handler's own AST rather than listed here,
+    so the assertion cannot go stale the way a hand-maintained list would.
+    """
+
+    #: Reading an argument through one of these means the handler accepts it.
+    READERS = ("as_str", "as_int", "as_bool", "as_float", "as_limit", "_as_float")
+
+    def _arguments_read_by(self, module_path, function_name):
+        import ast
+        import pathlib
+
+        source = pathlib.Path(module_path).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == function_name
+        )
+
+        found = set()
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            # args.get("x")
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "args"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                found.add(node.args[0].value)
+            # as_str(args, "x") and friends
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id in self.READERS
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "args"
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                found.add(node.args[1].value)
+        return found
+
+    def _assert_declared(self, tool_name, function_name):
+        import erpnext_mcp.tools.state_tax as module
+        from erpnext_mcp import registry
+
+        read = self._arguments_read_by(module.__file__, function_name)
+        declared = set(registry.TOOLS[tool_name]["inputSchema"]["properties"])
+        undeclared = read - declared
+        self.assertEqual(
+            undeclared,
+            set(),
+            f"{tool_name}'s handler reads {sorted(undeclared)}, which its inputSchema does "
+            f"not declare. The schema carries additionalProperties:false, so a caller that "
+            f"honours the advertised contract cannot send them.",
+        )
+
+    def test_import_state_tax_table_declares_replace(self):
+        """The specific regression: `replace` reachable from the contract."""
+        from erpnext_mcp import registry
+        schema = registry.TOOLS["import_state_tax_table"]["inputSchema"]
+        self.assertIn("replace", schema["properties"])
+        self.assertEqual(schema["properties"]["replace"]["type"], "boolean")
+        self.assertNotIn("replace", schema["required"])
+
+    def test_import_state_tax_table_schema_covers_its_handler(self):
+        self._assert_declared("import_state_tax_table", "import_state_tax_table")
+
+    def test_the_other_state_tax_tools_too(self):
+        for tool_name, function_name in (
+            ("get_state_tax_config", "get_state_tax_config"),
+            ("list_state_tax_configs", "list_state_tax_configs"),
+            ("get_state_tax_table", "get_state_tax_table"),
+            ("preview_state_withholding", "preview_state_withholding"),
+            ("preview_total_payroll_taxes", "preview_total_payroll_taxes"),
+            ("list_employees_by_work_state", "list_employees_by_work_state"),
+        ):
+            with self.subTest(tool=tool_name):
+                self._assert_declared(tool_name, function_name)
+
+    def test_the_refusal_names_an_argument_the_schema_allows(self):
+        """The refusal says "Pass replace=true"; the schema has to permit that.
+
+        Asserted together because the pairing is the actual defect — an error
+        message is only actionable if the contract admits the action it names.
+        """
+        from erpnext_mcp import registry
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026,
+            "brackets": [{"filing_status": "Single", "bracket_floor": 0,
+                          "bracket_ceiling": None, "base_tax": 0, "marginal_rate": 5.0}],
+        })
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026,
+            "brackets": [{"filing_status": "Single", "bracket_floor": 0,
+                          "bracket_ceiling": None, "base_tax": 0, "marginal_rate": 5.0}],
+        })
+        self.assertIn("replace=true", text)
+        self.assertIn("replace", registry.TOOLS["import_state_tax_table"]["inputSchema"]["properties"])
