@@ -7647,6 +7647,163 @@ def list_accident_reports(
 	return data
 
 
+#: The fourteen types a Wizard Definition may carry, mapped onto the seven the
+#: handset can draw. v0.91.0.
+#:
+#: A TYPE ABSENT FROM THIS TABLE IS PASSED THROUGH UNCHANGED, ON PURPOSE. The
+#: app decodes an unknown type as `unsupported` and draws a row saying the field
+#: needs a newer build — and, if the field is required, refuses to submit rather
+#: than posting a record with a hole in it. That is the right answer for the
+#: three types no iOS control collects: `employee_select` and `asset_select`
+#: need a roster or an asset register the seven cannot express, and
+#: `multi_select` would keep one of the several answers somebody gave. Calling
+#: any of them `select` would draw an empty picker with no way forward, which
+#: reads as a broken app rather than a missing one.
+#:
+#: THE SAME GOES FOR A TYPE NOBODY HAS ADDED YET. A `geo` on a Wizard Field this
+#: build has never heard of is passed through for the same reason rather than
+#: defaulted to `text`: a text box would ask a worker to TYPE a location and
+#: file the sentence they typed where coordinates belong, and nothing anywhere
+#: would report it. A field with NO type is the opposite case and `describe()`
+#: has already made it `text` before this table is consulted — a blank on a
+#: record somebody was filling in is a text box, and guessing there is right.
+#:
+#: `datetime` LOSES THE TIME OF DAY, which is the one lossy entry here. The
+#: alternative is refusing the accident wizard's first required field and taking
+#: the whole flow down with it; a date is worth more than nothing, and the app
+#: posts date-only strings a Frappe Datetime accepts.
+_IOS_FIELD_TYPES = {
+	"text": "text",
+	"long_text": "text",
+	"number": "number",
+	"date": "date",
+	"datetime": "date",
+	"select": "select",
+	"checkbox": "select",
+	"photo": "photo",
+	"signature": "signature",
+	"qr_scan": "qr",
+	# The recording is the alternative to typing, never the only way to answer —
+	# every seeded `audio_note` sits beside a `long_text` that asks the same
+	# question. A text box collects the same sentence from a build with no
+	# recorder in it.
+	"audio_note": "text",
+}
+
+#: What a `checkbox` becomes once it is a two-choice picker. The values are what
+#: gets posted, and they are `1`/`0` rather than `Yes`/`No` because the endpoint
+#: on the other end reads the answer with `cint`.
+_IOS_CHECKBOX_OPTIONS = (
+	{"value": "1", "label_en": "Yes", "label_es": "Sí"},
+	{"value": "0", "label_en": "No", "label_es": "No"},
+)
+
+
+def _ios_bilingual(row: dict, key: str, en: str, es: str) -> None:
+	"""Write one resolved string into both language slots.
+
+	THE SERVER RESOLVED THE LANGUAGE ALREADY AND THERE IS ONLY ONE STRING TO
+	SEND. `get_wizard_definition` picks the worker's own language off their
+	Employee record before it answers, so what arrives here is already the
+	sentence that person should read — but the app decodes `label_en` and
+	`label_es` and shows the Spanish one when the handset is set to Spanish, so
+	a spec carrying only `label_en` would show a Spanish-speaking picker an
+	empty label. Both slots get the resolved string: whichever the app reaches
+	for, it finds the words the server chose.
+
+	This is NOT bilingual support, and the honest version is a second pass —
+	`describe(doc, "en")` and `describe(doc, "es")` zipped together — which is a
+	change to make when the app needs to switch language without a round trip.
+	"""
+	value = str(en or "").strip()
+	row[key + "_en"] = value
+	row[key + "_es"] = str(es or value).strip()
+
+
+def _ios_wizard_field(field: dict) -> dict:
+	"""One control, in the shape `WizardField` decodes.
+
+	THE KEY IS THE TARGET FIELD, NOT THE FIELDNAME, and they are the same thing
+	until an operator says otherwise. `key` is what the app posts the answer
+	under, and Wizard Field carries `target_field` for exactly the case where
+	the question's name on the form and the column it lands in differ — a wizard
+	that set one and got its answers posted under the other would file every
+	record with the field it cares about empty.
+	"""
+	row = dict(field)
+	# iOS HAS NO CONDITIONAL LOGIC AND IS NOT BEING SENT ANY. `visible_if` is a
+	# rule the app cannot evaluate; leaving it on the wire invites a later build
+	# to half-implement it against a spec nobody validated.
+	row.pop("visible_if", None)
+
+	server_type = str(row.get("type") or "").strip().lower()
+	row["server_field_type"] = server_type
+	row["type"] = _IOS_FIELD_TYPES.get(server_type, server_type)
+
+	row["key"] = row.get("target_field") or row.get("fieldname") or ""
+	_ios_bilingual(row, "label", row.get("label"), "")
+	# THE HELP TEXT BECOMES THE PLACEHOLDER WHEN THERE IS NO PLACEHOLDER. The app
+	# has nowhere else to put a field's help, and "In your own words. Be specific"
+	# is the difference between a usable answer and three words.
+	_ios_bilingual(row, "placeholder", row.get("placeholder") or row.get("help") or "", "")
+	row["required"] = bool(row.get("required"))
+
+	options = []
+	for option in row.get("options") or []:
+		label = str(option.get("label") or option.get("value") or "")
+		entry = {"value": option.get("value") or ""}
+		_ios_bilingual(entry, "label", label, "")
+		options.append(entry)
+	if server_type == "checkbox" and not options:
+		options = [dict(option) for option in _IOS_CHECKBOX_OPTIONS]
+	row["options"] = options
+	return row
+
+
+def _ios_wizard_step(step: dict) -> dict:
+	"""One page of the form, in the shape `WizardStep` decodes."""
+	row = dict(step)
+	row.pop("visible_if", None)
+	row["key"] = row.get("step_key") or ""
+	_ios_bilingual(row, "title", row.get("title"), "")
+	# The server calls it a description and the app calls it help. Same sentence,
+	# same place on the screen — under the step title.
+	_ios_bilingual(row, "help", row.get("description") or "", "")
+	row["fields"] = [_ios_wizard_field(dict(field)) for field in (row.get("fields") or [])]
+	return row
+
+
+def _ios_wizard_spec(data: dict) -> dict:
+	"""The server's spec, in the shape the handset decodes. v0.91.0.
+
+	NOTHING RENDERED BEFORE THIS. `describe()` answers `wizard_key`, one resolved
+	`title`, `step_key`, `fieldname` and fourteen field types; `WizardDefinition`
+	decodes `name`, `title_en`/`title_es`, `key`, `key` again and seven. Every
+	key the app looks for was absent, so a server-authored spec decoded to an
+	empty name with no steps and `isRenderable` was false for all five of them —
+	the same shape a record nobody filled in would have, which is why the failure
+	looked like an empty register rather than a translation that was never
+	written.
+
+	THE TRANSLATION IS ADDITIVE AND THE SERVER'S OWN KEYS STAY. `wizard_key`,
+	`step_key`, `fieldname`, `validation`, `default` and the rest travel
+	untouched beside the iOS ones: the app ignores keys it does not declare,
+	`_with_submit_endpoint` reads `wizard_key` and `submit_method` off this dict
+	after the fact, and anybody debugging a spec against the MCP tool wants the
+	two shapes to be comparable. `visible_if` is the one thing removed, because
+	it is a rule rather than a datum.
+
+	THE MCP TOOL IS NOT TOUCHED. `tools/wizards.py` answers the same fourteen
+	types it always did to an MCP client, which has no handset and no seven-type
+	renderer. This is the sidecar's translation, in the sidecar, beside the
+	`submit_method` translation that had the same argument behind it.
+	"""
+	data["name"] = data.get("wizard_key") or ""
+	_ios_bilingual(data, "title", data.get("title"), "")
+	data["steps"] = [_ios_wizard_step(dict(step)) for step in (data.get("steps") or [])]
+	return data
+
+
 def _with_submit_endpoint(data: dict) -> dict:
 	"""Turn the wizard's `submit_method` into a path this transport publishes.
 
@@ -7713,7 +7870,11 @@ def get_wizard_definition(user: str, wizard=None, language=None) -> dict:
 	inner = {"wizard": str(wizard or "").strip(), "employee": employee, "user": user}
 	if language:
 		inner["language"] = str(language).strip()
-	return _with_submit_endpoint(wizard_tools.get_wizard_definition(inner).data)
+	# RESHAPED FIRST, ENDPOINT SECOND. `_with_submit_endpoint` reads `wizard_key`
+	# and `submit_method` off the dict, and `_ios_wizard_spec` leaves both where
+	# they were — but the order is the one that survives a later reshape that
+	# does not.
+	return _with_submit_endpoint(_ios_wizard_spec(wizard_tools.get_wizard_definition(inner).data))
 
 
 # ── 92. list_wizard_definitions ──────────────────────────────────────────────

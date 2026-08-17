@@ -142,17 +142,77 @@ a worker never shown the form has lost nothing, and a worker who fills in three
 steps and a signature before the post 404s has lost the thing the surface exists
 to collect. The reason travels in `submit_unavailable`.
 
+### …and the spec is now in a shape the handset can read
+
+The endpoint was the *second* thing wrong with these specs. **Not one key the app
+looks for was on the wire.** `describe()` answers `wizard_key`, a single resolved
+`title`, `steps[].step_key`, `fields[].fieldname` and fourteen field types; the
+app decodes `name`, `title_en`/`title_es`, `key`, `key` and seven. Every lookup
+missed, so a server-authored spec decoded to a nameless definition with no steps
+— **byte-for-byte what a Wizard Definition nobody filled in decodes to**, which
+is why the failure read as an empty register rather than as a translation that
+was never written.
+
+**The translation is additive and lives in the wrapper.** `wizard_key`,
+`step_key`, `fieldname`, `validation` and the rest travel untouched beside the
+iOS keys; the app ignores what it does not declare, `_with_submit_endpoint` still
+reads `wizard_key` off the dict afterwards, and the MCP tool answers the same
+fourteen types it always did to a client with no handset.
+
+**One resolved string reaches both language slots.** The server picks the
+worker's language off their Employee record before it answers, so there is one
+string to send and the app reads two keys — and `WizardLabel.pick` prefers `_es`,
+so sending only `title_en` shows a Spanish-set handset a *blank*. Both slots get
+what the server chose. This is not bilingual support; the honest version is a
+second `describe()` pass, and it is a change to make when the app needs to switch
+language without a round trip.
+
+**Ten of the fourteen types map onto a control that collects the same answer.**
+`long_text`→`text`, `datetime`→`date`, `qr_scan`→`qr`, `checkbox`→a two-choice
+picker whose values are `1`/`0` rather than `Yes`/`No`, because the answer is
+read on the other end with `cint` and a tick that files as unticked is worse than
+a field the app refuses to draw. `datetime` is the one lossy entry — it loses the
+time of day, and the alternative is taking the accident wizard's first required
+field down with the whole flow.
+
+**The other four are refused by name rather than guessed at.**
+`employee_select`, `asset_select` and `multi_select` collect a roster pick, an
+asset pick and several-of-many; no options travel with any of them, so calling
+them `select` draws an **empty picker with no way forward** and no sentence
+saying why. Passed through under their own names, the app draws its "needs a
+newer app" row and `missingRequired` blocks the submit. A type this build has
+never heard of — a `geo` added to the doctype later — goes the same way, because
+a text box would ask a worker to *type* a location and file the sentence they
+typed where coordinates belong. A field with **no** type is the opposite case and
+is still a text box: a blank on a record somebody was filling in is a text box,
+and guessing there is right.
+
+**`visible_if` is stripped at both levels.** iOS has no evaluator, and leaving a
+rule on the wire invites a later build to half-implement it against a spec nobody
+validated. **`key` is `target_field`, not `fieldname`** — they are the same until
+an operator says otherwise, and a wizard that set one and had its answers keyed by
+the other would file every record with the field it cares about empty.
+
 ### Tests
 
-**9,839 tests, all passing, 126 skipped** — 32 new (16 for the shadow log, 16 for
-the inventory and wizard routes), and every one of them *invokes* a wrapper
-rather than asserting it is published. That is the lesson of `bd66550`: the pause
-pair were listed in the surface-is-closed registry, asserted to exist, and never
-once called.
+**9,859 tests, all passing, 126 skipped** — 52 new (16 for the shadow log, 16 for
+the inventory and wizard routes, 20 for the wizard's shape), and every one of them
+*invokes* a wrapper rather than asserting it is published. That is the lesson of
+`bd66550`: the pause pair were listed in the surface-is-closed registry, asserted
+to exist, and never once called.
 
 `test_every_seeded_wizard_now_has_a_route_behind_it` walks the real installed
 register rather than a fixture, so a sixth spec added later with an unrouted
 `submit_method` fails there rather than in a field.
+
+`decode_wizard_definition` transcribes `WizardDefinition.init(from:)` into Python
+and runs the server's real payload through it, **as lenient as the Swift is** —
+because that leniency is exactly what turned a shape mismatch into a blank screen
+instead of an error somebody would have seen. The server cannot be checked against
+itself here: asserting that `describe()` emits `wizard_key` passes on the payload
+that rendered as nothing. `test_every_type_the_doctype_offers_is_accounted_for`
+reads the Select options off Wizard Field, so a fifteenth type added there and
+left untranslated fails at that line rather than on a phone.
 
 ## 0.90.0 — 2026-08-16 — one number past the wave
 

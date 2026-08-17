@@ -3376,3 +3376,403 @@ class TheWizardKnowsWhereToPostItsAnswers(MobileAPITestCase):
 		accepted = farmops_routes.accepted_arguments(mobile_api.start_inspection)
 		self.assertNotIn("worker", accepted)
 		self.assertNotIn("foreman", accepted)
+
+
+# ── 9. the spec is in the shape the handset decodes ─────────────────────────
+#: The seven controls `WizardFieldType` draws, and the case it decodes anything
+#: else into. Transcribed from FarmOpsKit's `WizardDefinition.swift`.
+IOS_FIELD_TYPES = frozenset({"text", "number", "date", "select", "photo", "signature", "qr"})
+
+
+def decode_wizard_definition(payload: dict) -> dict:
+	"""`WizardDefinition.init(from:)`, in Python, against the real payload.
+
+	THE POINT OF TRANSCRIBING IT IS THAT THE SERVER CANNOT BE CHECKED AGAINST
+	ITSELF HERE. `describe()` answers `wizard_key`, one `title`, `step_key` and
+	fourteen field types, all of which are correct and none of which the app
+	reads — so a test asserting the server emits what the server emits passes on
+	the exact payload that rendered as an empty form on a phone. This decoder
+	looks for the keys `CodingKeys` names and nothing else, which is the only way
+	a missing translation shows up as a failure rather than as a shrug.
+
+	It is DELIBERATELY as lenient as the Swift is: an absent key is an empty
+	string or an empty list, never an exception, because that leniency is what
+	turned a shape mismatch into a blank screen instead of an error somebody
+	would have seen.
+	"""
+
+	def text(row, key):
+		value = row.get(key)
+		return value if isinstance(value, str) else ""
+
+	def option(row):
+		return {
+			"value": text(row, "value"),
+			"label_en": text(row, "label_en") or text(row, "value"),
+			"label_es": text(row, "label_es") or None,
+		}
+
+	def field(row):
+		raw = text(row, "type").lower()
+		return {
+			"key": text(row, "key"),
+			# An unknown type is a named refusal rather than a throw — and a
+			# REQUIRED one blocks submission, which is why a wrong mapping here
+			# is not a cosmetic problem.
+			"type": raw if raw in IOS_FIELD_TYPES else "unsupported",
+			"label_en": text(row, "label_en"),
+			"label_es": text(row, "label_es") or None,
+			"required": bool(row.get("required")),
+			"options": [option(o) for o in (row.get("options") or [])],
+			"placeholder_en": text(row, "placeholder_en") or None,
+		}
+
+	def step(row):
+		return {
+			"key": text(row, "key"),
+			"title_en": text(row, "title_en"),
+			"title_es": text(row, "title_es") or None,
+			"help_en": text(row, "help_en") or None,
+			"fields": [field(f) for f in (row.get("fields") or [])],
+		}
+
+	steps = [step(s) for s in (payload.get("steps") or [])]
+	definition = {
+		"name": text(payload, "name"),
+		"title_en": text(payload, "title_en"),
+		"title_es": text(payload, "title_es") or None,
+		"steps": steps,
+		"submit_endpoint": text(payload, "submit_endpoint"),
+		"submit_context": payload.get("submit_context") or {},
+		"submit_unavailable": text(payload, "submit_unavailable") or None,
+	}
+	# `unrenderableReason`, in the order the Swift checks it.
+	if not definition["name"] or not steps or any(not s["fields"] for s in steps):
+		definition["unrenderable_reason"] = "nothingToFill"
+	elif not definition["submit_endpoint"]:
+		definition["unrenderable_reason"] = "noSubmitRoute"
+	else:
+		definition["unrenderable_reason"] = None
+	return definition
+
+
+class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
+	"""v0.91.0. The translation from `describe()`'s spec to `WizardDefinition`.
+
+	NOT ONE KEY THE APP LOOKS FOR WAS ON THE WIRE. The server answered
+	`wizard_key`, a single resolved `title`, `steps[].step_key`,
+	`fields[].fieldname` and fourteen field types; the app decodes `name`,
+	`title_en`/`title_es`, `key`, `key` and seven. Every lookup missed, so a
+	server-authored spec decoded to a nameless definition with no steps — which
+	is byte-for-byte what a Wizard Definition nobody filled in would decode to.
+	That is why `12f4e6f`'s `submit_endpoint` fix did not make these render: the
+	endpoint was the second thing wrong with them.
+
+	THE SEVEN ARE NOT A SUBSET OF THE FOURTEEN AND THE GAP IS NOT ALL FALLBACK.
+	Three server types collect an answer no iOS control can — a roster pick, an
+	asset pick, several answers where the seven give one — and those pass through
+	under their own names so the app draws its "needs a newer app" row and
+	refuses to submit a required one. Calling them `select` would draw an empty
+	picker instead, which is the same screen with the honesty taken out.
+	"""
+
+	#: One of each of the fourteen `field_type` options on Wizard Field, so the
+	#: mapping is asserted against the whole doctype rather than against the
+	#: subset the five shipped specs happen to use. A fifteenth added to the
+	#: doctype and not to this list fails `test_every_type_the_doctype_offers`.
+	MIXED = (
+		("plain", "text"),
+		("story", "long_text"),
+		("count", "number"),
+		("day", "date"),
+		("moment", "datetime"),
+		("choice", "select"),
+		("several", "multi_select"),
+		("ticked", "checkbox"),
+		("snap", "photo"),
+		("signed", "signature"),
+		("scanned", "qr_scan"),
+		("spoken", "audio_note"),
+		("who", "employee_select"),
+		("which", "asset_select"),
+	)
+
+	def setUp(self):
+		super().setUp()
+		self.a_mixed_wizard()
+
+	def a_mixed_wizard(self, key="mixed_types", field_overrides=None, **overrides):
+		"""A spec carrying every field type the doctype offers, on a real route.
+
+		`create_accident_report` is a published method, so `submit_endpoint`
+		resolves and `unrenderableReason` has only the shape left to complain
+		about — which is the thing under test.
+		"""
+		doc = frappe.new_doc("Wizard Definition")
+		doc.wizard_key = key
+		doc.__newname = key
+		doc.title_en = "Mixed Types"
+		doc.title_es = "Tipos Mezclados"
+		doc.enabled = 1
+		doc.submit_method = overrides.get("submit_method", "create_accident_report")
+		step = doc.append(
+			"steps",
+			{
+				"step_key": "everything",
+				"title_en": "Everything",
+				"title_es": "Todo",
+				"description_en": "One of each.",
+				"description_es": "Uno de cada uno.",
+			},
+		)
+		for fieldname, field_type in self.MIXED:
+			row = {
+				"fieldname": fieldname,
+				"field_type": field_type,
+				"label_en": fieldname.title(),
+				"label_es": f"{fieldname.title()} ES",
+			}
+			if field_type == "select":
+				row["options"] = json.dumps(
+					[
+						{"value": "Pass", "label_en": "Pass", "label_es": "Aprobó"},
+						{"value": "Fail", "label_en": "Fail", "label_es": "Falló"},
+					]
+				)
+			# The conditional logic the handset has no evaluator for.
+			row["visible_if"] = json.dumps({"field": "choice", "equals": "Fail"})
+			row.update((field_overrides or {}).get(fieldname, {}))
+			step.append("fields", row)
+		for attribute, value in overrides.items():
+			setattr(doc, attribute, value)
+		doc.insert()
+		return doc
+
+	def a_spec(self, wizard="mixed_types"):
+		self.be()
+		return mobile_api.get_wizard_definition(wizard=wizard)
+
+	def fields_by_name(self, spec):
+		return {field["key"]: field for step in spec["steps"] for field in step["fields"]}
+
+	# ── the shape ───────────────────────────────────────────────────────────
+	def test_a_server_authored_spec_is_renderable_at_all(self):
+		"""The whole bug in one assertion: before the translation this decoded
+		to `nothingToFill`, which is what an empty record decodes to, so the
+		screen blamed whoever authored the form."""
+		definition = decode_wizard_definition(self.a_spec())
+		self.assertIsNone(definition["unrenderable_reason"])
+		self.assertEqual(definition["name"], "mixed_types")
+		self.assertEqual(definition["title_en"], "Mixed Types")
+		self.assertEqual(len(definition["steps"]), 1)
+		self.assertEqual(len(definition["steps"][0]["fields"]), len(self.MIXED))
+
+	def test_the_keys_the_server_already_answered_are_still_there(self):
+		"""The translation is ADDITIVE. `wizard_key` is what
+		`_with_submit_endpoint` reads to name a wizard in its refusal, and the
+		MCP tool answers the same spec to a client with no handset."""
+		spec = self.a_spec()
+		self.assertEqual(spec["wizard_key"], spec["name"])
+		self.assertEqual(spec["steps"][0]["step_key"], spec["steps"][0]["key"])
+		self.assertEqual(self.fields_by_name(spec)["plain"]["fieldname"], "plain")
+
+	def test_every_seeded_wizard_decodes_as_renderable_too(self):
+		"""The five shipped specs, through the same decoder. A translation that
+		only worked on the fixture in this file would be worth nothing."""
+		from erpnext_mcp.tools import wizards as wizard_tools
+
+		wizard_tools.install_wizard_definitions()
+		self.be()
+		for row in mobile_api.list_wizard_definitions()["wizards"]:
+			with self.subTest(wizard=row["wizard_key"]):
+				definition = decode_wizard_definition(
+					mobile_api.get_wizard_definition(wizard=row["wizard_key"])
+				)
+				self.assertIsNone(definition["unrenderable_reason"])
+				self.assertTrue(definition["title_en"])
+
+	# ── the language ────────────────────────────────────────────────────────
+	def test_the_resolved_string_reaches_both_language_slots(self):
+		"""THE SERVER PICKED THE LANGUAGE ALREADY — there is one string to send
+		and the app reads two keys. Sending only `title_en` shows a handset set
+		to Spanish an empty label, because `WizardLabel.pick` prefers `_es` and
+		the fallback only fires when it is missing."""
+		spec = self.a_spec(wizard="mixed_types")
+		self.assertEqual(spec["title_en"], "Mixed Types")
+		self.assertEqual(spec["title_es"], "Mixed Types")
+		step = spec["steps"][0]
+		self.assertEqual(step["title_en"], "Everything")
+		self.assertEqual(step["title_es"], "Everything")
+		self.assertEqual(step["help_en"], "One of each.")
+		self.assertEqual(step["help_es"], "One of each.")
+
+	def test_a_spanish_reader_gets_spanish_in_both_slots(self):
+		"""The same call with the language resolved the other way. Neither slot
+		is hardcoded to a language — both carry whatever the server picked."""
+		spec = self.a_spec()
+		spanish = mobile_api.get_wizard_definition(wizard="mixed_types", language="es")
+		self.assertEqual(spanish["title_en"], "Tipos Mezclados")
+		self.assertEqual(spanish["title_es"], "Tipos Mezclados")
+		self.assertEqual(spanish["steps"][0]["help_en"], "Uno de cada uno.")
+		self.assertNotEqual(spanish["title_en"], spec["title_en"])
+
+	def test_a_field_label_reaches_both_slots(self):
+		field = self.fields_by_name(self.a_spec())["plain"]
+		self.assertEqual(field["label_en"], "Plain")
+		self.assertEqual(field["label_es"], "Plain")
+
+	# ── the field types ─────────────────────────────────────────────────────
+	def test_the_ten_types_an_ios_control_collects_are_translated(self):
+		fields = self.fields_by_name(self.a_spec())
+		for fieldname, expected in (
+			("plain", "text"),
+			("story", "text"),
+			("count", "number"),
+			("day", "date"),
+			("moment", "date"),
+			("choice", "select"),
+			("ticked", "select"),
+			("snap", "photo"),
+			("signed", "signature"),
+			("scanned", "qr"),
+			("spoken", "text"),
+		):
+			with self.subTest(field=fieldname):
+				self.assertEqual(fields[fieldname]["type"], expected)
+
+	def test_the_three_types_no_ios_control_collects_are_left_to_be_refused(self):
+		"""A roster pick, an asset pick and several-of-many. Mapped to `select`
+		they would draw an EMPTY picker — no options travel with any of them —
+		and a required one would strand somebody on the step with no way to
+		answer and no sentence saying why. Left alone, the app draws its "needs
+		a newer app" row and `missingRequired` blocks the submit."""
+		fields = self.fields_by_name(self.a_spec())
+		definition = decode_wizard_definition(self.a_spec())
+		decoded = {field["key"]: field for field in definition["steps"][0]["fields"]}
+		for fieldname in ("who", "which", "several"):
+			with self.subTest(field=fieldname):
+				self.assertNotIn(fields[fieldname]["type"], IOS_FIELD_TYPES)
+				self.assertEqual(decoded[fieldname]["type"], "unsupported")
+
+	def test_every_type_the_doctype_offers_is_accounted_for(self):
+		"""The list this class mixes IS the doctype's Select options. A
+		fifteenth type added to Wizard Field and not translated here fails at
+		this line rather than on a phone."""
+		meta = frappe.get_meta("Wizard Field")
+		offered = {
+			option.strip()
+			for option in (meta.get_field("field_type").options or "").split("\n")
+			if option.strip()
+		}
+		self.assertEqual(offered, {field_type for _, field_type in self.MIXED})
+
+	def test_a_type_this_table_has_never_heard_of_is_refused_rather_than_guessed(self):
+		"""A FIELD WITH NO TYPE AND A FIELD WITH AN UNKNOWN TYPE ARE DIFFERENT
+		FACTS. `describe()` already defaults an EMPTY type to `text`, which is
+		right — a record somebody left blank is most likely a text box. A type
+		this server does not recognise is the opposite: a `geo` added to the
+		doctype after this build shipped is the case `WizardFieldType.unsupported`
+		was written for, and drawing it as a text box asks a worker to TYPE a
+		location and posts the sentence they typed where coordinates belong.
+		Nobody finds out; the record just has the wrong thing in it."""
+		self.a_mixed_wizard(key="odd_one", field_overrides={"plain": {"field_type": "geo"}})
+		spec = self.a_spec(wizard="odd_one")
+		self.assertEqual(self.fields_by_name(spec)["plain"]["type"], "geo")
+		decoded = decode_wizard_definition(spec)["steps"][0]["fields"]
+		self.assertEqual(next(f for f in decoded if f["key"] == "plain")["type"], "unsupported")
+
+	def test_a_field_with_no_type_at_all_is_still_a_text_box(self):
+		"""The other half, and the one where guessing IS right. `describe()`
+		makes the call before this translation sees it; asserted here because
+		the two halves only make sense read together."""
+		self.a_mixed_wizard(key="untyped", field_overrides={"plain": {"field_type": ""}})
+		fields = self.fields_by_name(self.a_spec(wizard="untyped"))
+		self.assertEqual(fields["plain"]["type"], "text")
+
+	def test_the_original_type_travels_beside_the_translated_one(self):
+		"""So a spec can be debugged against the record without reading this
+		table, and so a later build that grows a roster picker can find the
+		fields it should be drawing."""
+		fields = self.fields_by_name(self.a_spec())
+		self.assertEqual(fields["story"]["server_field_type"], "long_text")
+		self.assertEqual(fields["who"]["server_field_type"], "employee_select")
+
+	# ── options ─────────────────────────────────────────────────────────────
+	def test_a_select_carries_its_choices_in_the_shape_the_app_decodes(self):
+		definition = decode_wizard_definition(self.a_spec())
+		choice = next(
+			field for field in definition["steps"][0]["fields"] if field["key"] == "choice"
+		)
+		self.assertEqual(
+			[(option["value"], option["label_en"]) for option in choice["options"]],
+			[("Pass", "Pass"), ("Fail", "Fail")],
+		)
+
+	def test_a_checkbox_becomes_a_two_choice_picker_the_endpoint_can_read(self):
+		"""THE VALUES ARE `1` AND `0`, NOT `Yes` AND `No`. The answer is posted
+		straight through to a method that reads it with `cint`, and `Yes` reads
+		as zero there — a tick that files as unticked is worse than a field the
+		app refuses to draw."""
+		fields = self.fields_by_name(self.a_spec())
+		self.assertEqual(fields["ticked"]["type"], "select")
+		self.assertEqual(
+			[(option["value"], option["label_en"]) for option in fields["ticked"]["options"]],
+			[("1", "Yes"), ("0", "No")],
+		)
+
+	def test_a_field_with_no_choices_carries_an_empty_list_not_a_missing_key(self):
+		fields = self.fields_by_name(self.a_spec())
+		self.assertEqual(fields["plain"]["options"], [])
+
+	# ── what is deliberately withheld ───────────────────────────────────────
+	def test_the_conditional_logic_is_stripped_from_every_level(self):
+		"""iOS HAS NO EVALUATOR AND IS NOT BEING SENT A RULE. Every field in the
+		fixture carries a `visible_if`; none of it reaches the wire, so a later
+		build cannot half-implement it against a spec nobody validated."""
+		spec = self.a_spec()
+		self.assertNotIn("visible_if", json.dumps(spec))
+
+	def test_the_key_is_what_the_answer_is_posted_under(self):
+		"""`target_field` is what Wizard Field carries for the case where the
+		question's name and the column it lands in differ, and `key` is what the
+		app posts under. A wizard that set one and got its answers keyed by the
+		other files every record with the field it cares about empty."""
+		self.a_mixed_wizard(
+			key="retargeted", field_overrides={"plain": {"target_field": "description"}}
+		)
+		fields = self.fields_by_name(self.a_spec(wizard="retargeted"))
+		self.assertIn("description", fields)
+		self.assertEqual(fields["description"]["fieldname"], "plain")
+
+	# ── and the endpoint is still resolved after all of it ──────────────────
+	def test_the_submit_endpoint_survives_the_translation(self):
+		"""`_with_submit_endpoint` runs AFTER the reshape and reads `wizard_key`
+		and `submit_method` off it — both of which the reshape leaves alone."""
+		spec = self.a_spec()
+		self.assertEqual(spec["submit_endpoint"], "farmops/api/mobile/create_accident_report")
+		self.assertEqual(spec["submit_context"], {})
+		self.assertIsNone(decode_wizard_definition(spec)["unrenderable_reason"])
+
+	def test_a_reshaped_spec_with_no_route_is_still_blanked_and_explained(self):
+		"""The two refusals stay distinguishable: this one is `noSubmitRoute`,
+		not `nothingToFill`, so the screen sends somebody to the office rather
+		than to whoever wrote the form."""
+		self.a_mixed_wizard(key="unrouted", submit_method="no_such_tool")
+		definition = decode_wizard_definition(self.a_spec(wizard="unrouted"))
+		self.assertEqual(definition["unrenderable_reason"], "noSubmitRoute")
+		self.assertEqual(definition["submit_endpoint"], "")
+		self.assertIn("does not publish", definition["submit_unavailable"])
+
+	def test_the_mcp_tool_still_answers_the_servers_own_shape(self):
+		"""THE RESHAPE IS THE SIDECAR'S, and an MCP client has no handset. If
+		this starts failing, the translation has leaked out of `api/mobile.py`
+		and into the tool every other caller reads."""
+		from erpnext_mcp.tools import wizards as wizard_tools
+
+		data = wizard_tools.get_wizard_definition({"wizard": "mixed_types"}).data
+		self.assertNotIn("name", data)
+		self.assertNotIn("title_en", data)
+		self.assertEqual(data["wizard_key"], "mixed_types")
+		self.assertEqual(data["steps"][0]["fields"][0]["type"], "text")
+		self.assertEqual(data["steps"][0]["fields"][1]["type"], "long_text")
+		self.assertIsNotNone(data["steps"][0]["fields"][0]["visible_if"])
