@@ -1308,8 +1308,23 @@ def _write_state_change(row: dict, asset_type: str, action: str, from_state: str
 
     meter = {} if cascaded_from else engine_hours.apply_reading(row, asset_type, action, args)
 
+    # ONE TIMESTAMP FOR BOTH WRITES, read once. The register's `last_state_change`
+    # says when the state it is showing was reached and the log row says the same
+    # thing about the same event; two calls to `now()` would put them a fraction
+    # apart, and a screen that reconciles the cached column against the log it
+    # caches would report a valve whose register disagrees with its own history.
+    stamp = frappe.utils.now()
+
     doc = frappe.get_doc(ASSET_REGISTER, row["name"])
     doc.current_state = json.dumps({"state": to_state})
+    # A CACHE OF THE LOG, NOT A SECOND ACCOUNT OF IT — the same relationship
+    # `current_state` beside it has, and the same one `engine_hours` describes at
+    # length for the hour meter. Runtime is still summed from the Asset State Log;
+    # this column exists so a list of forty valves can say "open since 06:12"
+    # without forty queries behind a screen a worker is waiting on. Written only
+    # where the site has migrated the column.
+    if compat.has_field(ASSET_REGISTER, "last_state_change"):
+        doc.last_state_change = stamp
     doc.save(ignore_permissions=True)
 
     log = frappe.new_doc(ASSET_STATE_LOG)
@@ -1321,7 +1336,7 @@ def _write_state_change(row: dict, asset_type: str, action: str, from_state: str
     log.performed_by = as_str(args, "performed_by") or (
         frappe.session.user if hasattr(frappe, "session") else None
     )
-    log.performed_at = frappe.utils.now()
+    log.performed_at = stamp
 
     notes = as_str(args, "notes")
     if cascaded_from:

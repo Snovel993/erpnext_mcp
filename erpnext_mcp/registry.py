@@ -129,6 +129,7 @@ from .tools import (
 	training,
 	universal_scan,
 	uploads,
+	valves,
 	visits,
 	w4,
 	wagedefaults,
@@ -17521,6 +17522,251 @@ TOOLS = {
 		},
 		required=("asset",),
 		title="Get irrigation runtime",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	# ── the QR valve workflow ──────────────────────────────────────────────
+	#
+	# NO NEW REGISTER. A valve has been an Asset Register row of type
+	# "Irrigation Valve" since v0.25.0, with a QR label whose payload is its
+	# docname, a parent in the `location` tree, a state machine, a closing
+	# cascade and a state log that `get_irrigation_runtime` above sums into water
+	# minutes. These six tools are the WORKFLOW on top of that register — a
+	# toggle that reads the state so a worker does not have to, a rank that lets
+	# a Main filed under a Lateral be refused, and a scan that answers the three
+	# questions somebody standing at a gate actually asked. See
+	# `tools/valves.py` for why a second table of valves would be a second
+	# account of the same pipe.
+	"create_irrigation_valve": _tool(
+		valves.create_irrigation_valve,
+		"MUTATING (default OFF). Register one valve on an irrigation line. The "
+		"docname IS the printable tag ID — 'MC-Valve-05' on the label and in the "
+		"database are the same string — and the QR the tag carries is derived "
+		"from it.\n\n"
+		"THE PARENT IS THE HIERARCHY AND THE RANK IS NOT. `parent_valve` sets "
+		"the tree the closing cascade walks; `valve_type` (Main, Sub-Main, "
+		"Lateral) is what a worker calls the thing. Both are stated here because "
+		"this is the only moment somebody states both, and they are checked "
+		"against each other: a Main filed underneath a Lateral is refused, "
+		"because the cascade would otherwise honour it and shut a line from the "
+		"wrong end.\n\n"
+		"THE ZONE IS THE ONLY LINK TO A FLOW RATE. Without it "
+		"get_water_usage_report counts this valve's minutes and can price none "
+		"of them, so it is required — but a valve under a parent that already "
+		"has one inherits it, and `zone_source` says which happened.\n\n"
+		"REFUSES: a duplicate tag ID; a parent that is not a valve; a parent "
+		"ranked below its child; a zone that does not exist or belongs to "
+		"another entity.",
+		{
+			"valve_id": _field(
+				_STRING,
+				"The tag ID that will be printed on the label and is the docname, e.g. "
+				"'MC-Valve-05'.",
+			),
+			"zone": _field(
+				_STRING,
+				"The Irrigation Zone this valve draws through. list_irrigation_zones has the "
+				"register. Optional only when parent_valve already names one.",
+			),
+			"valve_type": _field(_STRING, "Main, Sub-Main or Lateral — the valve's rank on the line."),
+			"parent_valve": _field(
+				_STRING,
+				"The valve upstream of this one, as an Asset Register docname. Empty for a "
+				"valve at the head of its line. This is the tree closing cascades down.",
+			),
+			"company": _field(_STRING, "The company that owns it. Inferred on a single-company site."),
+			"installed_date": _field(
+				_STRING,
+				"YYYY-MM-DD, when it went into the ground. Distinct from acquired_on, which is "
+				"when it was bought.",
+			),
+			"description": _field(_STRING, "What this valve is, in words."),
+			"nfc_uid": _field(_STRING, "The UID of an NFC tag, if one is attached."),
+			"gps_latitude": _field(_NUMBER, "Where it is."),
+			"gps_longitude": _field(_NUMBER, "Where it is."),
+			"serial_number": _field(_STRING, "Manufacturer's serial, if the label carries one."),
+			"model": _field(_STRING, "Make and model."),
+			"acquired_on": _field(_STRING, "YYYY-MM-DD, when it was purchased."),
+		},
+		required=("valve_id", "valve_type"),
+		mutating=True,
+		title="Create an irrigation valve",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"list_irrigation_valves": _tool(
+		valves.list_irrigation_valves,
+		"Every valve, or every valve on one zone, with what each is doing right "
+		"now: its state, its rank, the zone it draws through, its parent and how "
+		"many valves hang off it.\n\n"
+		"A VALVE NOBODY HAS EVER TOGGLED IS CLOSED, not unknown. `current_state` "
+		"is empty until the first state change is logged, and the state machine's "
+		"default is what it means — so the `state` filter is applied to the "
+		"resolved state rather than to the column, and a new install's valves are "
+		"not silently dropped from `state='closed'`.",
+		{
+			"zone": _field(_STRING, "Narrow to one Irrigation Zone."),
+			"state": _field(
+				_STRING,
+				"Narrow to one state: open, closed or winterized. Resolved per valve, so "
+				"valves never toggled count as closed.",
+			),
+			"valve_type": _field(_STRING, "Narrow to Main, Sub-Main or Lateral."),
+			"parent_valve": _field(_STRING, "Narrow to the valves hanging directly off this one."),
+			"include_retired": _field(_BOOLEAN, "Include retired valves. Default false."),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"limit": _LIMIT,
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored "
+				"spelling and gains a `*_local` twin rendered in this zone.",
+			),
+		},
+		title="List irrigation valves",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"get_irrigation_valve": _tool(
+		valves.get_irrigation_valve,
+		"One valve in full: its state, the zone it draws through with that "
+		"zone's flow rate, the chain of valves above it, the valves below it and "
+		"which of those are open, today's runtime for the valve and for "
+		"everything it commands, and what one press of the toggle would do.\n\n"
+		"`runtime_today` CARRIES TWO FIGURES ON PURPOSE. `minutes` is this valve; "
+		"`subtree_minutes` is this valve and everything below it, which is what "
+		"shutting it would stop. A main with four laterals running under it has "
+		"not itself been open four times as long.",
+		{
+			"name": _field(_STRING, "The valve's Asset Register docname, e.g. 'MC-Valve-05'."),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored "
+				"spelling and gains a `*_local` twin rendered in this zone.",
+			),
+		},
+		required=("name",),
+		title="Get an irrigation valve",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"toggle_irrigation_valve": _tool(
+		valves.toggle_irrigation_valve,
+		"MUTATING (default OFF). Open a closed valve, close an open one. The "
+		"state is read here so the caller does not have to know it — which is "
+		"what makes a scanned QR resolve to a button rather than to a menu.\n\n"
+		"CLOSING CARRIES DOWN THE LINE AND OPENING DOES NOT. Shutting a main "
+		"stops the water below it for certain, so every valve beneath it is "
+		"closed too and each gets a real log row naming the main "
+		"(`cascaded_from`); the full list comes back in `cascaded`, and every "
+		"descendant NOT closed comes back in `cascade_skipped` with the reason. "
+		"Opening a main only makes water available to what is below, each of "
+		"which is opened on its own account — an opening cascade would mark every "
+		"lateral as running, and those events are what get_water_usage_report "
+		"prices into gallons. A child closes without touching its parent.\n\n"
+		"REFUSES: a winterized valve (un-winterizing a line mid-season is a "
+		"deliberate act, not one a toggle makes — send `reopen` through "
+		"log_asset_state_change); a retired valve; and an `expect_state` that no "
+		"longer matches, for a screen drawn before somebody else moved it.",
+		{
+			"name": _field(_STRING, "The valve's Asset Register docname."),
+			"expect_state": _field(
+				_STRING,
+				"Optional. The state the caller believed it was in — 'open' or 'closed'. "
+				"Refused if it has changed since, rather than toggled the wrong way.",
+			),
+			"notes": _field(_STRING, "What the worker wants on the record."),
+			"performed_by": _field(_STRING, "Who did it. Defaults to the calling user."),
+			"photo_file_token": _field(_STRING, "A File docname to attach as evidence."),
+			"gps_lat": _field(_NUMBER, "Latitude of whoever was standing at the valve."),
+			"gps_lon": _field(_NUMBER, "Longitude of whoever was standing at the valve."),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Display only: nothing stored moves.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		title="Toggle an irrigation valve",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"get_valve_runtime": _tool(
+		valves.get_valve_runtime,
+		"Hours one valve ran over a date window, with its whole zone's total "
+		"beside it so the two can be read against each other.\n\n"
+		"THE MEASUREMENT IS get_irrigation_runtime'S, NOT A SECOND ONE — same "
+		"pairing of open to close, same handling of a run that started before "
+		"the window, ended after it, or has not ended at all. The valve figure "
+		"covers the valve and everything below it; `zone_rollup` covers every "
+		"valve the zone links, priced at the zone's own flow rate where it has "
+		"one.\n\n"
+		"`date_from`/`date_to` and `from_date`/`to_date` are the same two "
+		"arguments under both spellings.",
+		{
+			"name": _field(_STRING, "The valve's Asset Register docname."),
+			"date_from": _field(_STRING, "Start of the window, YYYY-MM-DD. Default 30 days before date_to."),
+			"date_to": _field(
+				_STRING,
+				"End of the window, YYYY-MM-DD, inclusive of the whole day. Default today.",
+			),
+			"include_zone": _field(
+				_BOOLEAN,
+				"Compute the zone rollup beside the valve's own figure. Default true; false "
+				"where only the one valve is wanted.",
+			),
+			"flow_rate_gpm": _field(
+				_NUMBER,
+				"Optional. Gallons per minute for the valve's own figure, stated outright.",
+			),
+			"company": _field(_STRING, "Company. Inferred on a single-company site."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Display only: no total changes.",
+			),
+		},
+		required=("name",),
+		title="Get valve runtime",
+		available=_needs_doctype("Asset Register", "Asset State Log"),
+		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
+	),
+	"scan_valve_qr": _tool(
+		valves.scan_valve_qr,
+		"MUTATING (default OFF). Resolve a scanned valve QR and answer with the "
+		"whole screen: current state, today's runtime, the zone and its flow "
+		"rate, the line above and below, and what one press of the toggle would "
+		"do.\n\n"
+		"THE STRING A CAMERA PRODUCES IS A URL. A printed tag encodes "
+		"`<site>/scan/<docname>`, which is unwound here by the same parser "
+		"universal_scan uses; a bare valve ID typed into a manual-entry box "
+		"passes through untouched, so both are the same call.\n\n"
+		"WHAT IS WRITTEN IS THE SCAN STAMP AND NOTHING ELSE — last_scan_at, "
+		"last_scan_by and, where a fix was sent, the valve's GPS position. THE "
+		"VALVE IS NOT TOGGLED: scanning a tag is looking at a thing, and opening "
+		"water onto a block is a decision that cascades. `next_action` is the "
+		"button; toggle_irrigation_valve is what it posts to.\n\n"
+		"A tag that is not a valve is refused BY NAMING WHAT IT IS, so a worker "
+		"who scanned a tractor learns which screen they wanted. A credential QR "
+		"is refused before any register is read and is never quoted back.",
+		{
+			"qr_data": _field(
+				_STRING,
+				"The raw string the scanner read — the tag's full URL, or the bare valve ID "
+				"from a manual-entry box.",
+			),
+			"scanned_by": _field(_STRING, "Who scanned it. Defaults to the calling user."),
+			"gps_lat": _field(_NUMBER, "Latitude from the scanner's GPS fix."),
+			"gps_lon": _field(_NUMBER, "Longitude from the scanner's GPS fix."),
+			"company": _field(_STRING, "Company. A tag belonging to another entity is refused."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Display only.",
+			),
+		},
+		required=("qr_data",),
+		mutating=True,
+		title="Scan a valve QR",
 		available=_needs_doctype("Asset Register", "Asset State Log"),
 		requires="the Asset Register and Asset State Log DocTypes — run `bench migrate`",
 	),

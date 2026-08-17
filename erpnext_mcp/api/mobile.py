@@ -122,6 +122,7 @@ from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
 from ..tools import universal_scan as universal_scan_tool
+from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
 from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
@@ -7946,3 +7947,106 @@ def get_shift_crew_timeline(user: str, shift=None, employee=None) -> dict:
 
 	result = shifts.get_shift_crew_timeline(inner)
 	return result.data
+
+
+# ── 102. scan_valve ──────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("scan_valve", mutating=True, limit=guard.WRITE_LIMIT)
+def scan_valve(
+	user: str,
+	qr_data=None,
+	content=None,
+	scan=None,
+	raw=None,
+	code=None,
+	toggle=None,
+	expect_state=None,
+	notes=None,
+	company=None,
+	gps_lat=None,
+	gps_lon=None,
+) -> dict:
+	"""Scan a valve tag and, if asked in the same call, open or shut it.
+
+	SCAN-TO-ACTION IN ONE POST, WITH THE ACTION OPT-IN. A worker walks up to a
+	gate, points the camera at it and wants two things: to know what it is doing,
+	and to change it. Those are two calls on this transport today —
+	`universal_scan` then `log_asset_state_change` — and the second needs an
+	action name the first does not hand over, because `log_asset_state_change`
+	wants `close_valve` and the phone has to work out that the valve was open to
+	know that. So this route resolves the tag, reads the state, and picks the
+	action itself.
+
+	`toggle` DEFAULTS TO FALSE AND THAT IS THE WHOLE SAFETY OF IT. A scan is
+	looking at a thing; opening water onto a block is a decision, and closing a
+	main is a decision that dries out every valve beneath it. A camera that
+	fires on recognition would otherwise water a block because somebody walked
+	past it with a phone. The answer's `next_action` is the button, and posting
+	again with `toggle: true` is what pressing it does.
+
+	`expect_state` IS FOR THE SCREEN THAT WAS DRAWN A MINUTE AGO. Pass the state
+	the phone last showed and a valve somebody else has since moved is refused
+	rather than toggled the wrong way round — on a valve that is the difference
+	between watering a block and drying it out. It is optional because the
+	scan-and-toggle-in-one-gesture flow has no stale reading to guard against:
+	the state it acts on is the one it just read.
+
+	THE COMPANY IS THE CALLER'S. Taken from the scope check rather than the body,
+	so a valve tag belonging to another entity resolves as though it were not
+	there — the same answer `universal_scan` gives a tag from another site, and
+	the reason a scan cannot be used to enumerate the register next door.
+
+	WHAT IS WRITTEN WITHOUT `toggle`: the scan stamp only — `last_scan_at`,
+	`last_scan_by` and, where the handset sent a fix, the valve's GPS position.
+	The route is declared mutating because of exactly that stamp, and metered at
+	`WRITE_LIMIT` rather than `universal_scan`'s read limit because the branch
+	that matters here is the one that opens water.
+	"""
+	allowed = guard.require_scope(user)
+	scanned = str(qr_data or content or scan or raw or code or "").strip()
+	if not scanned:
+		frappe.throw(
+			"qr_data is required — the string the scanner read. It may be the tag's full URL "
+			"or the bare valve ID from the manual-entry box.",
+			frappe.ValidationError,
+		)
+
+	scoped = _company(user, company, allowed)
+	inner = {"qr_data": scanned, "scanned_by": user, "company": scoped}
+	if gps_lat is not None:
+		inner["gps_lat"] = gps_lat
+	if gps_lon is not None:
+		inner["gps_lon"] = gps_lon
+
+	data = dict(valve_tools.scan_valve_qr(inner).data)
+
+	# A REFUSED TOGGLE TAKES THE SCAN STAMP DOWN WITH IT, and that is the
+	# framework's transaction rather than a choice made here: a `ValidationError`
+	# out of the toggle rolls the request back, `last_scan_at` included. What
+	# survives is the AUDIT row — `guard.endpoint` commits its failure rows on
+	# their own transaction precisely so a refusal cannot erase the evidence of
+	# itself — so "somebody stood at this gate and was refused" is recorded in
+	# MCP Action Log even though the valve's own scan column reads as though the
+	# call never happened. Do not read `last_scan_at` as a record of attempts; it
+	# is a record of completed scans.
+	data["toggled"] = False
+	if not frappe.utils.cint(toggle):
+		return data
+
+	change = {"name": data["name"], "performed_by": user, "company": scoped}
+	if expect_state is not None:
+		change["expect_state"] = str(expect_state)
+	if notes is not None:
+		change["notes"] = str(notes)
+	if gps_lat is not None:
+		change["gps_lat"] = gps_lat
+	if gps_lon is not None:
+		change["gps_lon"] = gps_lon
+
+	toggled = dict(valve_tools.toggle_irrigation_valve(change).data)
+	toggled["scanned"] = data["scanned"]
+	toggled["resolved_from"] = data["resolved_from"]
+	toggled["entity_type"] = data["entity_type"]
+	toggled["scan_recorded"] = True
+	toggled["toggled"] = True
+	return toggled

@@ -806,7 +806,14 @@
   "allow_update_reporting_template",
   "allow_create_disclosure_checklist",
   "allow_update_disclosure_checklist",
-  "allow_complete_disclosure_item"
+  "allow_complete_disclosure_item",
+  "irrigation_valve_section",
+  "allow_list_irrigation_valves",
+  "allow_get_irrigation_valve",
+  "allow_get_valve_runtime",
+  "allow_create_irrigation_valve",
+  "allow_toggle_irrigation_valve",
+  "allow_scan_valve_qr"
  ],
  "fields": [
   {
@@ -6129,6 +6136,55 @@
    "fieldname": "allow_complete_disclosure_item",
    "fieldtype": "Check",
    "label": "Complete Disclosure Item"
+  },
+  {
+   "collapsible": 1,
+   "description": "The QR valve workflow: scan a tag, see the state and today's runtime, toggle it. No register of its own — a valve is an Asset Register row of type \"Irrigation Valve\", so these switches gate the workflow and the asset tag switches still gate the register underneath it.",
+   "fieldname": "irrigation_valve_section",
+   "fieldtype": "Section Break",
+   "label": "Irrigation Valve Workflow"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every valve, or every valve on one zone, with its state, rank, zone, parent and child count. A valve never toggled resolves as closed rather than unknown.",
+   "fieldname": "allow_list_irrigation_valves",
+   "fieldtype": "Check",
+   "label": "List Irrigation Valves"
+  },
+  {
+   "default": "1",
+   "description": "READ. One valve in full: state, zone and its flow rate, the chain of valves above it, the valves below and which are open, today's runtime for the valve and for everything it commands, and what one press of the toggle would do.",
+   "fieldname": "allow_get_irrigation_valve",
+   "fieldtype": "Check",
+   "label": "Get Irrigation Valve"
+  },
+  {
+   "default": "1",
+   "description": "READ. Hours one valve ran over a date window with its whole zone's total beside it. The same measurement Get Irrigation Runtime makes, scoped to a valve and its zone.",
+   "fieldname": "allow_get_valve_runtime",
+   "fieldtype": "Check",
+   "label": "Get Valve Runtime"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register one valve on a line: tag ID, rank (Main, Sub-Main, Lateral), the zone it draws through and the valve upstream of it. Refuses a Main filed underneath a Lateral, which the closing cascade would otherwise honour.",
+   "fieldname": "allow_create_irrigation_valve",
+   "fieldtype": "Check",
+   "label": "Create Irrigation Valve"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Open a closed valve, close an open one, reading the state so the caller does not have to. CLOSING CARRIES DOWN THE LINE — every valve below is closed too and each gets its own log row. Opening does not cascade. Refuses a winterized or retired valve.",
+   "fieldname": "allow_toggle_irrigation_valve",
+   "fieldtype": "Check",
+   "label": "Toggle Irrigation Valve"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Resolve a scanned valve QR and answer with the whole valve screen. It writes the scan stamp only — last_scan_at, last_scan_by and the GPS fix, the same stamp Scan Asset leaves. It does NOT toggle the valve.",
+   "fieldname": "allow_scan_valve_qr",
+   "fieldtype": "Check",
+   "label": "Scan Valve QR"
   }
  ],
  "index_web_pages_for_search": 0,

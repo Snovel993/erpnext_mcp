@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 636 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 642 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 308 read tools are **on** by default and can be switched off individually. A
+All 311 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -13391,6 +13391,124 @@ valve log.
 `get_irrigation_runtime` is deliberately untouched: its arguments mean exactly
 what they meant, because a report somebody has been running all season must not
 change its answer on an upgrade.
+
+## The QR valve workflow
+
+Six tools for the thing a person actually does with a valve: walk up to it, scan
+the sticker, see what it is doing, press one button.
+
+**There is no `Irrigation Valve` doctype and there is not going to be one.** A
+valve has been an `Asset Register` row of type `Irrigation Valve` since v0.25.0,
+with a QR label whose payload is its docname, a parent in the `location` tree, a
+state machine, a closing cascade, and an `Asset State Log` that
+`get_irrigation_runtime` sums into water minutes. A second table of valves would
+be a second account of the same pipe — two rows for one gate, two states that
+disagree the first time somebody corrects one, and two answers to "how long did
+zone 3 run" of which the wrong one is whichever a water district happened to
+read. These six are the *workflow* on top of the register that is already there.
+
+Two columns are new on `Asset Register`: `valve_type` (Main, Sub-Main, Lateral)
+and `installed_date`. A third, `last_state_change`, is a **cache of the log**
+stamped in the same save that moves `current_state`, from the same timestamp the
+log row carries — so a list of forty valves can say "open since 06:12" without
+forty queries. Runtime is still summed from the log and never from the cache.
+
+### `create_irrigation_valve` — MUTATING, default off
+
+`register_asset` with the valve's own three refusals in front of it. The docname
+is the printable tag ID and the QR is derived from it.
+
+**The parent is the hierarchy; the rank is not.** `parent_valve` writes
+`location`, which is the column the closing cascade walks. `valve_type` is what a
+worker calls the thing. They are checked against each other exactly once, here,
+because this is the only moment somebody states both — and a Main filed
+underneath a Lateral is refused, because the cascade would otherwise honour it
+and shut a line from the wrong end. Two laterals in a row are fine; that is real
+plumbing.
+
+**The zone is the only link to a flow rate**, so it is required — but a valve
+under a parent that already has one inherits it, and `zone_source` says which
+happened. Inheriting from anywhere else would be a guess, and this column is what
+`get_water_usage_report` prices gallons with.
+
+### `list_irrigation_valves`, `get_irrigation_valve`
+
+**A valve nobody has ever toggled is closed, not unknown.** `current_state` is
+empty until the first change is logged and the machine's default is what that
+means, so the `state` filter is applied to the *resolved* state rather than to
+the column — a SQL filter would drop every valve on a new install from
+`state=closed`.
+
+`get_irrigation_valve` returns the zone with its flow rate, the chain of valves
+above (what would have to be shut to dry this out), the valves below and which
+of them are open, and `runtime_today` — which carries **two** figures on purpose:
+`minutes` for this valve and `subtree_minutes` for everything it commands. A main
+with four laterals running under it has not itself been open four times as long.
+
+### `toggle_irrigation_valve` — MUTATING, default off
+
+Opens a closed valve, closes an open one. The state is read here so the caller
+does not have to know it, which is the whole reason this exists rather than an
+open/close pair: `log_asset_state_change` wants `close_valve`, and a phone that
+has just read a QR cannot know the gate was open. That is what makes a scan
+resolve to a *button* rather than to a menu.
+
+**Closing carries down the line and opening does not.** Shutting a main stops the
+water below it for certain, so every valve beneath is closed too and each gets a
+real log row naming the main in `cascaded_from`; `cascaded` lists them and
+`cascade_skipped` names every descendant that was *not* closed, with the reason.
+Opening a main only makes water *available* to what is below, each of which is
+opened on its own account — an opening cascade would mark every lateral as
+running, and those events are exactly what `get_water_usage_report` prices into
+gallons. A child closes without touching its parent. See
+`asset_tags._CASCADING_ACTIONS` for the argument in full.
+
+Refuses a winterized valve (send `reopen` through `log_asset_state_change` —
+un-winterizing a line mid-season is a deliberate act), a retired one, and an
+`expect_state` that no longer matches, which is for a screen drawn before
+somebody else moved the gate.
+
+### `get_valve_runtime`
+
+Hours one valve ran over a window with its whole zone's total beside it, so the
+two can be read against each other — a lateral that ran three hours on a zone
+that ran forty is a sentence somebody can act on. Both figures come from
+`irrigation._runs_for`; it is not a second sum. `date_from`/`date_to` and
+`from_date`/`to_date` are the same two arguments under both spellings.
+
+### `scan_valve_qr` — MUTATING, default off
+
+**The string a camera produces is a URL**, not a docname — a printed tag encodes
+`<site>/scan/<docname>`, unwound here by the same parser `universal_scan` uses. A
+bare valve ID typed into a manual-entry box passes through untouched, so both are
+one call. A credential QR is refused before any register is read and is never
+quoted back.
+
+**What is written is the scan stamp and nothing else** — `last_scan_at`,
+`last_scan_by` and the GPS fix. **The valve is not toggled.** Scanning a tag is
+looking at a thing; opening water onto a block is a decision, and closing a main
+is a decision that dries out everything beneath it. `next_action` in the answer
+is the button; `toggle_irrigation_valve` is what it posts to.
+
+A tag that is not a valve is refused **by naming what it is**, so a worker who
+scanned a tractor learns which screen they wanted rather than being sent back to
+a menu with nothing.
+
+### The mobile route
+
+`POST /api/method/erpnext_mcp.api.mobile.scan_valve` is the iOS scan-to-action:
+it resolves the tag, records the scan, and — only when the body sends
+`toggle: true` — opens or shuts the gate in the same POST, picking the action
+from the state the phone cannot know. **`toggle` defaults to false**, which is
+the whole safety of it: a camera that fired on recognition would water a block
+because somebody walked past with a phone. The company comes from the scope
+check and never from the body, so a tag belonging to another entity resolves as
+though it were not there.
+
+A refused toggle rolls the scan stamp back with it — that is the framework's
+transaction, not a choice — but the audit row survives, because `guard.endpoint`
+commits its failure rows apart from the request. `last_scan_at` records completed
+scans, not attempts.
 
 ### `get_asset_status_report`, and what a scan returns now
 

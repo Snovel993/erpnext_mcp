@@ -825,9 +825,9 @@ class ToolRegistration(unittest.TestCase):
 		# per machine, engine hours, a service schedule, a water usage roll-up,
 		# and the four restricted-entry tools. See `test_protocol.Catalogue`,
 		# which carries the long version of the same three numbers.
-		self.assertEqual(len(self.registry.TOOLS), 636)
-		self.assertEqual(len(self.registry.READ_TOOLS), 308)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 328)
+		self.assertEqual(len(self.registry.TOOLS), 642)
+		self.assertEqual(len(self.registry.READ_TOOLS), 311)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 331)
 
 
 if __name__ == "__main__":

@@ -288,6 +288,17 @@ ROUTES = (
 	Route("/mobile", mobile_api.log_shift_location),
 	Route("/mobile", mobile_api.get_shift_track),
 	Route("/mobile", mobile_api.get_shift_crew_timeline),
+	# The QR valve workflow's one route: scan the tag, and — only when the body
+	# sends `toggle: true` — open or shut the gate in the same POST, with the
+	# action chosen from the state the phone cannot know.
+	#
+	# THE ARGUMENT FILTER IS WHY THE TOGGLE IS SAFE TO PUT ON THIS TABLE. `bind`
+	# keeps only the keys the signature declares, and `scan_valve` declares
+	# neither an action name nor a target state — so a body cannot ask for
+	# `close_valve` on a valve that is shut, or reach past the toggle into
+	# `log_asset_state_change`'s vocabulary. What it can ask for is one press of
+	# the button the previous answer offered.
+	Route("/mobile", mobile_api.scan_valve),
 	# v0.62.0. THE SEVEN `MobileAPI.swift` NAMES AND THIS TABLE DID NOT CARRY.
 	# Audited against v0.61.0 on 2026-08-12; see the block comment in
 	# `api/mobile.py` that opens this set for the argument each one settles.

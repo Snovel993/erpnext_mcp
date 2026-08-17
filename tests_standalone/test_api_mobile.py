@@ -473,6 +473,16 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"log_shift_location",
 		"get_shift_track",
 		"get_shift_crew_timeline",
+		# The QR valve workflow's one route. Scan-to-action: it resolves a valve
+		# tag, records the scan, and — only when the body asks for it — opens or
+		# shuts the gate in the same POST, picking the action from the state the
+		# phone cannot know. `toggle` defaults to false, which is the whole safety
+		# of it: a camera that fired on recognition would water a block because
+		# somebody walked past with a phone.
+		#
+		# HERE RATHER THAN IN `MOBILE` because `MobileAPI.swift` does not name it
+		# yet, which is this set's rule. It moves up when the constant lands.
+		"scan_valve",
 	}
 
 	def _whitelisted(self, module):

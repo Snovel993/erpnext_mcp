@@ -31,6 +31,11 @@
   "gps_longitude",
   "state_section",
   "current_state",
+  "last_state_change",
+  "valve_section",
+  "valve_type",
+  "valve_col",
+  "installed_date",
   "service_section",
   "service_interval_hours",
   "service_interval_days",
@@ -201,6 +206,41 @@
    "fieldname": "current_state",
    "fieldtype": "JSON",
    "label": "Current State"
+  },
+  {
+   "description": "When the state above was reached, cached from the Asset State Log row that reached it. A CACHE AND NOT A SECOND ACCOUNT: it is stamped in the same save that moves current_state, from the same timestamp the log row carries, so the two can never name different moments. Runtime is still summed from the log — this column exists so a valve list can say \"open since 06:12\" without one query per valve, which is what a scan screen and a dispatch board both need.",
+   "fieldname": "last_state_change",
+   "fieldtype": "Datetime",
+   "label": "Last State Change",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.asset_type==\"Irrigation Valve\"",
+   "description": "What a valve is on its line, and when it went in. Present on Asset Register rather than on a doctype of its own because a valve IS a tagged asset — it has a QR label, a state machine, a parent and a state log already, and a second table of valves would be a second account of the same pipe.",
+   "fieldname": "valve_section",
+   "fieldtype": "Section Break",
+   "label": "Irrigation Valve"
+  },
+  {
+   "depends_on": "eval:doc.asset_type==\"Irrigation Valve\"",
+   "description": "Where this valve sits on the line: a Main at the turnout, a Sub-Main off it, a Lateral at the row. RANK, NOT HIERARCHY — the hierarchy is the location link above, which is what the closing cascade actually walks. This says what kind of thing a worker is standing at, and lets create_irrigation_valve refuse a Main filed underneath a Lateral, which is a data entry error the cascade would otherwise honour.",
+   "fieldname": "valve_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Valve Type",
+   "options": "\nMain\nSub-Main\nLateral"
+  },
+  {
+   "depends_on": "eval:doc.asset_type==\"Irrigation Valve\"",
+   "fieldname": "valve_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.asset_type==\"Irrigation Valve\"",
+   "description": "When this valve went into the ground. Separate from acquired_on, which is when it was bought — a valve sitting in the shed for a season has one date and not the other, and a line's age is what a replacement schedule is written from.",
+   "fieldname": "installed_date",
+   "fieldtype": "Date",
+   "label": "Installed Date"
   },
   {
    "fieldname": "service_section",

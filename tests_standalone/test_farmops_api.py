@@ -256,6 +256,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/log_shift_location",
 		"/mobile/get_shift_track",
 		"/mobile/get_shift_crew_timeline",
+		# The QR valve workflow. One route: resolve the tag, record the scan, and
+		# open or shut the gate in the same POST only when the body asks for it.
+		# `toggle` defaults to false — a camera that acted on recognition would
+		# water a block because somebody walked past with a phone.
+		"/mobile/scan_valve",
 		# v0.62.0. The seven the handset names and this table did not carry. The
 		# first three reach the same functions as `list_onboarding_reference_data`,
 		# `list_available_housing` and `assign_housing` above; they are separate

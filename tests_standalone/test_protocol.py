@@ -1054,9 +1054,9 @@ class Catalogue(SeededTestCase):
 		restricted-entry answer an operator has to switch on is one a worker
 		does not get.
 		"""
-		self.assertEqual(len(registry.TOOLS), 636)
-		self.assertEqual(len(registry.READ_TOOLS), 308)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 328)
+		self.assertEqual(len(registry.TOOLS), 642)
+		self.assertEqual(len(registry.READ_TOOLS), 311)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 331)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
