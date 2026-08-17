@@ -122,6 +122,7 @@ from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
 from ..tools import payroll as payroll_tools
+from ..tools import payroll_deductions as payroll_deduction_tools
 from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
 from ..tools import stock_inventory as stock_tools
@@ -147,6 +148,7 @@ TRAINING_RECORD = "Employee Training Record"
 REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
 EXPENSE_RECEIPT = "Expense Receipt"
+PAYROLL_DEDUCTION = "Farm Payroll Deduction"
 DOCUMENT_VALIDATION = "Document Validation"
 DISCIPLINE_RECORD = "Discipline Record"
 ACCIDENT_REPORT = "Accident Report"
@@ -9440,3 +9442,247 @@ def update_my_bank_account(
 			inner[key] = value
 
 	return ach_tools.update_employee_bank_account(inner).data
+
+
+# ── 119. list_payroll_deductions ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_payroll_deductions", limit=guard.READ_LIMIT)
+def list_payroll_deductions(
+	user: str,
+	company=None,
+	employee=None,
+	deduction_type=None,
+	deduction_category=None,
+	status=None,
+	reference=None,
+	in_force_on=None,
+	limit=None,
+) -> dict:
+	"""The register of garnishments and voluntary deductions, for this entity.
+
+	WHY A HANDSET NEEDS THIS AT ALL. An office asked "is the support order on
+	file yet" has to answer before the run, not after it, and the person who
+	knows is frequently not at a desk. The alternative this replaces is somebody
+	reading the answer off a Desk session over the phone.
+
+	SCOPED TO THE CALLER'S ENTITIES like every other read here. A support order
+	filed against a worker at one company is not visible to another, even where
+	the same person works for both — which is also how the withholding behaves.
+
+	IT IS A READ OVER PII AND IS RATE LIMITED AS ONE. What a person's wages are
+	garnished for is among the more sensitive facts this app holds; `READ_LIMIT`
+	is a foreman answering a question and is not a register being enumerated.
+	"""
+	allowed = guard.require_scope(user)
+	inner: dict = {"company": _company(user, company, allowed)}
+	if employee:
+		inner["employee"] = _employee_argument(employee, allowed)
+	for key, value in (
+		("deduction_type", deduction_type),
+		("deduction_category", deduction_category),
+		("status", status),
+		("reference", reference),
+		("in_force_on", in_force_on),
+		("limit", limit),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return payroll_deduction_tools.list_payroll_deductions(inner).data
+
+
+# ── 120. get_payroll_deduction ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_payroll_deduction", limit=guard.READ_LIMIT)
+def get_payroll_deduction(user: str, deduction=None) -> dict:
+	"""One deduction in full, with what the payroll engine will make of it.
+
+	The docname is proved to belong to an entity this caller may reach before it
+	is read, so a row belonging to another company reads as not found rather than
+	as refused — the register cannot be mapped by watching which error comes back.
+	"""
+	allowed = guard.require_scope(user)
+	docname = guard.require_scoped_doc(
+		PAYROLL_DEDUCTION, deduction, "deduction", allowed,
+	)
+	return payroll_deduction_tools.get_payroll_deduction({"deduction": docname}).data
+
+
+# ── 121. list_employee_deductions ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_employee_deductions", limit=guard.READ_LIMIT)
+def list_employee_deductions(
+	user: str,
+	employee=None,
+	in_force_on=None,
+	include_inactive=None,
+	gross_pay=None,
+	statutory_withholding=None,
+	pay_frequency=None,
+) -> dict:
+	"""Everything standing against one worker's pay, in the order it comes out.
+
+	THE CALL AN ONBOARDING OR A PAYROLL QUESTION ACTUALLY MAKES. Sorted the way
+	the run will process it — child support, tax levies, student loans, other
+	garnishments, then the worker's own elections — so it reads as what will
+	happen rather than as rows somebody has to rank.
+
+	`gross_pay` TURNS IT INTO A PRICED PREVIEW against the CCPA ceilings. Send
+	`statutory_withholding` with it: disposable earnings is gross less the
+	withholding the law requires, and without it the preview treats gross as
+	disposable and OVERSTATES what a garnishment may take. The answer says so
+	rather than quietly assuming zero tax.
+	"""
+	allowed = guard.require_scope(user)
+	inner: dict = {"employee": _employee_argument(employee, allowed)}
+	for key, value in (
+		("in_force_on", in_force_on),
+		("include_inactive", include_inactive),
+		("gross_pay", gross_pay),
+		("statutory_withholding", statutory_withholding),
+		("pay_frequency", pay_frequency),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return payroll_deduction_tools.list_employee_deductions(inner).data
+
+
+# ── 122. create_payroll_deduction ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_payroll_deduction", mutating=True, limit=guard.WRITE_LIMIT)
+def create_payroll_deduction(
+	user: str,
+	employee=None,
+	company=None,
+	deduction_category=None,
+	amount=None,
+	deduction_type=None,
+	amount_type=None,
+	basis=None,
+	max_per_period=None,
+	priority=None,
+	effective_from=None,
+	effective_to=None,
+	status=None,
+	reference=None,
+	pre_tax=None,
+	fica_exempt=None,
+	supports_other_dependents=None,
+	arrears_over_12_weeks=None,
+	exempt_amount=None,
+	label=None,
+	notes=None,
+) -> dict:
+	"""File a garnishment or a voluntary election from the handset.
+
+	THE DAY THIS EXISTS FOR IS THE DAY THE ORDER ARRIVES. A support order is
+	served on the employer with a date on it, and withholding is required from
+	the first pay period after service — so the gap between "the envelope was
+	opened in the yard" and "somebody was at a Desk" is a gap with a liability in
+	it. Filing it from where the envelope was opened closes that.
+
+	EVERY REFUSAL THE TOOL MAKES IS MADE HERE TOO, because the tool is what runs:
+	a duplicate active order with the same reference, a garnishment marked
+	pre-tax, a percentage over 100, a window that ends before it starts, an
+	employee name matching more than one person. The employee is proved to be
+	inside this caller's entities first, so an order cannot be filed against
+	somebody at another company.
+	"""
+	allowed = guard.require_scope(user)
+	inner: dict = {
+		"employee": _employee_argument(employee, allowed),
+		"company": _company(user, company, allowed),
+	}
+	for key, value in (
+		("deduction_category", deduction_category),
+		("amount", amount),
+		("deduction_type", deduction_type),
+		("amount_type", amount_type),
+		("basis", basis),
+		("max_per_period", max_per_period),
+		("priority", priority),
+		("effective_from", effective_from),
+		("effective_to", effective_to),
+		("status", status),
+		("reference", reference),
+		("pre_tax", pre_tax),
+		("fica_exempt", fica_exempt),
+		("supports_other_dependents", supports_other_dependents),
+		("arrears_over_12_weeks", arrears_over_12_weeks),
+		("exempt_amount", exempt_amount),
+		("label", label),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return payroll_deduction_tools.create_payroll_deduction(inner).data
+
+
+# ── 123. update_payroll_deduction ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_payroll_deduction", mutating=True, limit=guard.WRITE_LIMIT)
+def update_payroll_deduction(
+	user: str,
+	deduction=None,
+	status=None,
+	deduction_type=None,
+	deduction_category=None,
+	amount_type=None,
+	amount=None,
+	basis=None,
+	max_per_period=None,
+	priority=None,
+	effective_from=None,
+	effective_to=None,
+	reference=None,
+	pre_tax=None,
+	fica_exempt=None,
+	supports_other_dependents=None,
+	arrears_over_12_weeks=None,
+	exempt_amount=None,
+	label=None,
+	notes=None,
+) -> dict:
+	"""Change a filed deduction, or retire it by setting its status.
+
+	`employee` AND `company` ARE NOT IN THIS SIGNATURE AT ALL, which is the
+	strongest form of the tool's own refusal: there is no argument to send. A
+	deduction moved to another worker would apply an order made against one
+	person to somebody else. Retire this row and file a new one.
+
+	STOPPING A DEDUCTION IS A STATUS CHANGE OR AN END DATE, never a deletion. A
+	garnishment removed from the file cannot answer the court that asks why the
+	withholding stopped.
+	"""
+	allowed = guard.require_scope(user)
+	docname = guard.require_scoped_doc(
+		PAYROLL_DEDUCTION, deduction, "deduction", allowed,
+	)
+
+	inner: dict = {"deduction": docname}
+	for key, value in (
+		("status", status),
+		("deduction_type", deduction_type),
+		("deduction_category", deduction_category),
+		("amount_type", amount_type),
+		("amount", amount),
+		("basis", basis),
+		("max_per_period", max_per_period),
+		("priority", priority),
+		("effective_from", effective_from),
+		("effective_to", effective_to),
+		("reference", reference),
+		("pre_tax", pre_tax),
+		("fica_exempt", fica_exempt),
+		("supports_other_dependents", supports_other_dependents),
+		("arrears_over_12_weeks", arrears_over_12_weeks),
+		("exempt_amount", exempt_amount),
+		("label", label),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return payroll_deduction_tools.update_payroll_deduction(inner).data

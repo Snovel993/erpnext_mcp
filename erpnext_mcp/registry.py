@@ -107,6 +107,7 @@ from .tools import (
 	packets,
 	parties,
 	payroll,
+	payroll_deductions,
 	payroll_gl,
 	printing,
 	purchasing,
@@ -24512,6 +24513,245 @@ TOOLS = {
 		title="Generate ACH prenote file",
 		available=_needs_doctype("Employee Bank Account"),
 		requires=_ACH_REQUIRES,
+	),
+	# ── payroll deductions: garnishments and voluntary elections ────────────
+	"list_payroll_deductions": _tool(
+		payroll_deductions.list_payroll_deductions,
+		"The register of standing instructions to withhold money that is not a tax: "
+		"court-ordered garnishments, child support, tax levies and student loans on "
+		"one side, and the worker's own elections — 401(k), health, dental and vision, "
+		"HSA, FSA, life insurance, union dues — on the other. Filter by employee, "
+		"type, category, status or reference. Read-only.\n\n"
+		"EVERY ROW CARRIES WHAT THE ENGINE WILL MAKE OF IT, not just what is stored: "
+		"the effective priority, whether it is pre-tax, whether it also leaves the "
+		"FICA base, and which legal ceiling governs it. None of those is necessarily "
+		"on the row — they fall back to the category — and all four decide the money.\n\n"
+		"THE AMOUNTS ARE WHAT EACH ORDER ASKS FOR, not what a run will take. The CCPA "
+		"ceilings are a property of an employee's pay and this list does not have "
+		"anybody's pay in front of it; use list_employee_deductions with a gross_pay "
+		"for that, or read a slip.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Only this employee's deductions. Docname or name."),
+			"deduction_type": _field(_STRING, "Garnishment or Voluntary."),
+			"deduction_category": _field(
+				_STRING,
+				"Child Support, Wage Garnishment, Tax Levy, Student Loan, Retirement 401k, "
+				"Health Insurance, Dental Vision, Life Insurance, HSA, FSA, Union Dues or Other.",
+			),
+			"status": _field(_STRING, "Active, Suspended or Completed."),
+			"reference": _field(_STRING, "Substring of the court order number, levy notice or plan id."),
+			"in_force_on": _field(
+				_STRING,
+				"YYYY-MM-DD. Only what was actually in force that day, which is the question "
+				"an audit asks. Handles open-ended orders correctly — a row with no end date "
+				"is in force forever, and a plain date filter would drop it.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List payroll deductions",
+		available=_needs_doctype("Farm Payroll Deduction"),
+		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_payroll_deduction": _tool(
+		payroll_deductions.get_payroll_deduction,
+		"One deduction in full, with the four derived facts that actually decide the "
+		"money — effective priority, pre-tax, FICA-exempt, and which ceiling governs "
+		"it — plus the warnings worth reading about it: a garnishment with no "
+		"reference to defend it, a tax levy with no exempt amount, a percentage with "
+		"no per-period cap. Read-only.",
+		{
+			"deduction": _field(_STRING, "The Farm Payroll Deduction docname ('FPD-2026-0001')."),
+		},
+		required=("deduction",),
+		title="Get a payroll deduction",
+		available=_needs_doctype("Farm Payroll Deduction"),
+		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_employee_deductions": _tool(
+		payroll_deductions.list_employee_deductions,
+		"Everything standing against one worker's pay, IN THE ORDER IT COMES OUT — "
+		"child support, then tax levies, then student loans, then other garnishments, "
+		"then the voluntary elections. The order is the answer: it reads as what a "
+		"payroll run will actually do rather than as a set of rows somebody has to "
+		"rank. Read-only.\n\n"
+		"PASS gross_pay TO TURN IT INTO A PREVIEW. Given a period's pay it prices "
+		"every line against the CCPA ceilings — 25% of disposable earnings or the "
+		"amount over 30x the federal minimum wage for ordinary garnishments, 50-65% "
+		"for child support, no CCPA limit at all for a tax levy — and reports what "
+		"would be withheld, what would fall short, and why.\n\n"
+		"PASS statutory_withholding WITH IT. Disposable earnings is gross less the "
+		"withholding the law requires, and this tool has no W-4, no bracket table and "
+		"no state configuration to compute that. Without it the preview treats gross "
+		"as disposable, which OVERSTATES what a garnishment may take — it says so on "
+		"the answer rather than quietly assuming zero tax.",
+		{
+			"employee": _field(_STRING, "The employee. Docname, or a name that matches exactly one."),
+			"in_force_on": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"include_inactive": _field(
+				_BOOLEAN,
+				"true to include suspended and completed rows, and ones outside their date "
+				"window. Default false — the ordinary question is what comes out of this cheque.",
+			),
+			"gross_pay": _field(_NUMBER, "The period's gross pay. Turns the list into a priced preview."),
+			"statutory_withholding": _field(
+				_NUMBER,
+				"Federal, state, Social Security and Medicare for the period, summed. What "
+				"disposable earnings is measured from.",
+			),
+			"pay_frequency": _field(
+				_STRING,
+				"Weekly, Biweekly, Semimonthly or Monthly. Decides the CCPA exempt floor — "
+				"$217.50 weekly at the federal minimum wage, $435 biweekly. Default Biweekly.",
+			),
+		},
+		required=("employee",),
+		title="List one employee's deductions",
+		available=_needs_doctype("Farm Payroll Deduction"),
+		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_payroll_deduction": _tool(
+		payroll_deductions.create_payroll_deduction,
+		"MUTATING (default OFF). File one standing instruction to withhold against a "
+		"worker's pay: a garnishment, a support order, a levy, or a voluntary "
+		"election, with its amount or percentage, its cap, its date window and the "
+		"document it exists because of.\n\n"
+		"THE CATEGORY SETS THE LAW AND YOU RARELY OVERRIDE IT. It decides the "
+		"processing order, the ceiling, whether the deduction is pre-tax, and whether "
+		"it also leaves the FICA base. That last one is the distinction worth knowing: "
+		"a Section 125 benefit (health, dental, vision, HSA, FSA) is exempt from "
+		"income tax AND FICA, while a traditional 401(k) deferral is exempt from "
+		"income tax and STAYS in the Social Security and Medicare base — IRC "
+		"402(e)(3) defers the income tax, 3121(v)(1)(A) keeps it in FICA.\n\n"
+		"REFUSES: a second active order of the same category with the same reference "
+		"against the same worker, because filing it twice withholds it twice; a "
+		"garnishment marked pre-tax; a percentage over 100; a window that ends before "
+		"it starts; an employee name matching more than one person.\n\n"
+		"WARNS without refusing a garnishment with no reference, a tax levy with no "
+		"exempt amount, a percentage with no per-period cap, and a 401(k) marked "
+		"FICA-exempt.",
+		{
+			"employee": _field(_STRING, "The employee. Docname, or a name that matches exactly one."),
+			"company": _COMPANY,
+			"deduction_category": _field(
+				_STRING,
+				"Child Support, Wage Garnishment, Tax Levy, Student Loan, Retirement 401k, "
+				"Health Insurance, Dental Vision, Life Insurance, HSA, FSA, Union Dues or Other.",
+			),
+			"deduction_type": _field(
+				_STRING,
+				"Garnishment or Voluntary. Omit to take it from the category, which is right "
+				"unless this is an 'Other' that belongs on the opposite side of the line.",
+			),
+			"amount_type": _field(_STRING, "Fixed or Percentage. Default Fixed."),
+			"amount": _field(
+				_NUMBER,
+				"The dollar amount per period, or the percentage — 6 means 6%, not 0.06.",
+			),
+			"basis": _field(
+				_STRING,
+				"For a percentage: Gross Pay or Net After Tax. Net After Tax means DISPOSABLE "
+				"EARNINGS, which is what every court order is written against. Blank defaults "
+				"to Net After Tax for a garnishment and Gross Pay for a voluntary election.",
+			),
+			"max_per_period": _field(
+				_NUMBER,
+				"Never withhold more than this in one period. Zero means no cap. What makes a "
+				"percentage safe on a harvest week heavy with overtime.",
+			),
+			"priority": _field(
+				_INTEGER,
+				"Processing order, lowest first. Leave at 0 to use the order the law gives the "
+				"category — child support 10, tax levy 20, student loan 30, other garnishments "
+				"40, voluntary elections from 100.",
+			),
+			"effective_from": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"effective_to": _field(
+				_STRING, "YYYY-MM-DD. Blank for an open-ended election or an order with no stated end."
+			),
+			"status": _field(_STRING, "Active, Suspended or Completed. Default Active."),
+			"reference": _field(
+				_STRING,
+				"The court order number, IRS levy notice, state case id, plan id or policy "
+				"number. WHAT MAKES A GARNISHMENT DEFENSIBLE — an employer answers for what it "
+				"withheld and this ties the withholding to the order it was made under.",
+			),
+			"pre_tax": _field(
+				_BOOLEAN,
+				"Override the category. A garnishment is never pre-tax and passing true for one "
+				"is refused.",
+			),
+			"fica_exempt": _field(
+				_BOOLEAN,
+				"Override the category: does this leave the Social Security and Medicare base "
+				"too? Only meaningful on a pre-tax deduction.",
+			),
+			"supports_other_dependents": _field(
+				_BOOLEAN,
+				"Child support only. Does this employee support another spouse or dependent "
+				"child? Sets the ceiling at 50% of disposable earnings rather than 60% "
+				"(15 U.S.C. 1673(b)(2)). Default true.",
+			),
+			"arrears_over_12_weeks": _field(
+				_BOOLEAN,
+				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 "
+				"becomes 65.",
+			),
+			"exempt_amount": _field(
+				_NUMBER,
+				"Tax levy only. What the levy notice leaves the employee per period, from "
+				"Publication 1494. A levy is not limited by the CCPA (29 CFR 870.11(b)(2)); "
+				"this is what bounds it instead.",
+			),
+			"label": _field(_STRING, "What this line is called on a pay stub. Blank uses the category's name."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("employee", "deduction_category", "amount"),
+		mutating=True,
+		title="File a payroll deduction",
+		available=_needs_doctype("Farm Payroll Deduction"),
+		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_payroll_deduction": _tool(
+		payroll_deductions.update_payroll_deduction,
+		"MUTATING (default OFF). Change a filed deduction — its amount, its cap, its "
+		"dates, its priority, its reference, or its status. Every change is echoed "
+		"back as before → after.\n\n"
+		"CANNOT RE-KEY IT. `employee` and `company` are refused by name: moving a "
+		"deduction to another worker would apply an order made against one person to "
+		"somebody else and leave an audit trail saying it had always been theirs. "
+		"Retire this row and file a new one.\n\n"
+		"SUSPENDING AND COMPLETING ARE HOW A DEDUCTION ENDS — nothing here deletes. "
+		"Set status to Completed for an order that has been satisfied, Suspended for "
+		"one a court has stayed. A garnishment removed from the file cannot answer the "
+		"court that asks why the withholding stopped, and a satisfied order is the "
+		"record proving it was paid off.",
+		{
+			"deduction": _field(_STRING, "The Farm Payroll Deduction docname ('FPD-2026-0001')."),
+			"status": _field(_STRING, "Active, Suspended or Completed."),
+			"deduction_type": _field(_STRING, "Garnishment or Voluntary."),
+			"deduction_category": _field(_STRING, "Any of the twelve categories."),
+			"amount_type": _field(_STRING, "Fixed or Percentage."),
+			"amount": _field(_NUMBER, "Dollar amount per period, or the percentage."),
+			"basis": _field(_STRING, "Gross Pay or Net After Tax."),
+			"max_per_period": _field(_NUMBER, "Per-period cap. Zero means no cap."),
+			"priority": _field(_INTEGER, "Processing order, lowest first. 0 uses the category's."),
+			"effective_from": _field(_STRING, "YYYY-MM-DD."),
+			"effective_to": _field(_STRING, "YYYY-MM-DD. The ordinary way to stop an order on a date."),
+			"reference": _field(_STRING, "Court order number, levy notice, plan id."),
+			"pre_tax": _field(_BOOLEAN, "Override the category. Refused on a garnishment."),
+			"fica_exempt": _field(_BOOLEAN, "Override the category. Only meaningful on a pre-tax row."),
+			"supports_other_dependents": _field(_BOOLEAN, "Child support ceiling: 50% rather than 60%."),
+			"arrears_over_12_weeks": _field(_BOOLEAN, "Child support ceiling: adds 5 points."),
+			"exempt_amount": _field(_NUMBER, "Tax levy only. Publication 1494 exempt amount."),
+			"label": _field(_STRING, "Pay stub label."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("deduction",),
+		mutating=True,
+		title="Update a payroll deduction",
+		available=_needs_doctype("Farm Payroll Deduction"),
+		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

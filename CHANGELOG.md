@@ -11,6 +11,88 @@ v0.69.0, and the one that left a filled-in wizard with nowhere to go. Plus the
 audit that asks whether the pause/resume bug fixed in the session before this
 one had siblings anywhere else in the tree.
 
+### Garnishments and voluntary deductions
+
+Payroll has withheld taxes since v0.28.0 and nothing else ever since. That is the
+easy half of a payroll run and not the half with a liability attached: a court
+serves a support order on the **employer**, and an employer who pays the worker in
+full is answerable for the money it failed to withhold and, in most states, for
+the arrears on top. The 401(k) half fails quietly rather than loudly — an elective
+deferral that never reduces the wage base is a worker over-withheld all year and a
+plan out of compliance.
+
+**New doctype `Farm Payroll Deduction`** — one standing instruction to withhold
+what is not a tax, with its amount or percentage, its per-period cap, its date
+window, its priority and the document it exists because of. Four garnishment
+categories (child support, wage garnishment, tax levy, student loan) and eight
+voluntary ones (401(k), health, dental/vision, life, HSA, FSA, union dues, other).
+
+**New engine `erpnext_mcp/payroll_deductions.py`**, pure functions like
+`payroll_calc` and `payroll_integration` beside it. It owns the CCPA ceilings, the
+priority order and the pre-tax arithmetic.
+
+**Five tools** — `list_payroll_deductions`, `get_payroll_deduction`,
+`list_employee_deductions`, `create_payroll_deduction`,
+`update_payroll_deduction` — and five mobile routes, all HR-gated.
+
+#### "Pre-tax" is two different answers, and this is the half worth reading
+
+A Section 125 benefit (health, dental, vision, HSA, FSA) is exempt from income tax
+**and** FICA — IRC §125(a), §3121(a)(5)(G). A traditional 401(k) elective deferral
+is exempt from income tax and **stays in the FICA wage base**: §402(e)(3) defers
+the income tax, §3121(v)(1)(A) keeps the deferral taxable for Social Security and
+Medicare in the year deferred.
+
+So a slip now carries **two** reduced bases, `federal_taxable_gross` and
+`fica_taxable_gross`, and on a slip with a 401(k) they differ by exactly the
+deferral. Running FICA on the income tax base under-withholds every deferral — an
+error that reconciles cleanly all year and surfaces on a W-2, where Box 1 and
+Box 3 are supposed to differ by the deferral and instead agree.
+`calculate_federal_withholding` grew an optional `fica_gross`; omitting it
+computes exactly what every prior caller got.
+
+#### Four ceilings, and a pool they share
+
+Ordinary garnishments take the lesser of 25% of disposable earnings and the amount
+over 30× the federal minimum wage ($217.50 weekly; the regulation's own 60×/65×/130×
+for the longer periods). Child support has its own ceiling of 50–65% by the two
+facts in §1673(b)(2). A tax levy is outside Title III entirely (29 CFR
+870.11(b)(2)) and bounded instead by the IRC §6334(d) exempt amount on the notice.
+A student loan is capped at 15%.
+
+**They share one pool.** 29 CFR 870.11(b)(1): an ordinary garnishment gets what is
+left of the 25% after support, not a fresh 25% of its own — frequently zero, which
+is the rule working rather than a failure to collect. Two orders of the same kind
+that will not both fit are prorated, and each line says so.
+
+#### Disposable earnings does not move when an employee raises their 401(k)
+
+29 CFR 870.10(a) defines it as pay less amounts required **by law** to be
+withheld. Voluntary deductions are not subtracted, pre-tax ones included —
+otherwise an employee could shrink the base a court order is measured against by
+raising their own contribution rate, which is the employee choosing how much of a
+court order to obey.
+
+#### What it will not do
+
+It never produces a negative net: where elections and orders together exceed the
+pay, deductions are cut in reverse priority — voluntary first — and every cut is
+reported with what was asked and what was taken. It does **not** carry arrears
+forward; `deduction_shortfalls` on the slip and on the run summary is the only
+place the gap is ever said. And it makes no legal determination: `state_cap_rate`
+is the hook for a state stricter than the federal 25%, applied as the tighter of
+the two because §1677 makes Title III a floor under the worker's protection and
+never a ceiling on it.
+
+#### Nothing already stored moves
+
+`total_deductions` now **includes** these, so `net_pay = gross_pay −
+total_deductions` remains the invariant every reader of a slip relies on and net
+pay stays what the worker is actually handed. The taxes on their own are the new
+`statutory_deductions`; a report that read the total as "taxes" should read that
+instead. A slip with no deductions on file computes figure for figure what it did
+before — which is every slip on every site until somebody files one.
+
 ### The shadow log reaches a handset
 
 `list_shadow_log_entries`, `get_shadow_log_entry` and `acknowledge_shadow_log`

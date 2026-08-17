@@ -61,6 +61,7 @@ eight hours.
 """
 from __future__ import annotations
 
+from . import payroll_deductions
 from .state_withholding import calculate_state_withholding
 from .withholding import calculate_federal_withholding
 
@@ -534,6 +535,7 @@ def calculate_full_payroll(
 	shifts: list[dict],
 	salary_structure: dict,
 	tax_config: dict,
+	deductions: list[dict] | None = None,
 ) -> dict:
 	"""Orchestrate a complete payroll slip for one employee.
 
@@ -554,6 +556,19 @@ def calculate_full_payroll(
 			pay_frequency, ytd_gross, ytd_ss_withheld, and per-state
 			state_configs keyed by state code (e.g. {"OR": {...}, "WA": {...}})
 			and state_tax_tables keyed by state code.
+		deductions: Farm Payroll Deduction rows for this employee, already
+			filtered to the ones in force in the period. None or empty is the
+			ordinary slip and computes exactly as every release before this one
+			— the whole deduction stack collapses to zero and no figure moves.
+
+			GARNISHMENTS AND VOLUNTARY DEDUCTIONS, and the order between them is
+			`payroll_deductions`' business rather than this function's. What
+			happens HERE is the half that cannot live in a pure deduction module
+			because it changes the tax base: pre-tax elections are subtracted
+			BEFORE the withholding engines run, and they are subtracted twice
+			over at two different figures, because a 401(k) leaves the income tax
+			base and stays in the FICA one while a Section 125 premium leaves
+			both. See `payroll_deductions.calculate_pre_tax_deductions`.
 
 	Returns:
 		Complete slip dict with gross, all deductions, and net.
@@ -720,6 +735,24 @@ def calculate_full_payroll(
 		else min_wage_result["meets_minimum_wage"]
 	)
 
+	# ── Pre-tax deductions ────────────────────────────────────────────
+	#
+	# BEFORE THE ENGINES, because that is the entire difference between a
+	# pre-tax deduction and a post-tax one: it is not withheld earlier, it is
+	# withheld out of a smaller wage base. A 401(k) that came out after the
+	# withholding calculation would be an after-tax contribution to a pre-tax
+	# plan — the worker over-withheld all year and the plan out of compliance.
+	#
+	# TWO REDUCED BASES, NOT ONE. `federal_taxable_gross` is gross less every
+	# pre-tax election; `fica_taxable_gross` is gross less only the ones that
+	# also leave the FICA base. They differ by exactly the 401(k) deferral, and
+	# collapsing them into one figure is the classic version of this bug —
+	# see `payroll_deductions` for the statute on each side of it.
+	deduction_rows = payroll_deductions.active_deductions(deductions or [])
+	pre_tax = payroll_deductions.calculate_pre_tax_deductions(gross_pay, deduction_rows)
+	federal_taxable_gross = pre_tax["federal_taxable_gross"]
+	fica_taxable_gross = pre_tax["fica_taxable_gross"]
+
 	# ── Federal taxes ─────────────────────────────────────────────────
 	w4_data = tax_config.get("w4_data", {})
 	fica_config = tax_config.get("fica_config", {})
@@ -728,8 +761,8 @@ def calculate_full_payroll(
 	ytd_ss_withheld = float(tax_config.get("ytd_ss_withheld", 0))
 
 	federal = calculate_federal_withholding(
-		gross_pay, pay_frequency, w4_data, ytd_gross, ytd_ss_withheld,
-		fica_config, federal_tax_table,
+		federal_taxable_gross, pay_frequency, w4_data, ytd_gross, ytd_ss_withheld,
+		fica_config, federal_tax_table, fica_gross=fica_taxable_gross,
 	)
 
 	# ── State taxes — per-state allocation for cross-state workers ────
@@ -742,6 +775,28 @@ def calculate_full_payroll(
 	total_state_employer = 0.0
 	total_state_suta = 0.0
 
+	def _state_taxable(state: str, wages: float) -> float:
+		"""One state's share of wages, less its share of the pre-tax elections.
+
+		WHICH reduced base depends on what the state actually levies, and the two
+		answers differ by the 401(k) — `payroll_deductions.STATE_TAXABLE_BASIS`
+		carries the reasoning per state. Oregon taxes federal taxable income, so a
+		deferral is out of its base; Washington levies no income tax and its
+		employee-side premiums follow the FICA definition, so a deferral is in.
+
+		PRORATED BY THE STATE'S SHARE OF GROSS on a cross-state slip, because a
+		worker's 401(k) election is a property of the pay period rather than of
+		one state's hours, and charging the whole deferral against whichever state
+		happened to be computed first would move real money between two states'
+		withholding.
+		"""
+		if gross_pay <= 0:
+			return 0.0
+		basis = payroll_deductions.STATE_TAXABLE_BASIS.get(state, "federal")
+		removed = pre_tax["total"] if basis == "federal" else pre_tax["fica_exempt_total"]
+		share = removed * (wages / gross_pay)
+		return round(max(wages - share, 0.0), 2)
+
 	if len(state_hours) <= 1:
 		# Single-state: apply to full gross — makeup included, because a top-up to
 		# the minimum wage is wages and is taxed as wages.
@@ -749,7 +804,8 @@ def calculate_full_payroll(
 			state_hours[primary_state]["gross"] = gross_pay
 		if primary_state and primary_state in state_configs:
 			state_result = calculate_state_withholding(
-				gross_pay, pay_frequency, primary_state, filing_status,
+				_state_taxable(primary_state, gross_pay),
+				pay_frequency, primary_state, filing_status,
 				state_configs[primary_state],
 				state_tax_tables.get(primary_state),
 				ytd_gross,
@@ -774,7 +830,8 @@ def calculate_full_payroll(
 
 			if ws in state_configs:
 				state_result = calculate_state_withholding(
-					state_gross, pay_frequency, ws, filing_status,
+					_state_taxable(ws, state_gross),
+					pay_frequency, ws, filing_status,
 					state_configs[ws],
 					state_tax_tables.get(ws),
 					ytd_gross,
@@ -795,9 +852,40 @@ def calculate_full_payroll(
 	social_security = federal["social_security_employee"]
 	medicare = federal["medicare_employee"] + federal["additional_medicare"]
 
-	total_deductions = round(
+	statutory_deductions = round(
 		federal_withholding + social_security + medicare + total_state_employee, 2,
 	)
+
+	# ── Garnishments and post-tax deductions ──────────────────────────
+	#
+	# DISPOSABLE EARNINGS IS GROSS LESS THE STATUTORY WITHHOLDING AND NOTHING
+	# ELSE. 29 CFR 870.10(a) says "amounts required by law to be withheld", and
+	# the pre-tax elections above are not required by law however much they
+	# reduced the tax — subtracting them here would let an employee shrink the
+	# base a court order is measured against by raising their own 401(k) rate.
+	disposable = payroll_deductions.disposable_earnings(gross_pay, statutory_deductions)
+	garnishments = payroll_deductions.apply_garnishments(
+		disposable,
+		deduction_rows,
+		pay_frequency=pay_frequency,
+		state_cap_rate=tax_config.get("garnishment_state_cap_rate"),
+	)
+
+	# Post-tax voluntary deductions take what the orders left, and no more. A
+	# garnishment outranks a union due, so the union due is what goes short.
+	cash_left = round(max(gross_pay - pre_tax["total"] - statutory_deductions - garnishments["total"], 0.0), 2)
+	post_tax = payroll_deductions.apply_post_tax_deductions(
+		cash_left, deduction_rows, gross_pay, disposable,
+	)
+
+	deduction_lines = pre_tax["lines"] + garnishments["lines"] + post_tax["lines"]
+	deduction_summary = payroll_deductions.summarize_deductions(deduction_lines)
+	total_deduction_withholdings = deduction_summary["total"]
+
+	# Inside `total_deductions`, so `net_pay = gross_pay - total_deductions`
+	# stays the invariant every reader of a slip already relies on and net pay
+	# stays what the worker is actually handed.
+	total_deductions = round(statutory_deductions + total_deduction_withholdings, 2)
 	net_pay = round(gross_pay - total_deductions, 2)
 
 	# ── Employer taxes ────────────────────────────────────────────────
@@ -844,6 +932,34 @@ def calculate_full_payroll(
 		"social_security": social_security,
 		"medicare": medicare,
 		"state_taxes_detail": state_results,
+		# The taxes on their own, kept apart from the total now that the total
+		# carries other things. Every release before this one had these two as
+		# the same number, and a report that assumed so should read this one.
+		"statutory_deductions": statutory_deductions,
+		# ── Garnishments and voluntary deductions ────────────────────────
+		#
+		# `deduction_lines` is the itemised list a pay stub prints line by line;
+		# the totals beside it are what a register column and a GL posting want.
+		# The two taxable bases are stored rather than derived because a W-2 is
+		# built from them: Box 1 is the federal one, Box 3 the FICA one, and on a
+		# slip carrying a 401(k) they differ by exactly the deferral.
+		"deduction_lines": deduction_lines,
+		"total_deduction_withholdings": total_deduction_withholdings,
+		"pre_tax_deductions": deduction_summary["pre_tax_total"],
+		"post_tax_deductions": deduction_summary["post_tax_total"],
+		"garnishment_total": deduction_summary["garnishment_total"],
+		"voluntary_deduction_total": deduction_summary["voluntary_total"],
+		"deductions_by_category": deduction_summary["by_category"],
+		"federal_taxable_gross": federal_taxable_gross,
+		"fica_taxable_gross": fica_taxable_gross,
+		"disposable_earnings": disposable,
+		"garnishment_detail": garnishments,
+		# What an order asked for and the pay could not give. NOT carried
+		# forward into the next period — see `payroll_deductions` — so this list
+		# is the only place it is said, and somebody has to read it.
+		"deduction_shortfalls": (
+			pre_tax["shortfalls"] + garnishments["shortfalls"] + post_tax["shortfalls"]
+		),
 		"total_deductions": total_deductions,
 		"net_pay": net_pay,
 		"social_security_employer": social_security_employer,

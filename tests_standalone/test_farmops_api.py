@@ -487,6 +487,16 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_my_bank_accounts",
 		"/mobile/add_my_bank_account",
 		"/mobile/update_my_bank_account",
+		# The payroll deduction register: three reads and two writes, all
+		# gated on HR_ROLES in their own bodies. `update_payroll_deduction`
+		# is the one whose ABSENT arguments matter — `employee` and `company`
+		# are on the tool and not on the wrapper, so `bind` drops them and a
+		# handset cannot move an order made against one person to another.
+		"/mobile/list_payroll_deductions",
+		"/mobile/get_payroll_deduction",
+		"/mobile/list_employee_deductions",
+		"/mobile/create_payroll_deduction",
+		"/mobile/update_payroll_deduction",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

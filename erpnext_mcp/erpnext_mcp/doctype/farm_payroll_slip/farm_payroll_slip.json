@@ -29,6 +29,17 @@
   "social_security",
   "medicare",
   "state_taxes_detail",
+  "other_deductions_section",
+  "statutory_deductions",
+  "total_deduction_withholdings",
+  "pre_tax_deductions",
+  "post_tax_deductions",
+  "col_break_other_deductions",
+  "garnishment_total",
+  "voluntary_deduction_total",
+  "federal_taxable_gross",
+  "fica_taxable_gross",
+  "disposable_earnings",
   "totals_section",
   "total_deductions",
   "net_pay",
@@ -203,6 +214,78 @@
    "fieldname": "state_taxes_detail",
    "fieldtype": "JSON",
    "label": "State Taxes Detail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "other_deductions_section",
+   "fieldtype": "Section Break",
+   "label": "Garnishments and Voluntary Deductions"
+  },
+  {
+   "description": "Federal withholding, state withholding, Social Security and Medicare — the deductions the law requires, on their own. Every release before garnishments existed had this equal to Total Deductions; a report that read the total as 'taxes' should read this instead.",
+   "fieldname": "statutory_deductions",
+   "fieldtype": "Currency",
+   "label": "Statutory Deductions",
+   "read_only": 1
+  },
+  {
+   "description": "Every garnishment and voluntary deduction on this slip, summed. Total Deductions is this plus Statutory Deductions, and Net Pay is gross less Total Deductions — so this is inside the total and inside what the worker is handed. The itemised lines are in the State Taxes Detail JSON under `_deduction_lines`.",
+   "fieldname": "total_deduction_withholdings",
+   "fieldtype": "Currency",
+   "label": "Total Other Deductions",
+   "read_only": 1
+  },
+  {
+   "description": "Deductions taken out of the WAGE BASE before withholding was computed — 401(k) deferrals, Section 125 premiums, HSA and FSA contributions.",
+   "fieldname": "pre_tax_deductions",
+   "fieldtype": "Currency",
+   "label": "Pre-Tax Deductions",
+   "read_only": 1
+  },
+  {
+   "description": "Deductions taken after tax: garnishments, life insurance, union dues.",
+   "fieldname": "post_tax_deductions",
+   "fieldtype": "Currency",
+   "label": "Post-Tax Deductions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_other_deductions",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Court-ordered and statutory withholding paid to somebody other than the worker: child support, tax levies, student loans, creditor garnishments. Bounded by the CCPA ceilings (15 U.S.C. 1673); where an order asked for more than the ceiling allowed, the difference is in the State Taxes Detail JSON under `_deduction_shortfalls` and is NOT carried into the next period.",
+   "fieldname": "garnishment_total",
+   "fieldtype": "Currency",
+   "label": "Garnishments",
+   "read_only": 1
+  },
+  {
+   "description": "The worker's own elections, pre-tax and post-tax together.",
+   "fieldname": "voluntary_deduction_total",
+   "fieldtype": "Currency",
+   "label": "Voluntary Deductions",
+   "read_only": 1
+  },
+  {
+   "description": "Gross less every pre-tax deduction: the base federal income tax was computed on. W-2 Box 1 is built from this.",
+   "fieldname": "federal_taxable_gross",
+   "fieldtype": "Currency",
+   "label": "Federal Taxable Gross",
+   "read_only": 1
+  },
+  {
+   "description": "Gross less only the pre-tax deductions that leave the FICA base too. IT DIFFERS FROM FEDERAL TAXABLE GROSS BY EXACTLY THE 401(k) DEFERRAL — a Section 125 premium leaves both bases, a traditional 401(k) deferral leaves the income tax base and stays in this one (IRC 402(e)(3), 3121(v)(1)(A)). W-2 Box 3 is built from this, and Box 1 and Box 3 are supposed to differ by the deferral.",
+   "fieldname": "fica_taxable_gross",
+   "fieldtype": "Currency",
+   "label": "FICA Taxable Gross",
+   "read_only": 1
+  },
+  {
+   "description": "Gross less the withholding the law requires, and nothing else — 29 CFR 870.10(a). The figure every CCPA garnishment ceiling is measured against. Voluntary deductions do NOT reduce it, however pre-tax they are: an employee cannot shrink the base a court order is measured against by raising their own contribution rate.",
+   "fieldname": "disposable_earnings",
+   "fieldtype": "Currency",
+   "label": "Disposable Earnings",
    "read_only": 1
   },
   {

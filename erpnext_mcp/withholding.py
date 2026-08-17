@@ -33,11 +33,14 @@ def calculate_federal_withholding(
     ytd_ss_withheld: float,
     fica_config: dict,
     tax_table: list[dict],
+    fica_gross: float | None = None,
 ) -> dict:
     """Calculate all federal payroll taxes for one pay period.
 
     Args:
-        gross_pay: Gross pay for this pay period.
+        gross_pay: Gross pay for this pay period. Where pre-tax deductions are
+            in play this is the INCOME TAX base — gross less every pre-tax
+            election — because that is what the percentage method annualizes.
         pay_frequency: One of the PERIODS_PER_YEAR keys.
         w4_data: Dict with W-4 fields: filing_status, multiple_jobs,
             dependents_under_17_count, other_dependents_count,
@@ -55,12 +58,35 @@ def calculate_federal_withholding(
             payroll_period, sorted by bracket_floor ascending. Each has:
             bracket_floor, bracket_ceiling (None for top), base_tax,
             marginal_rate.
+        fica_gross: The Social Security, Medicare and FUTA base, where it is
+            NOT the same figure as `gross_pay`. Defaults to `gross_pay`, which
+            is right on every slip carrying no pre-tax deduction and was the
+            only possible answer before they existed.
+
+            THE TWO BASES DIFFER BY EXACTLY THE 401(k). A traditional elective
+            deferral leaves the income tax base under IRC §402(e)(3) and STAYS
+            in the FICA base under §3121(v)(1)(A) — taxed for Social Security
+            and Medicare in the year deferred and never again. A Section 125
+            cafeteria plan benefit leaves both. Running FICA on the income tax
+            base under-withholds every deferral, an error that reconciles
+            cleanly all year and surfaces on a W-2, where Box 1 and Box 3 are
+            supposed to differ by the deferral and instead agree.
 
     Returns:
         Dict with all tax amounts and a computation_detail breakdown.
     """
     periods = PERIODS_PER_YEAR.get(pay_frequency, 1)
     detail = {"pay_frequency": pay_frequency, "periods_per_year": periods}
+    fica_base = gross_pay if fica_gross is None else max(float(fica_gross), 0.0)
+    if fica_base != gross_pay:
+        detail["fica_base"] = round(fica_base, 2)
+        detail["fica_base_note"] = (
+            "Social Security, Medicare and FUTA were computed on a different base from "
+            "federal income tax. The gap is the pre-tax deductions that leave the income "
+            "tax base without leaving the FICA one — a traditional 401(k) deferral is the "
+            "ordinary case (IRC 402(e)(3) defers the income tax; 3121(v)(1)(A) keeps the "
+            "deferral in the FICA wage base)."
+        )
 
     # ── Federal Income Tax (Percentage Method, 2020+ W-4) ─────────────
     fit, fit_detail = _calc_federal_income_tax(
@@ -70,16 +96,16 @@ def calculate_federal_withholding(
 
     # ── FICA ──────────────────────────────────────────────────────────
     ss_employee, ss_employer, ss_detail = _calc_social_security(
-        gross_pay, ytd_gross, ytd_ss_withheld, fica_config, periods,
+        fica_base, ytd_gross, ytd_ss_withheld, fica_config, periods,
     )
     detail["social_security"] = ss_detail
 
     med_employee, med_employer, addl_med, med_detail = _calc_medicare(
-        gross_pay, ytd_gross, fica_config,
+        fica_base, ytd_gross, fica_config,
     )
     detail["medicare"] = med_detail
 
-    futa, futa_detail = _calc_futa(gross_pay, ytd_gross, fica_config)
+    futa, futa_detail = _calc_futa(fica_base, ytd_gross, fica_config)
     detail["futa"] = futa_detail
 
     total_employee = fit + ss_employee + med_employee + addl_med

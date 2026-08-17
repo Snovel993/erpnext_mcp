@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 705 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 710 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 351 read tools are **on** by default and can be switched off individually. A
+All 354 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -15544,3 +15544,157 @@ and the ten-record blocking.
 **The entry hash is not a checksum of the file.** It is the sum of the
 *eight-digit* routing prefixes of every entry — the check digit deliberately
 excluded — truncated to its rightmost ten digits.
+
+## Garnishments and voluntary deductions
+
+Every release before this one computed a slip whose only deductions were the ones
+the government requires. That is the easy half of a payroll run and not the half
+with a liability attached: a court serves a support order on the **employer**, and
+an employer who pays the worker in full is answerable for the money it failed to
+withhold and, in most states, for the arrears on top.
+
+A **Farm Payroll Deduction** is one standing instruction — what to take, from
+when, under which document. Each payroll run reads it and decides what it can
+actually take out of that period's pay. The two are different numbers whenever a
+ceiling binds, and the difference lands on the slip as a shortfall.
+
+### The order is the law's own order
+
+1. Gross pay, minimum wage makeup included.
+2. **Pre-tax** voluntary deductions leave the wage base **before** withholding is
+   computed. This is the step that makes a 401(k) a 401(k).
+3. Taxes, on the reduced base.
+4. **Disposable earnings** = gross − the taxes actually withheld. Note what is
+   *not* subtracted: voluntary deductions, pre-tax ones included. 29 CFR 870.10
+   says amounts required **by law**, and an elective deferral is not one —
+   subtracting it would let an employee shrink the base a court order is measured
+   against by raising their own contribution rate.
+5. **Garnishments**, in legal priority order, against the CCPA ceilings.
+6. **Post-tax** voluntary deductions, out of whatever cash is left.
+
+Steps 5 and 6 are in that order because a garnishment outranks a union due. When
+the money runs out, the voluntary deduction is what gets cut.
+
+### "Pre-tax" is two different answers
+
+Getting this wrong is the classic version of this bug, and it reconciles cleanly
+all year before surfacing on a W-2:
+
+| | Federal income tax | Social Security / Medicare / FUTA |
+|---|---|---|
+| Section 125 — health, dental/vision, HSA, FSA | exempt | **exempt** |
+| Traditional 401(k) elective deferral | exempt | **not exempt** |
+
+IRC §125(a) and §3121(a)(5)(G) for the first row; §402(e)(3) defers the income tax
+on the second while §3121(v)(1)(A) keeps the deferral in the FICA wage base. So a
+slip carries **two** reduced bases — `federal_taxable_gross` and
+`fica_taxable_gross` — and on a slip with a 401(k) they differ by exactly the
+deferral. Those two figures are what W-2 Box 1 and Box 3 are built from, and Box 1
+and Box 3 are supposed to differ by the deferral rather than agree.
+
+### Four ceilings, not one
+
+| Kind | Ceiling | Authority |
+|---|---|---|
+| Ordinary garnishment (creditor, judgment) | lesser of **25%** of disposable earnings, or the amount over **30× federal minimum wage** | 15 U.S.C. §1673(a) |
+| Child support | **50%** supporting another family, **60%** if not, **+5** for arrears past 12 weeks | §1673(b)(2) |
+| Federal or state tax levy | **no CCPA limit**; bounded by the IRC §6334(d) exempt amount on the notice | 29 CFR 870.11(b)(2) |
+| Student loan (AWG) | **15%** of disposable pay, inside the ordinary pool | 20 U.S.C. §1095a(a)(1) |
+
+The floor is $217.50 a week at $7.25, and the regulation gives the longer periods
+their own multipliers rather than asking anybody to annualise: 60× biweekly
+($435), 65× semimonthly ($471.25), 130× monthly ($942.50).
+
+**When several compete the pool is shared.** 29 CFR 870.11(b)(1): an ordinary
+garnishment gets what is *left* of the 25% after support has taken its share, not
+a fresh 25% of its own. Where support took a quarter or more, a creditor collects
+nothing that period — that is the rule working, not a failure to collect, and the
+slip says which rule refused it. Two orders of the same kind that will not both
+fit are **prorated** by ordered amount, and each line says it was.
+
+`state_cap_rate` is the hook for a state stricter than the federal 25%. Title III
+is a floor under the worker's protection and never a ceiling on it (§1677), so
+the tighter rule always wins and a looser state rate cannot loosen anything.
+
+### What it will not do
+
+**It never produces a negative net.** Where the elections and the orders together
+exceed the pay, deductions are cut in reverse priority — voluntary first — and
+every cut is reported with what was asked and what was taken.
+
+**It does not carry arrears forward.** What a period could not take is reported
+and not remembered; the next period computes from its own pay. `deduction_shortfalls`
+on the slip and on the run summary is the only place it is ever said, and somebody
+has to read it.
+
+**It gives no legal advice and makes no determination.** The state rule that beats
+the federal one is not shipped, and a few states bar creditor garnishment of wages
+almost entirely.
+
+### `list_payroll_deductions`
+
+The register, filtered by employee, type, category, status or reference. Every row
+carries the four **derived** facts that actually decide the money — effective
+priority, pre-tax, FICA-exempt, and which ceiling governs it — because none of
+them is necessarily stored on the row; they fall back to the category.
+`in_force_on` asks what was in force on a date, which is the question an audit
+asks, and it handles an open-ended order correctly where a plain date filter would
+silently drop every one of them.
+
+### `get_payroll_deduction`
+
+One row in full, with the warnings worth reading about it: a garnishment with no
+reference to defend it, a tax levy with no exempt amount, a percentage with no
+per-period cap, a 401(k) wrongly marked FICA-exempt.
+
+### `list_employee_deductions`
+
+Everything standing against one worker's pay, **in the order it comes out**. Pass
+`gross_pay` to turn it into a priced preview against the CCPA ceilings — and pass
+`statutory_withholding` with it, because disposable earnings is gross less the
+legally required withholding and this tool has no W-4, bracket table or state
+configuration to compute it. Without it the preview treats gross as disposable,
+which **overstates** what a garnishment may take; it says so on the answer rather
+than quietly assuming zero tax.
+
+### `create_payroll_deduction`, `update_payroll_deduction`
+
+Both mutating, both default **off**.
+
+The category sets the law and you rarely override it: processing order, ceiling,
+pre-tax and FICA treatment all come from it. `deduction_type` is derived from the
+category when you do not name one — a support order filed as a voluntary election
+would sit behind the union dues and outside its own ceiling, so the doctype ships
+with **no** default on that field rather than a default of Voluntary.
+
+**Create refuses** a second active order of the same category with the same
+reference against the same worker (filing it twice withholds it twice, which is
+money actually taken from somebody), a garnishment marked pre-tax, a percentage
+over 100, a window that ends before it starts, and an employee name matching more
+than one person.
+
+**Update cannot re-key it.** `employee` and `company` are refused by name: moving
+a deduction to another worker would apply an order made against one person to
+somebody else and leave an audit trail saying it had always been theirs.
+
+**Nothing deletes.** A deduction is retired by status — `Completed` for an order
+satisfied, `Suspended` for one a court has stayed. A garnishment removed from the
+file cannot answer the court that asks why the withholding stopped, and a
+satisfied order is the record proving it was paid off.
+
+### On the slip, and on the mobile surface
+
+`total_deductions` **includes** garnishments and voluntary deductions, so
+`net_pay = gross_pay − total_deductions` remains the invariant it always was and
+net pay stays what the worker is handed. The taxes on their own are
+`statutory_deductions`; the itemised lines a stub prints are `deduction_lines`.
+
+All five tools are on `/farmops/api/mobile/`, and like the payroll register and
+the pay stub they require an HR role in their own bodies rather than the field
+roles the surface is built for — what a person's wages are garnished for is among
+the most sensitive facts this app holds, and a Foreman is refused. The writes are
+published because withholding on a support order is required from the first pay
+period after service, and the gap between an envelope opened in a yard and
+somebody reaching a Desk is a gap with a liability in it. `employee` and `company`
+are absent from `update_payroll_deduction`'s mobile signature entirely, so the
+argument filter makes that refusal unreachable rather than merely enforced.

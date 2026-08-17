@@ -1446,6 +1446,7 @@ APP_DOCTYPES = {
 	"State Tax Table": "state_tax_table",
 	# v0.30.0. Salary Structures + Payroll.
 	"Farm Salary Structure": "farm_salary_structure",
+	"Farm Payroll Deduction": "farm_payroll_deduction",
 	"Farm Payroll Entry": "farm_payroll_entry",
 	"Farm Payroll Slip": "farm_payroll_slip",
 	# v0.40.0. Payroll to the general ledger: which accounts a company's payroll

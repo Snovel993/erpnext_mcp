@@ -659,6 +659,37 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_my_bank_accounts),
 	Route("/mobile", mobile_api.add_my_bank_account),
 	Route("/mobile", mobile_api.update_my_bank_account),
+	# The payroll deduction register. THE THIRD SET OF ROUTES ON THIS TABLE THAT
+	# REACHES WAGES, and like the register and the stub above they gate on
+	# `HR_ROLES` in their own bodies rather than on the field roles this surface
+	# is built for. What a person's pay is garnished for is among the most
+	# sensitive facts this app holds, and a foreman has no business reading it.
+	#
+	# THE READS ARE SCOPED TWO DIFFERENT WAYS because they ask two different
+	# questions. `list_payroll_deductions` declares `company` and
+	# `guard.require_company` refuses an entity this account cannot reach;
+	# `get_payroll_deduction` runs its docname through `require_scoped_doc`, so a
+	# row belonging to another entity reads as NOT FOUND rather than as refused
+	# and the register cannot be mapped by watching which error comes back.
+	# `list_employee_deductions` takes the employee through
+	# `_employee_argument`, the same check that stops an HR account walking the
+	# holding company's payroll one stub at a time.
+	#
+	# THE WRITES ARE HERE BECAUSE OF WHEN AN ORDER ARRIVES. Withholding on a
+	# support order is required from the first pay period after service, so the
+	# gap between the envelope being opened in a yard and somebody reaching a
+	# Desk is a gap with a liability in it.
+	#
+	# `employee` AND `company` ARE ABSENT FROM `update_payroll_deduction`'s
+	# SIGNATURE, so this table's argument filter is what makes the tool's refusal
+	# unreachable rather than merely enforced: there is no key to send. Moving a
+	# deduction to another worker would apply an order made against one person to
+	# somebody else.
+	Route("/mobile", mobile_api.list_payroll_deductions),
+	Route("/mobile", mobile_api.get_payroll_deduction),
+	Route("/mobile", mobile_api.list_employee_deductions),
+	Route("/mobile", mobile_api.create_payroll_deduction),
+	Route("/mobile", mobile_api.update_payroll_deduction),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

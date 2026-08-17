@@ -897,6 +897,7 @@ def build_payroll_inputs(
 	min_wage_rates: dict | None = None,
 	pay_frequency: str = "Biweekly",
 	ytd_by_employee: dict | None = None,
+	deductions_by_employee: dict | None = None,
 ) -> list[dict]:
 	"""Marry timesheet aggregates to structures and tax configuration.
 
@@ -919,6 +920,15 @@ def build_payroll_inputs(
 		ytd_by_employee: Employee → {"ytd_gross", "ytd_ss_withheld"}. Absent is
 			treated as zero, which is right for the first period of a year and
 			understates the Social Security wage base consumed after it.
+		deductions_by_employee: Employee → their Farm Payroll Deduction rows,
+			already filtered to the ones in force in this period. Absent means
+			no garnishment and no voluntary election, which is the ordinary
+			worker and computes exactly as it did before deductions existed.
+
+			PER EMPLOYEE AND NEVER SHARED, unlike the tax tables above it. A
+			salary structure or a bracket table can sensibly be one object read
+			by forty slips; a child support order cannot, and a bug that let one
+			leak across employees would garnish the wrong person's wages.
 	"""
 	inputs = []
 	for employee in sorted(employee_aggregates or {}):
@@ -971,6 +981,7 @@ def build_payroll_inputs(
 				},
 				"aggregate": aggregate,
 				"min_wage_regions": structure.get("min_wage_regions") or {},
+				"deductions": list((deductions_by_employee or {}).get(employee) or []),
 			}
 		)
 	return inputs
@@ -1035,6 +1046,7 @@ def run_integrated_payroll(
 	overtime_threshold: float = OVERTIME_THRESHOLD_HOURS,
 	workweek_anchor=None,
 	include_unworked: bool = True,
+	deductions_by_employee: dict | None = None,
 ) -> list[dict]:
 	"""Shifts in, payroll slips out.
 
@@ -1079,6 +1091,7 @@ def run_integrated_payroll(
 		min_wage_rates=min_wage_rates,
 		pay_frequency=pay_frequency,
 		ytd_by_employee=ytd_by_employee,
+		deductions_by_employee=deductions_by_employee,
 	)
 
 	slips = []
@@ -1089,6 +1102,7 @@ def run_integrated_payroll(
 			item["shifts"],
 			item["salary_structure"],
 			item["tax_config"],
+			deductions=item.get("deductions"),
 		)
 
 		wages_by_state = _state_wages(slip)
@@ -1175,10 +1189,36 @@ def summarize_payroll_run(slips: list[dict]) -> dict:
 	total_gross = total_deductions = total_net = 0.0
 	total_hours = total_overtime = total_units = 0.0
 	total_makeup = 0.0
+	total_garnishments = total_pre_tax = total_post_tax = 0.0
 	below = []
 	topped_up = []
 	open_shifts = []
+	deduction_shortfalls = []
 	for slip in slips or []:
+		total_garnishments += _as_float(slip.get("garnishment_total"))
+		total_pre_tax += _as_float(slip.get("pre_tax_deductions"))
+		total_post_tax += _as_float(slip.get("post_tax_deductions"))
+		if slip.get("deduction_shortfalls"):
+			deduction_shortfalls.append(
+				{
+					"employee": slip.get("employee"),
+					"employee_name": slip.get("employee_name"),
+					"shortfall": round(
+						sum(_as_float(row.get("shortfall")) for row in slip["deduction_shortfalls"]), 2
+					),
+					"lines": [
+						{
+							"label": row.get("label"),
+							"deduction_category": row.get("deduction_category"),
+							"requested": row.get("requested"),
+							"withheld": row.get("amount"),
+							"shortfall": row.get("shortfall"),
+							"reason": row.get("shortfall_reason", ""),
+						}
+						for row in slip["deduction_shortfalls"]
+					],
+				}
+			)
 		total_gross += _as_float(slip.get("gross_pay"))
 		makeup = _as_float(slip.get("minimum_wage_makeup"))
 		total_makeup += makeup
@@ -1225,7 +1265,16 @@ def summarize_payroll_run(slips: list[dict]) -> dict:
 		"total_overtime_hours": round(total_overtime, 2),
 		"total_piece_units": round(total_units, 2),
 		"total_minimum_wage_makeup": round(total_makeup, 2),
+		"total_garnishments": round(total_garnishments, 2),
+		"total_pre_tax_deductions": round(total_pre_tax, 2),
+		"total_post_tax_deductions": round(total_post_tax, 2),
 		"below_minimum_wage": below,
 		"topped_up_to_minimum_wage": topped_up,
 		"with_open_shifts": open_shifts,
+		# The fourth list, and it belongs beside the other three for the same
+		# reason: a slip that could not satisfy a court order computes cleanly
+		# and is a liability. An employer who withholds less than an order
+		# demands answers to the court for the difference, and nothing carries
+		# the balance forward — so this is the only place it is ever said.
+		"deduction_shortfalls": deduction_shortfalls,
 	}

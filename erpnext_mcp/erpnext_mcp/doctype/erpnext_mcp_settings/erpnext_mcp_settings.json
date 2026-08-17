@@ -397,6 +397,13 @@
   "allow_submit_payroll",
   "allow_run_payroll_for_period",
   "allow_render_pay_stub",
+  "payroll_deduction_section",
+  "allow_list_payroll_deductions",
+  "allow_get_payroll_deduction",
+  "allow_list_employee_deductions",
+  "payroll_deduction_col",
+  "allow_create_payroll_deduction",
+  "allow_update_payroll_deduction",
   "payroll_gl_section",
   "allow_get_payroll_account_mapping",
   "allow_preview_payroll_gl",
@@ -3469,6 +3476,51 @@
    "fieldname": "allow_render_pay_stub",
    "fieldtype": "Check",
    "label": "Render Pay Stub"
+  },
+  {
+   "fieldname": "payroll_deduction_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll Deductions (Garnishments and Voluntary)"
+  },
+  {
+   "default": "1",
+   "description": "READ. The register of garnishments and voluntary deductions, filtered by employee, type, category, status or reference, each row carrying the priority, pre-tax and FICA treatment the payroll engine will actually apply.",
+   "fieldname": "allow_list_payroll_deductions",
+   "fieldtype": "Check",
+   "label": "List Payroll Deductions"
+  },
+  {
+   "default": "1",
+   "description": "READ. One deduction in full, with the derived facts that decide the money and the warnings worth reading about it.",
+   "fieldname": "allow_get_payroll_deduction",
+   "fieldtype": "Check",
+   "label": "Get Payroll Deduction"
+  },
+  {
+   "default": "1",
+   "description": "READ. Everything standing against one worker's pay, in the order it comes out. Given a gross_pay it prices each line against the CCPA ceilings and reports what would be withheld and what would fall short.",
+   "fieldname": "allow_list_employee_deductions",
+   "fieldtype": "Check",
+   "label": "List Employee Deductions"
+  },
+  {
+   "fieldname": "payroll_deduction_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File a garnishment, support order, levy or voluntary election against a worker's pay. Refuses a duplicate active order with the same reference, a garnishment marked pre-tax, and a percentage over 100.",
+   "fieldname": "allow_create_payroll_deduction",
+   "fieldtype": "Check",
+   "label": "Create Payroll Deduction"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a filed deduction, or retire it by setting its status to Suspended or Completed. Cannot move it to another employee or company.",
+   "fieldname": "allow_update_payroll_deduction",
+   "fieldtype": "Check",
+   "label": "Update Payroll Deduction"
   },
   {
    "fieldname": "payroll_gl_section",

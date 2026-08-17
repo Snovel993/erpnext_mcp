@@ -35,6 +35,7 @@ from frappe.utils import today
 
 from .. import breaks as breaks_mod
 from .. import bucket_bridge, compat, pay_stub_pdf, payroll_integration, wage_defaults
+from .. import payroll_deductions
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
@@ -51,6 +52,33 @@ from . import artifacts, wagedefaults
 SALARY_STRUCTURE = "Farm Salary Structure"
 PAYROLL_ENTRY = "Farm Payroll Entry"
 PAYROLL_SLIP = "Farm Payroll Slip"
+PAYROLL_DEDUCTION = "Farm Payroll Deduction"
+
+#: What a payroll run needs off a deduction row. Narrower than the register's
+#: own field list on purpose — `notes` and the audit columns are not arithmetic
+#: and a run that carried them would put them in every slip's stored JSON.
+_DEDUCTION_FIELDS = (
+	"name",
+	"employee",
+	"company",
+	"deduction_type",
+	"deduction_category",
+	"status",
+	"priority",
+	"amount_type",
+	"amount",
+	"basis",
+	"max_per_period",
+	"pre_tax",
+	"fica_exempt",
+	"supports_other_dependents",
+	"arrears_over_12_weeks",
+	"exempt_amount",
+	"effective_from",
+	"effective_to",
+	"reference",
+	"label",
+)
 EMPLOYEE = "Employee"
 W4_FORM = "W-4 Form"
 FICA_CONFIG = "FICA Configuration"
@@ -1315,6 +1343,13 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 	worked = sorted({member["employee"] for shift in shifts for member in shift.get("crew") or []})
 	known = sorted(set(worked) | set(structures))
 
+	# THE GARNISHMENTS AND THE VOLUNTARY ELECTIONS. Read once for the whole run
+	# rather than per employee inside the loop, the same reason the wage floor
+	# and the tax tables are. Dated to the period END: a support order that
+	# started mid-period is withheld from the period it started in, which is what
+	# an employer served part way through a fortnight is required to do.
+	deductions_by_employee, deduction_sources = _load_deductions(company, str(end), known)
+
 	slips = payroll_integration.run_integrated_payroll(
 		shifts,
 		structures,
@@ -1332,6 +1367,7 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 		overtime_threshold=threshold,
 		workweek_anchor=anchor,
 		include_unworked=include_unworked,
+		deductions_by_employee=deductions_by_employee,
 	)
 
 	aggregates = payroll_integration.aggregate_shifts_for_period(
@@ -1372,6 +1408,12 @@ def _period_run(args: dict, creating: bool) -> tuple[dict, list[dict], dict]:
 		# possible answer and now there are two — the shipped table, or a State Tax
 		# Configuration somebody edited — and "the floor is not what I set it to"
 		# is answered by knowing which.
+		# Where the deductions came from, and whether the register was there to
+		# read at all. A site that has not migrated has no Farm Payroll Deduction
+		# table, and a run that silently withheld nothing would look identical to
+		# a run where nobody has a garnishment — which is the difference between
+		# "nothing to withhold" and "the orders were never read".
+		"deductions": deduction_sources,
 		"minimum_wage_rates": min_wage_rates,
 		"minimum_wage_states_configured": sorted(
 			state
@@ -1410,6 +1452,19 @@ def _slip_view(slip: dict, verbose: bool) -> dict:
 		"state_withholding": slip.get("state_withholding"),
 		"social_security": slip.get("social_security"),
 		"medicare": slip.get("medicare"),
+		# Garnishments and voluntary deductions. `total_deductions` INCLUDES
+		# these, so `net_pay = gross_pay - total_deductions` still holds; the
+		# taxes on their own are `statutory_deductions`.
+		"statutory_deductions": slip.get("statutory_deductions") or 0,
+		"total_deduction_withholdings": slip.get("total_deduction_withholdings") or 0,
+		"pre_tax_deductions": slip.get("pre_tax_deductions") or 0,
+		"post_tax_deductions": slip.get("post_tax_deductions") or 0,
+		"garnishment_total": slip.get("garnishment_total") or 0,
+		"deduction_lines": slip.get("deduction_lines") or [],
+		"deduction_shortfalls": slip.get("deduction_shortfalls") or [],
+		"federal_taxable_gross": slip.get("federal_taxable_gross") or 0,
+		"fica_taxable_gross": slip.get("fica_taxable_gross") or 0,
+		"disposable_earnings": slip.get("disposable_earnings") or 0,
 		"total_deductions": slip.get("total_deductions"),
 		"net_pay": slip.get("net_pay"),
 		"social_security_employer": slip.get("social_security_employer"),
@@ -1580,6 +1635,16 @@ def _slip_row(slip: dict) -> dict:
 	if slip.get("gross_detail", {}).get("segments"):
 		detail["_pay_segments"] = slip["gross_detail"]["segments"]
 
+	# The itemised deductions travel in the same JSON column the state detail
+	# does, so a stub printed three years from now can name each line rather
+	# than showing one "Other" figure. The TOTALS get their own columns below —
+	# a figure a report sums has to be a column, not a key inside a blob.
+	if slip.get("deduction_lines"):
+		detail["_deduction_lines"] = slip["deduction_lines"]
+	if slip.get("garnishment_detail"):
+		detail["_garnishment_detail"] = slip["garnishment_detail"]
+	if slip.get("deduction_shortfalls"):
+		detail["_deduction_shortfalls"] = slip["deduction_shortfalls"]
 	minimum = slip.get("minimum_wage_detail") or {}
 	meets = minimum.get("meets_minimum_wage")
 	if meets is None:
@@ -1607,6 +1672,20 @@ def _slip_row(slip: dict) -> dict:
 		"social_security": slip.get("social_security"),
 		"medicare": slip.get("medicare"),
 		"state_taxes_detail": json.dumps(detail, default=str),
+		# Garnishments and voluntary deductions. `total_deductions` INCLUDES
+		# these — net pay is what the worker is handed — so a report that used
+		# to read the total as "taxes" should read `statutory_deductions`.
+		"statutory_deductions": slip.get("statutory_deductions") or 0,
+		"total_deduction_withholdings": slip.get("total_deduction_withholdings") or 0,
+		"pre_tax_deductions": slip.get("pre_tax_deductions") or 0,
+		"post_tax_deductions": slip.get("post_tax_deductions") or 0,
+		"garnishment_total": slip.get("garnishment_total") or 0,
+		"voluntary_deduction_total": slip.get("voluntary_deduction_total") or 0,
+		# The two bases a W-2 is built from. They differ by exactly the 401(k)
+		# deferral, which is what Box 1 and Box 3 are supposed to differ by.
+		"federal_taxable_gross": slip.get("federal_taxable_gross") or 0,
+		"fica_taxable_gross": slip.get("fica_taxable_gross") or 0,
+		"disposable_earnings": slip.get("disposable_earnings") or 0,
 		"total_deductions": slip.get("total_deductions"),
 		"net_pay": slip.get("net_pay"),
 		"minimum_wage_check": 1 if meets else 0,
@@ -2745,6 +2824,71 @@ def _load_shifts(employee: str, start: str, end: str, company: str | None = None
 	except Exception:
 		return []
 
+
+def _load_deductions(
+	company: str | None,
+	on_date: str,
+	employees: list[str] | None = None,
+) -> tuple[dict, dict]:
+	"""Every deduction in force on `on_date`, grouped by employee.
+
+	Returns `(by_employee, provenance)`. The provenance half is the same idea as
+	`_load_period_shifts`': a run that withheld nothing because nobody has an
+	order and a run that withheld nothing because the register was never migrated
+	produce identical slips, and only one of them is fine.
+
+	SCOPED TO THE COMPANY, like every other read on a personnel file. A support
+	order filed against a worker at one entity does not reach a cheque written by
+	another, even where the same person works for both.
+
+	FILTERED IN PYTHON RATHER THAN IN SQL, and deliberately: a row with no
+	`effective_to` is in force forever, and `("<=", date)` on an empty column
+	excludes it — so the obvious query would silently drop every open-ended
+	support order, which is most of them. `payroll_deductions.is_active` is the
+	one place that rule lives.
+	"""
+	if not compat.doctype_exists(PAYROLL_DEDUCTION):
+		return {}, {
+			"available": False,
+			"reason": (
+				"Farm Payroll Deduction is not on this site, so no garnishment or voluntary "
+				"deduction was applied. It ships with erpnext_mcp — run `bench --site <site> "
+				"migrate` after upgrading the app."
+			),
+			"count": 0,
+		}
+
+	filters = {}
+	if company:
+		filters["company"] = company
+	if employees:
+		filters["employee"] = ("in", list(employees))
+
+	rows = frappe.db.get_all(
+		PAYROLL_DEDUCTION,
+		filters=filters,
+		fields=list(compat.existing_fields(PAYROLL_DEDUCTION, _DEDUCTION_FIELDS)),
+		limit=10000,
+	)
+	live = [row for row in rows if payroll_deductions.is_active(row, on_date)]
+
+	by_employee: dict[str, list[dict]] = {}
+	for row in live:
+		by_employee.setdefault(str(row.get("employee") or ""), []).append(dict(row))
+
+	return by_employee, {
+		"available": True,
+		"count": len(live),
+		"on_file": len(rows),
+		"in_force_on": on_date,
+		"employees": sorted(by_employee),
+		"garnishment_count": len(
+			[row for row in live if payroll_deductions.row_type(row) == "garnishment"]
+		),
+		"voluntary_count": len(
+			[row for row in live if payroll_deductions.row_type(row) == "voluntary"]
+		),
+	}
 
 def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 	"""Active salary structures for a company, keyed by employee.

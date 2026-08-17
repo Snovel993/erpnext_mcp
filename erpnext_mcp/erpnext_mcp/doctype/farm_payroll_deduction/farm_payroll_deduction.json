@@ -1,0 +1,290 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-17 09:00:00.000000",
+ "description": "One standing instruction to withhold money from an employee's pay that is not a tax: a court-ordered garnishment, a child support order, a tax levy, a student loan, or a voluntary election such as a 401(k) deferral, a health premium or union dues. Garnishments are withheld after taxes in legal priority order and against the CCPA ceilings (15 U.S.C. 1673); pre-tax voluntary deductions reduce the wage base before withholding is computed.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "col_break_1",
+  "deduction_type",
+  "deduction_category",
+  "status",
+  "priority",
+  "amount_section",
+  "amount_type",
+  "amount",
+  "basis",
+  "col_break_amount",
+  "max_per_period",
+  "pre_tax",
+  "fica_exempt",
+  "garnishment_section",
+  "supports_other_dependents",
+  "arrears_over_12_weeks",
+  "col_break_garnishment",
+  "exempt_amount",
+  "dates_section",
+  "effective_from",
+  "effective_to",
+  "reference_section",
+  "reference",
+  "label",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "FPD-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "FPD-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Garnishment or Voluntary. NO DEFAULT, deliberately: the category below implies the answer and a default of Voluntary would quietly file a support order as an employee election — behind the union dues in the queue and outside the ceiling that governs it. A GARNISHMENT is money a court, an agency or a statute compels the employer to withhold and remit to somebody other than the worker; it is withheld after taxes, in legal priority order, and only up to what the Consumer Credit Protection Act allows. A VOLUNTARY deduction is the worker's own election and yields to a garnishment whenever the money runs out. Set this against the category only for an 'Other' that belongs on the opposite side of the line.",
+   "fieldname": "deduction_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Deduction Type",
+   "options": "Garnishment\nVoluntary",
+   "reqd": 1
+  },
+  {
+   "default": "Other",
+   "description": "What this is, which decides the ceiling that governs it and where it sits in the queue. Child Support has its own ceiling of 50-65% of disposable earnings; Tax Levy is not limited by the CCPA at all; Student Loan is capped at 15%; Wage Garnishment gets the ordinary 25% pool and shares it with everything above. On the voluntary side the category decides whether the deduction is pre-tax and whether it also leaves the FICA base — a 401(k) leaves the income tax base and stays in the FICA one, a health premium leaves both.",
+   "fieldname": "deduction_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Child Support\nWage Garnishment\nTax Levy\nStudent Loan\nRetirement 401k\nHealth Insurance\nDental Vision\nLife Insurance\nHSA\nFSA\nUnion Dues\nOther",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "description": "Only Active is ever withheld. Suspended holds an order in place without taking money — a support order stayed by a court, an election paused for unpaid leave — and Completed retires one that has been satisfied. Neither is a deletion: an order that has been paid off is the record that proves it was, and a garnishment removed from the file cannot answer the court that asks why withholding stopped.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nSuspended\nCompleted",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Processing order, lowest first. Leave at 0 to use the order the law gives the category — child support 10, tax levy 20, student loan 30, other garnishments 40, then voluntary elections from 100. Set it only where a specific order says otherwise, which is the one record more specific than the statute. Zero means 'not set' rather than 'first': every Int on every doctype defaults to 0, and treating that as top priority would promote every unfilled row ahead of a support order.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "Amount"
+  },
+  {
+   "default": "Fixed",
+   "description": "Fixed is a dollar amount per pay period. Percentage is a share of the basis below.",
+   "fieldname": "amount_type",
+   "fieldtype": "Select",
+   "label": "Amount Type",
+   "options": "Fixed\nPercentage",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "The dollar amount per period, or the percentage — 6 means 6%, not 0.06. This is what the deduction ASKS for; what it actually takes may be less, because a garnishment is bounded by the CCPA ceilings and a voluntary deduction is bounded by the cash left after the garnishments. The difference is reported on the slip as a shortfall and is NOT carried into the next period.",
+   "fieldname": "amount",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Amount",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.amount_type=='Percentage'",
+   "description": "What a percentage is a percentage OF. Net After Tax means DISPOSABLE EARNINGS — gross less the withholding the law requires, which is the figure every court order and withholding notice is written against, and the figure the CCPA measures. Gross Pay is what a 401(k) deferral rate means. Blank defaults to Net After Tax for a garnishment and Gross Pay for a voluntary election. Note that voluntary pre-tax deductions do NOT reduce disposable earnings: an employee cannot shrink the base a court order is measured against by raising their own contribution rate.",
+   "fieldname": "basis",
+   "fieldtype": "Select",
+   "label": "Percentage Basis",
+   "options": "\nGross Pay\nNet After Tax"
+  },
+  {
+   "fieldname": "col_break_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Never withhold more than this in one pay period. Zero means no cap — a Currency field defaults to 0 on every row, so a zero here is a field nobody filled in rather than a cap of nothing. This is what makes a percentage safe: a 6% deferral on a harvest week heavy with overtime can exceed what a plan allows per period.",
+   "fieldname": "max_per_period",
+   "fieldtype": "Currency",
+   "label": "Maximum Per Period"
+  },
+  {
+   "description": "Leave unset to follow the category, which is almost always right. A pre-tax deduction comes out of the WAGE BASE before withholding is computed, so it reduces the tax; a post-tax one comes out of the pay after the tax was computed on the whole of it. A GARNISHMENT IS NEVER PRE-TAX whatever this says — money taken under a court order is wages the worker earned and was taxed on, and the order reaches what is left.",
+   "fieldname": "pre_tax",
+   "fieldtype": "Check",
+   "label": "Pre-Tax"
+  },
+  {
+   "depends_on": "eval:doc.pre_tax",
+   "description": "Does this leave the Social Security and Medicare base as well as the income tax base? Leave unset to follow the category. THIS IS THE FIELD THAT SEPARATES A 401(k) FROM A HEALTH PREMIUM: a Section 125 cafeteria plan benefit is exempt from both (IRC 125(a), 3121(a)(5)(G)), while a traditional 401(k) elective deferral is exempt from income tax and stays in the FICA wage base (IRC 402(e)(3) defers the income tax; 3121(v)(1)(A) keeps it in FICA). Ticking this for a 401(k) under-withholds Social Security and Medicare on every deferral — an error that reconciles cleanly all year and surfaces on a W-2, where Box 1 and Box 3 should differ by the deferral and instead agree.",
+   "fieldname": "fica_exempt",
+   "fieldtype": "Check",
+   "label": "Also Exempt From FICA"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.deduction_type=='Garnishment'",
+   "fieldname": "garnishment_section",
+   "fieldtype": "Section Break",
+   "label": "Garnishment Limits"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.deduction_category=='Child Support'",
+   "description": "Does this employee support another spouse or dependent child? It sets the child support ceiling under 15 U.S.C. 1673(b)(2): 50% of disposable earnings where they do, 60% where they do not. It is a fact about the EMPLOYEE rather than about this order, so where two orders disagree the more permissive answer is used and both inputs are reported on the slip.",
+   "fieldname": "supports_other_dependents",
+   "fieldtype": "Check",
+   "label": "Supports Other Dependents"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.deduction_category=='Child Support'",
+   "description": "Is this support more than twelve weeks in arrears? Adds 5 points to the ceiling above, so 50 becomes 55 and 60 becomes 65. The final clause of 15 U.S.C. 1673(b)(2).",
+   "fieldname": "arrears_over_12_weeks",
+   "fieldtype": "Check",
+   "label": "Arrears Over 12 Weeks"
+  },
+  {
+   "fieldname": "col_break_garnishment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.deduction_category=='Tax Levy'",
+   "description": "What the levy notice leaves the employee, per pay period. A federal tax levy is NOT limited by the CCPA (29 CFR 870.11(b)(2)); it is bounded instead by the exempt amount IRC 6334(d) leaves the taxpayer, which the IRS computes from filing status and dependents and publishes on the Part D table of the levy notice (Publication 1494). This app does not carry that table, so the figure is typed from the notice. Left at zero the levy takes what it asks for, bounded only by the pay.",
+   "fieldname": "exempt_amount",
+   "fieldtype": "Currency",
+   "label": "Exempt Amount (Pub 1494)"
+  },
+  {
+   "fieldname": "dates_section",
+   "fieldtype": "Section Break",
+   "label": "In Force"
+  },
+  {
+   "description": "First day this is withheld. A deduction with no start date is withheld from the first period that reads it.",
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
+   "reqd": 1
+  },
+  {
+   "description": "Last day this is withheld. Leave blank for an open-ended election or an order with no stated end — which is most support orders. A period is tested against these dates, so an order that ended mid-period is not withheld from that period at all rather than pro-rated.",
+   "fieldname": "effective_to",
+   "fieldtype": "Date",
+   "label": "Effective To"
+  },
+  {
+   "fieldname": "reference_section",
+   "fieldtype": "Section Break",
+   "label": "Reference"
+  },
+  {
+   "description": "The document this deduction exists because of: a court order number, an IRS levy notice number, a state case identifier, a plan id, a policy number. THE FIELD THAT MAKES A GARNISHMENT DEFENSIBLE — an employer served with an order answers for what it withheld and this is what ties the withholding to the order it was made under.",
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reference"
+  },
+  {
+   "description": "What this line is called on a pay stub. Blank uses the category's own name — 'Child Support', '401(k)' — which is what a worker expects to read. Set one where the same category carries two orders that have to be told apart.",
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Pay Stub Label"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-17 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Payroll Deduction",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR User",
+   "write": 1
+  }
+ ],
+ "search_fields": "employee_name,deduction_category,status,reference",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}

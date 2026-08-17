@@ -589,6 +589,26 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_my_bank_accounts",
 		"add_my_bank_account",
 		"update_my_bank_account",
+		# The payroll deduction register: three reads and two writes.
+		# `MobileAPI.swift` names none of the five — there is no deductions
+		# screen in the app — so the server half is published first and the iOS
+		# half is a client change rather than a release of both.
+		#
+		# THEY ARE HERE RATHER THAN IN `MOBILE` FOR THIS SET'S ORDINARY REASON
+		# and not as paperwork: `test_ios_contract` requires a mirror of the
+		# Swift Codable for everything in that set, and there is no Codable to
+		# mirror. Writing one would invent the contract rather than transcribe
+		# it, and an invented contract is worse than an absent one — the app
+		# would be built against a shape nothing on either side agreed to.
+		#
+		# ALL FIVE ARE HR-ONLY IN THEIR OWN BODIES, which is the thing to check
+		# if any appears in an app build. What a person's wages are garnished
+		# for is among the most sensitive facts this app holds.
+		"list_payroll_deductions",
+		"get_payroll_deduction",
+		"list_employee_deductions",
+		"create_payroll_deduction",
+		"update_payroll_deduction",
 	}
 
 	def _whitelisted(self, module):
