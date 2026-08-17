@@ -61,7 +61,18 @@ from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.tools import mobile as mobile_tools
 from erpnext_mcp.tools import shifts as shift_tools
 
-from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
+from .fixtures import (
+	MAIN,
+	OTHER,
+	OTHER_STORES,
+	SHOP,
+	SPRAY,
+	STORES,
+	V12TestCase,
+	install_hrms,
+	seed_masters,
+	seed_stock,
+)
 from .harness import ROLES, STORE, set_roles
 from .test_dispatch import WALK
 
@@ -503,6 +514,30 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_shadow_log_entries",
 		"get_shadow_log_entry",
 		"acknowledge_shadow_log",
+		# v0.91.0. The inventory tab's five, and the wizard submit target that
+		# completes the set of five the seeded wizards name.
+		#
+		# HERE FOR A SHARPER REASON THAN THE REST OF THIS SET, AND IT IS WORTH
+		# STATING. Everything above is "the Swift does not name it yet".
+		# `MobileAPI.swift` DOES name these five — at
+		# `farmops/api/stock-balance` and its four neighbours, the hyphenated
+		# top-level GETs `sprint-4-api-contracts.md` § Workstream 1 specifies.
+		# This route table cannot publish that shape (see `routes.py`), so the
+		# app is moving to the namespace instead, which is a client change to
+		# `MobileAPI.swift` and `InventoryAPI.swift`. Until it lands the app is
+		# calling paths that do not exist and these methods are unreached, which
+		# is what this set means. They move up with that change.
+		#
+		# `start_inspection` is here for a different reason again: nothing in
+		# `MobileAPI.swift` will ever name it. It is reached through the
+		# `submit_endpoint` its wizard hands the renderer, which is the whole
+		# point of that field — see `_with_submit_endpoint`.
+		"get_stock_balance",
+		"get_warehouse_summary",
+		"get_stock_ledger",
+		"list_reorder_alerts",
+		"create_stock_entry",
+		"start_inspection",
 	}
 
 	def _whitelisted(self, module):
@@ -3153,3 +3188,191 @@ class TheShadowFeedIsAddressed(MobileAPITestCase):
 		with self.assertRaises(Exception) as caught:
 			mobile_api.list_shadow_log_entries()
 		self.assertIn("has no Employee record", str(caught.exception))
+
+
+class TheInventoryTabReachesTheServer(MobileAPITestCase):
+	"""v0.91.0. The five stock routes, and the entity filter on each shape.
+
+	THE TOOLS HAVE EXISTED SINCE v0.69.0 AND NONE OF THEM HAD A ROUTE. Every
+	screen under `FarmOps/Features/Inventory` shipped against a contract whose
+	server half was never mounted, so all four showed the sidecar's own "is not
+	a Farm Ops API method" 404 in an error banner.
+
+	THE SCOPING IS DIFFERENT ON EVERY ONE OF THE THREE ROW SHAPES, which is what
+	these tests are really about. `get_stock_balance` rows carry `company` and
+	`guard.scoped` handles them; `get_warehouse_summary` is one shed whose rows
+	carry no company at all; `get_stock_ledger` and `list_reorder_alerts` carry
+	a warehouse and no company, and the ledger tool TAKES NO COMPANY ARGUMENT —
+	there is no filter to ask it for, so the wrapper resolves the caller's
+	entities to a warehouse set itself.
+
+	THE FIXTURE IS BUILT FOR EXACTLY THIS. SPRAY sits in two MAIN warehouses
+	(80 at STORES, 45 at SHOP) and one OTHER warehouse (500 at OTHER_STORES),
+	and Ana is scoped to MAIN alone. So 125 is the right answer and 625 is the
+	leak, on every read below.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		seed_masters()
+		seed_stock()
+
+	# ── get_stock_balance ───────────────────────────────────────────────────
+	def test_a_balance_covers_the_callers_entities_and_no_others(self):
+		self.be()
+		answer = mobile_api.get_stock_balance(item_code=SPRAY)
+		self.assertEqual({row["warehouse"] for row in answer["balances"]}, {STORES, SHOP})
+		self.assertEqual(answer["warehouse_count"], 2)
+
+	def test_the_balance_totals_are_recomputed_after_the_filter(self):
+		"""THE LEAK THAT SURVIVES ITS OWN ROWS. The tool sums before the wrapper
+		drops anything, so passing its totals through would report the other
+		entity's 500 units as a number after its row had gone — the whole point
+		of scoping defeated by an aggregate nobody looked at."""
+		self.be()
+		answer = mobile_api.get_stock_balance(item_code=SPRAY)
+		self.assertEqual(answer["total_qty"], 125.0)
+		self.assertEqual(answer["total_value"], 312.5)
+
+	def test_naming_another_entity_is_refused_rather_than_emptied(self):
+		self.be()
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.get_stock_balance(item_code=SPRAY, company=OTHER)
+
+	# ── get_warehouse_summary ───────────────────────────────────────────────
+	def test_a_warehouse_summary_answers_for_the_callers_own_shed(self):
+		self.be()
+		answer = mobile_api.get_warehouse_summary(warehouse=STORES)
+		self.assertEqual(answer["warehouse"], STORES)
+		self.assertEqual(answer["company"], MAIN)
+		self.assertEqual({row["item_code"] for row in answer["items"]}, {SPRAY})
+
+	def test_another_entitys_warehouse_is_refused_by_docname(self):
+		"""`guard.scoped` IS NO USE ON THIS SHAPE — the rows are items in one
+		shed and carry no company — so the whole answer is refused on the
+		warehouse's own entity, or a docname somebody typed reads another
+		farm's shelves."""
+		self.be()
+		with self.assertRaises(frappe.PermissionError):
+			mobile_api.get_warehouse_summary(warehouse=OTHER_STORES)
+
+	# ── get_stock_ledger ────────────────────────────────────────────────────
+	def test_the_ledger_is_filtered_by_warehouse_because_the_tool_cannot_be(self):
+		"""`get_stock_ledger` has no company argument at all, so without the
+		wrapper's own filter an account scoped to one entity reads every
+		movement on the site."""
+		self.be()
+		answer = mobile_api.get_stock_ledger(item_code=SPRAY)
+		self.assertTrue(answer["movements"], "the fixture has MAIN movements to find")
+		self.assertNotIn(OTHER_STORES, {row["warehouse"] for row in answer["movements"]})
+		self.assertEqual(answer["count"], len(answer["movements"]))
+
+	# ── list_reorder_alerts ─────────────────────────────────────────────────
+	def test_the_reorder_alerts_reach_the_phone(self):
+		self.be()
+		answer = mobile_api.list_reorder_alerts()
+		self.assertNotIn(OTHER_STORES, {row["warehouse"] for row in answer["alerts"] if row["warehouse"]})
+		self.assertEqual(answer["count"], len(answer["alerts"]))
+
+	# ── create_stock_entry ──────────────────────────────────────────────────
+	def test_a_stock_entry_comes_back_a_draft(self):
+		"""`submit_stock_entry` IS NOT ROUTED AND MUST NOT BE. Submitting writes
+		GL entries, and a posting to the general ledger does not originate on a
+		handset in a chemical shed."""
+		self.be()
+		answer = mobile_api.create_stock_entry(
+			entry_type="Material Receipt",
+			items=[{"item_code": SPRAY, "qty": 40, "warehouse": STORES, "basic_rate": 2.5}],
+		)
+		self.assertEqual(answer["docstatus"], 0)
+		self.assertEqual(answer["status"], "Draft")
+
+	def test_the_write_is_declared_mutating_on_the_wrapper_and_the_route(self):
+		self.assertTrue(mobile_api.create_stock_entry.farm_ops_mutating)
+		by_path = {route.path: route for route in farmops_routes.ROUTES}
+		self.assertTrue(by_path["/mobile/create_stock_entry"].mutating)
+		self.assertFalse(by_path["/mobile/get_stock_balance"].mutating)
+
+	def test_the_submit_is_not_reachable_at_any_path(self):
+		self.assertNotIn(
+			"submit_stock_entry", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES}
+		)
+
+	def test_a_line_in_another_entitys_warehouse_is_refused(self):
+		"""The company is scoped here and the tool checks every line's warehouse
+		against it, so scoping the entity scopes the whole entry."""
+		self.be()
+		with self.assertRaises(Exception):
+			mobile_api.create_stock_entry(
+				entry_type="Material Receipt",
+				items=[{"item_code": SPRAY, "qty": 5, "warehouse": OTHER_STORES}],
+			)
+
+
+class TheWizardKnowsWhereToPostItsAnswers(MobileAPITestCase):
+	"""v0.91.0. `submit_endpoint`, and the flow that could not be filed.
+
+	THE READ SHIPPED WITHOUT THE HALF THAT MAKES IT USABLE. A Wizard Definition
+	carries `submit_method` — a TOOL name, `create_accident_report` — and the
+	app decodes `submit_endpoint`, a path. Nothing was translating one into the
+	other, so a server-authored spec arrived with an empty endpoint and
+	`WizardDefinition.isRenderable` was false for every one of them.
+
+	THERE IS STILL NO `submit_wizard` AND THERE MUST NOT BE. One route that
+	looked up a spec's submit method and forwarded to it is the dispatcher
+	`routes.py` opens by refusing — the permission decision belongs per route.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from erpnext_mcp.tools import wizards as wizard_tools
+
+		# The five shipped specs, seeded as records — the same ones `migrate`
+		# installs. Asserting against the real register rather than a fixture of
+		# my own is the point of `test_every_seeded_wizard_now_has_a_route`:
+		# a sixth spec added later with an unrouted submit_method fails there.
+		wizard_tools.install_wizard_definitions()
+
+	def test_a_wizard_names_a_path_the_app_can_post_to(self):
+		self.be()
+		answer = mobile_api.get_wizard_definition(wizard="accident_investigation")
+		self.assertEqual(answer["submit_method"], "create_accident_report")
+		self.assertEqual(answer["submit_endpoint"], "farmops/api/mobile/create_accident_report")
+		self.assertEqual(answer["submit_context"], {})
+
+	def test_every_seeded_wizard_now_has_a_route_behind_it(self):
+		"""The `inspection_session` flow is why `start_inspection` exists: it
+		named a method that was on no table, so a worker could load the form and
+		not file it."""
+		self.be()
+		published = {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES}
+		for key in mobile_api.list_wizard_definitions()["wizards"]:
+			with self.subTest(wizard=key["wizard_key"]):
+				answer = mobile_api.get_wizard_definition(wizard=key["wizard_key"])
+				self.assertIn(answer["submit_method"], published)
+				self.assertTrue(answer["submit_endpoint"])
+
+	def test_an_unroutable_wizard_is_blanked_rather_than_pointed_at_a_404(self):
+		"""THE APP REFUSES TO DRAW A SPEC WITH NO ENDPOINT, and that is the
+		failure worth having. A worker never shown the form has lost nothing; a
+		worker who fills in three steps and a signature before the post 404s has
+		lost the thing this surface exists to collect."""
+		self.be()
+		frappe.db.set_value(
+			"Wizard Definition", "accident_investigation", "submit_method", "no_such_tool"
+		)
+		answer = mobile_api.get_wizard_definition(wizard="accident_investigation")
+		self.assertEqual(answer["submit_endpoint"], "")
+		self.assertIn("does not publish", answer["submit_unavailable"])
+
+	def test_there_is_no_submit_wizard_route(self):
+		self.assertNotIn(
+			"submit_wizard", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES}
+		)
+
+	def test_start_inspection_cannot_file_against_a_colleague(self):
+		"""`worker` and `foreman` are not on the signature, so `routes.bind`
+		cannot deliver either. The person opening the visit is the caller."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.start_inspection)
+		self.assertNotIn("worker", accepted)
+		self.assertNotIn("foreman", accepted)

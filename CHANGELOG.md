@@ -3,11 +3,13 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
-## 0.91.0 — 2026-08-17 — the feed nobody could reach, and a sweep for its cause
+## 0.91.0 — 2026-08-17 — the feed nobody could reach, the shelf nobody could count, and a sweep for their cause
 
 Three tools that have existed since v0.85.0 and answered **404 to every phone on
-the farm** get their routes. Plus the audit that asks whether the pause/resume
-bug fixed in the session before this one had siblings anywhere else in the tree.
+the farm** get their routes. Then five more that have done the same since
+v0.69.0, and the one that left a filled-in wizard with nowhere to go. Plus the
+audit that asks whether the pause/resume bug fixed in the session before this
+one had siblings anywhere else in the tree.
 
 ### The shadow log reaches a handset
 
@@ -62,8 +64,9 @@ This release asks whether it had siblings.
 - **Registry integrity.** All **693** tools resolve to a callable handler taking
   the single `args` dict, and the dict literal holds 693 distinct keys with no
   duplicate.
-- **Routes.** **127 routes, 127 guarded methods, zero stranded, zero dangling**
-  (124 before the three added here).
+- **Routes.** **133 routes, 133 guarded methods, zero stranded, zero dangling**
+  (124 before the nine added here — three shadow log, five inventory, and
+  `start_inspection`).
   Every route reaches a real guarded function and every guarded function has a
   route, in both directions; no route disagrees with its endpoint about whether
   it writes.
@@ -71,12 +74,85 @@ This release asks whether it had siblings.
   task pause/resume routed and fixed; the shadow log was the gap, and is what this
   release closes.
 
+### The inventory tab stops answering 404
+
+`get_stock_balance`, `get_warehouse_summary`, `get_stock_ledger`,
+`list_reorder_alerts` and `create_stock_entry` have been MCP tools since v0.69.0
+and reachable from a handset never. All four screens under
+`FarmOps/Features/Inventory` shipped against `sprint-4-api-contracts.md`
+§ Workstream 1 and every one of them put the sidecar's own *"is not a Farm Ops
+API method"* into an error banner.
+
+**The app was asking at the wrong shape as well as the wrong path.** The contract
+describes hyphenated top-level GETs — `/farmops/api/stock-balance`, and a
+warehouse as a *path* component — and the route table cannot express either:
+`Route` builds every path as `{prefix}/{method}` off the wrapper's own name. That
+is the same call v0.8x already made for Workstream 2 (`MobileAPI.swift`: *the
+hyphenated top-level path describes the intent, not the transport*), and it is
+made the same way here rather than teaching the table a second path grammar for
+five routes. **The iOS half is a client change and is not in this release** — the
+app still calls the old paths until `MobileAPI.swift` and `InventoryAPI.swift`
+land, which is why these five sit in `PENDING_IOS_INTEGRATION`.
+
+**The entity filter is different on each of the three row shapes, and one of them
+had nowhere to put it.** `get_stock_balance` rows carry a company, so
+`guard.scoped` is the whole of it. `get_warehouse_summary` describes one shed
+whose rows carry no company at all, so the warehouse's own entity is checked once
+and the whole answer refused. `get_stock_ledger` **takes no company argument** —
+there is no filter to ask the tool for — so the wrapper resolves the caller's
+entities to a warehouse set itself; without it an account scoped to one company
+reads every movement on the site.
+
+**Every total is recomputed from what survived the filter.** The tools sum before
+the wrapper drops anything, so passing `total_qty`, `total_value` or
+`net_qty_change` through unchanged would report another entity's quantities as a
+number after its rows had gone — the leak outliving the rows it came from. In the
+fixture that is the difference between 125 units and 625.
+
+**`create_stock_entry` is the one write and it comes back a draft.**
+`submit_stock_entry` writes GL entries and is deliberately absent from the route
+table: a posting to the general ledger does not originate on a handset in a
+chemical shed. Every line's warehouse is checked against the scoped company by
+the tool, so scoping the entity scopes the whole entry.
+
+### A wizard can be filed as well as loaded
+
+`get_wizard_definition` has been routed since v0.79.0 and **nothing could be
+submitted through it.** A Wizard Definition carries `submit_method` — a *tool*
+name, `create_accident_report` — and the app decodes `submit_endpoint`, a *path*.
+Nothing translated one into the other, so every server-authored spec arrived with
+an empty endpoint and `WizardDefinition.isRenderable` was false for all of them.
+
+**The translation lives in the wrapper, not in the tool.** `submit_method` means
+the same thing to an MCP client, which has no sidecar and no prefix; the MCP
+tool's shape is unchanged by this.
+
+**There is no `submit_wizard` and there must not be.** One route that looked up a
+spec's submit method and forwarded to it is the dispatcher `routes.py` opens by
+refusing — the permission decision belongs per route, where `guard.endpoint` and
+the argument filter can both see it. Instead the wizards' own submit targets are
+routed: four already were, and `start_inspection` — named by the
+`inspection_session` spec and existing nowhere — is added here. `worker` and
+`foreman` are off its signature, so the visit is opened by the caller and cannot
+be filed against a colleague.
+
+**A method with no route produces no endpoint, deliberately.** The app refuses to
+draw a spec whose `submit_endpoint` is empty, which is the failure worth having:
+a worker never shown the form has lost nothing, and a worker who fills in three
+steps and a signature before the post 404s has lost the thing the surface exists
+to collect. The reason travels in `submit_unavailable`.
+
 ### Tests
 
-**9,823 tests, all passing, 126 skipped** — 16 new, and every one of them
-*invokes* a wrapper rather than asserting it is published. That is the lesson of
-`bd66550`: the pause pair were listed in the surface-is-closed registry, asserted
-to exist, and never once called.
+**9,839 tests, all passing, 126 skipped** — 32 new (16 for the shadow log, 16 for
+the inventory and wizard routes), and every one of them *invokes* a wrapper
+rather than asserting it is published. That is the lesson of `bd66550`: the pause
+pair were listed in the surface-is-closed registry, asserted to exist, and never
+once called.
+
+`test_every_seeded_wizard_now_has_a_route_behind_it` walks the real installed
+register rather than a fixture, so a sixth spec added later with an unrouted
+`submit_method` fails there rather than in a field.
 
 ## 0.90.0 — 2026-08-16 — one number past the wave
 

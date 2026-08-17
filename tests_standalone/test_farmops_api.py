@@ -427,6 +427,26 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_shadow_log_entries",
 		"/mobile/get_shadow_log_entry",
 		"/mobile/acknowledge_shadow_log",
+		# v0.91.0. The inventory tab's four reads and one draft-only write. The
+		# app has been calling these at hyphenated top-level paths this table
+		# cannot express — `Route` builds every path off the wrapper's own name —
+		# so the client moves to the namespace rather than this file growing a
+		# second path grammar.
+		#
+		# `submit_stock_entry` IS ABSENT AND THAT IS THE POINT OF THE PAIR: the
+		# create writes a draft, the submit writes GL entries, and only the first
+		# is reachable from a handset.
+		"/mobile/get_stock_balance",
+		"/mobile/get_warehouse_summary",
+		"/mobile/get_stock_ledger",
+		"/mobile/list_reorder_alerts",
+		"/mobile/create_stock_entry",
+		# v0.91.0. The fifth wizard submit target. The other four —
+		# `create_employee`, `register_asset`, `create_accident_report`,
+		# `create_discipline_record` — were already on this table; the
+		# `inspection_session` wizard named one that existed nowhere, so the form
+		# loaded and could not be filed. There is still no `submit_wizard`.
+		"/mobile/start_inspection",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

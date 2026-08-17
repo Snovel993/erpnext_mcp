@@ -555,6 +555,40 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_shadow_log_entries),
 	Route("/mobile", mobile_api.get_shadow_log_entry),
 	Route("/mobile", mobile_api.acknowledge_shadow_log),
+	# v0.91.0. The inventory tab, which has been calling five endpoints that were
+	# never mounted. The tools have existed since v0.69.0; `FarmOps/Features/
+	# Inventory` shipped against `sprint-4-api-contracts.md` § Workstream 1 and
+	# every one of its four screens has shown the "is not a Farm Ops API method"
+	# 404 in an error banner since.
+	#
+	# THE APP WAS ASKING AT THE WRONG SHAPE AS WELL AS THE WRONG PATH. The
+	# contract describes hyphenated top-level GETs — `/farmops/api/stock-balance`,
+	# and a warehouse as a PATH component — and this table cannot express either:
+	# `Route` builds every path as `{prefix}/{farm_ops_method}`, off the wrapper's
+	# own name. That is the same call v0.8x already made for Workstream 2 (see
+	# `MobileAPI.swift`, "the hyphenated top-level path describes the intent, not
+	# the transport"), and it is made the same way here rather than teaching this
+	# table a second path grammar for five routes. The app moves to the namespace.
+	#
+	# FOUR READS AND ONE WRITE. `create_stock_entry` is `mutating=True` and comes
+	# back a DRAFT: `submit_stock_entry` writes GL entries and is deliberately
+	# absent from this table, so nothing a handset can reach posts to the ledger.
+	Route("/mobile", mobile_api.get_stock_balance),
+	Route("/mobile", mobile_api.get_warehouse_summary),
+	Route("/mobile", mobile_api.get_stock_ledger),
+	Route("/mobile", mobile_api.list_reorder_alerts),
+	Route("/mobile", mobile_api.create_stock_entry),
+	# v0.91.0. The last unrouted wizard submit target. A wizard names its own
+	# `submit_method` and four of the five seeded ones already had a route here —
+	# `create_employee`, `register_asset`, `create_accident_report` and
+	# `create_discipline_record`. `inspection_session` named `start_inspection`,
+	# which existed nowhere, so that form loaded and could not be filed.
+	#
+	# THERE IS STILL NO `submit_wizard` AND THERE MUST NOT BE. One route that
+	# looked up a spec's submit method and forwarded to it is the dispatcher this
+	# file opens by refusing: the permission decision belongs per route, where
+	# `guard.endpoint` and this table's argument filter can both see it.
+	Route("/mobile", mobile_api.start_inspection),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

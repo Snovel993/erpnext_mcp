@@ -121,7 +121,9 @@ from ..tools import training as training_tools
 from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
+from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
+from ..tools import stock_inventory as stock_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
@@ -7645,6 +7647,54 @@ def list_accident_reports(
 	return data
 
 
+def _with_submit_endpoint(data: dict) -> dict:
+	"""Turn the wizard's `submit_method` into a path this transport publishes.
+
+	THE TOOL DOES NOT KNOW WHAT A URL IS AND IS NOT BEING TAUGHT. `submit_method`
+	is a tool name — `create_accident_report` — and it means the same thing to an
+	MCP client, which has no sidecar and no prefix. The translation to
+	`farmops/api/mobile/create_accident_report` belongs where the prefix is known,
+	which is here, so the MCP tool's shape is unchanged by this.
+
+	A METHOD WITH NO ROUTE PRODUCES NO ENDPOINT, DELIBERATELY. The app treats a
+	spec with an empty `submit_endpoint` as unrenderable and refuses to draw it,
+	which is the failure worth having: a worker who is never shown the form has
+	lost nothing, and a worker who fills in three steps and a signature before the
+	post 404s has lost the thing this whole surface exists to collect. The reason
+	travels in `submit_unavailable` so the screen can say which flow is down
+	rather than showing an empty state that reads as "nothing to do".
+
+	`submit_context` is EMPTY and is sent anyway. Wizard Definition has no field
+	for it — the doctype carries `submit_method` and nothing else about
+	submission — so there is nothing to fill it with, and sending the key means
+	the app's decoder gets the shape it declares rather than falling back to a
+	default that would look identical to a context somebody forgot to configure.
+	"""
+	from ..farmops_api import routes as route_table
+
+	method = str(data.get("submit_method") or "").strip()
+	data["submit_context"] = {}
+	if not method:
+		data["submit_endpoint"] = ""
+		data["submit_unavailable"] = (
+			f"wizard {data.get('wizard_key')!r} names no submit_method, so there is nowhere to "
+			f"file it. An operator sets one on the Wizard Definition."
+		)
+		return data
+
+	published = {route.path.rsplit("/", 1)[-1] for route in route_table.ROUTES}
+	if method not in published:
+		data["submit_endpoint"] = ""
+		data["submit_unavailable"] = (
+			f"wizard {data.get('wizard_key')!r} submits to {method!r}, which this app does not "
+			f"publish to handsets. The flow cannot be filed from a phone until it is routed."
+		)
+		return data
+
+	data["submit_endpoint"] = f"farmops/api/mobile/{method}"
+	return data
+
+
 # ── 91. get_wizard_definition ────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_wizard_definition", limit=guard.READ_LIMIT)
@@ -7663,7 +7713,7 @@ def get_wizard_definition(user: str, wizard=None, language=None) -> dict:
 	inner = {"wizard": str(wizard or "").strip(), "employee": employee, "user": user}
 	if language:
 		inner["language"] = str(language).strip()
-	return wizard_tools.get_wizard_definition(inner).data
+	return _with_submit_endpoint(wizard_tools.get_wizard_definition(inner).data)
 
 
 # ── 92. list_wizard_definitions ──────────────────────────────────────────────
@@ -8382,3 +8432,263 @@ def acknowledge_shadow_log(user: str, name=None, note=None, acknowledged_at=None
 			inner[key] = str(value).strip()
 
 	return shadow_log_tools.acknowledge_shadow_log(inner).data
+
+
+# ── stock & inventory ────────────────────────────────────────────────────────
+#
+# THE FOUR READS AND THE ONE WRITE THE INVENTORY TAB HAS BEEN 404ING ON SINCE
+# v0.69.0. The tools have existed that whole time and none of them had a route,
+# so every screen under `FarmOps/Features/Inventory` put the sidecar's own
+# "is not a Farm Ops API method" 404 into an error banner and called it a day.
+#
+# THE SCOPING IS NOT UNIFORM ACROSS THE FIVE AND CANNOT BE, because the tools
+# hand back three different row shapes:
+#
+#   * `get_stock_balance` rows carry `company`, so `guard.scoped` is the whole
+#     of it.
+#   * `get_warehouse_summary` describes ONE warehouse and its rows carry no
+#     company at all — the entity is the warehouse's own, checked once.
+#   * `get_stock_ledger` and `list_reorder_alerts` rows carry `warehouse` and no
+#     company, and `get_stock_ledger` TAKES NO COMPANY ARGUMENT AT ALL — there is
+#     no filter to ask the tool for. So the wrapper resolves this caller's
+#     entities to a warehouse set and filters on that. Without it an account
+#     scoped to one company reads every movement on the site, which is precisely
+#     what `guard.scoped` prevents on the shapes that do carry a company.
+#
+# EVERY TOTAL IS RECOMPUTED FROM WHAT SURVIVED THE FILTER. The tools sum before
+# this wrapper drops anything, so passing their `total_qty`, `total_value` or
+# `net_qty_change` through unchanged would report another entity's quantities as
+# a number after its rows had gone — the leak outliving the rows it came from.
+def _allowed_warehouses(allowed: list) -> set:
+	"""Every Warehouse docname in the entities this caller may reach."""
+	names: set = set()
+	for company in allowed or []:
+		names.update(stock_tools._company_warehouses(company))
+	return names
+
+
+def _warehouse_scoped(rows: list, permitted: set) -> list:
+	"""Drop rows held in a warehouse this caller may not reach.
+
+	A row with NO warehouse is KEPT, for the same reason `guard.scoped` keeps a
+	row with no company: a pre-v12 reorder rule is stored flat on the Item with
+	no warehouse at all, and it is a site-wide rule rather than another entity's
+	secret. Hiding it would make it invisible instead of fixed.
+	"""
+	out = []
+	for row in rows or []:
+		if not isinstance(row, dict):
+			continue
+		warehouse = str(row.get("warehouse") or "").strip()
+		if warehouse and warehouse not in permitted:
+			continue
+		out.append(row)
+	return out
+
+
+# ── 107. get_stock_balance ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_stock_balance", limit=guard.READ_LIMIT)
+def get_stock_balance(user: str, item_code=None, warehouse=None, company=None) -> dict:
+	"""One item's position across the warehouses this caller may reach.
+
+	The question somebody standing in a chemical shed has: is there enough of
+	this to finish the block. Read-only.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	inner: dict = {"item_code": str(item_code or "").strip()}
+	if entity:
+		inner["company"] = entity
+	if warehouse not in (None, ""):
+		inner["warehouse"] = str(warehouse).strip()
+
+	data = stock_tools.get_stock_balance(inner).data
+	data["balances"] = guard.scoped(data.get("balances") or [], allowed)
+	data["warehouse_count"] = len(data["balances"])
+	data["total_qty"] = round(sum(row["qty"] for row in data["balances"]), 6)
+	data["total_value"] = round(sum(row["stock_value"] for row in data["balances"]), 2)
+	return data
+
+
+# ── 108. get_warehouse_summary ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_warehouse_summary", limit=guard.READ_LIMIT)
+def get_warehouse_summary(user: str, warehouse=None, company=None) -> dict:
+	"""Everything on hand in one warehouse, with its reorder rules.
+
+	THE ENTITY CHECK IS ON THE WAREHOUSE'S OWN COMPANY AND HAPPENS AFTER THE
+	READ, because the warehouse is the argument and its company is not knowable
+	without resolving it. `guard.scoped` is no use here: the rows are items in a
+	single shed and carry no company of their own, so one refusal for the whole
+	answer is the shape this one takes.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	inner: dict = {"warehouse": str(warehouse or "").strip()}
+	if entity:
+		inner["company"] = entity
+
+	data = stock_tools.get_warehouse_summary(inner).data
+	owner = str(data.get("company") or "").strip()
+	if owner and owner not in allowed:
+		raise frappe.PermissionError(
+			f"warehouse {data.get('warehouse')!r} belongs to {owner}, which is not one of this "
+			f"account's entities. Nothing was read."
+		)
+	return data
+
+
+# ── 109. get_stock_ledger ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_stock_ledger", limit=guard.READ_LIMIT)
+def get_stock_ledger(
+	user: str,
+	item_code=None,
+	warehouse=None,
+	from_date=None,
+	to_date=None,
+	limit=None,
+) -> dict:
+	"""Movements, newest first. The audit trail, not a balance.
+
+	THE TOOL HAS NO COMPANY ARGUMENT, so the entity filter is this wrapper's
+	entirely — see the section note above. `truncated` is left as the tool set
+	it: it describes whether the QUERY hit its limit, which is still true of the
+	rows read even after some were dropped here.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner: dict = {}
+	for key, value in (
+		("item_code", item_code),
+		("warehouse", warehouse),
+		("from_date", from_date),
+		("to_date", to_date),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	if limit is not None:
+		inner["limit"] = limit
+
+	data = stock_tools.get_stock_ledger(inner).data
+	data["movements"] = _warehouse_scoped(data.get("movements") or [], _allowed_warehouses(allowed))
+	data["count"] = len(data["movements"])
+	data["net_qty_change"] = round(sum(row["qty_change"] for row in data["movements"]), 6)
+	return data
+
+
+# ── 110. list_reorder_alerts ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_reorder_alerts", limit=guard.READ_LIMIT)
+def list_reorder_alerts(user: str, company=None, warehouse=None) -> dict:
+	"""What has fallen below its reorder line, worst shortfall first."""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+
+	inner: dict = {}
+	if entity:
+		inner["company"] = entity
+	if warehouse not in (None, ""):
+		inner["warehouse"] = str(warehouse).strip()
+
+	data = stock_tools.list_reorder_alerts(inner).data
+	data["alerts"] = _warehouse_scoped(data.get("alerts") or [], _allowed_warehouses(allowed))
+	data["count"] = len(data["alerts"])
+	return data
+
+
+# ── 111. create_stock_entry ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_stock_entry", mutating=True, limit=guard.WRITE_LIMIT)
+def create_stock_entry(
+	user: str,
+	entry_type=None,
+	company=None,
+	items=None,
+	posting_date=None,
+	source_doctype=None,
+	source_name=None,
+	remarks=None,
+) -> dict:
+	"""File a Material Receipt, Issue or Transfer. IT COMES BACK A DRAFT.
+
+	`submit_stock_entry` IS NOT ROUTED HERE AND MUST NOT BE. Submitting a Stock
+	Entry writes GL entries, and a posting to the general ledger does not
+	originate on a handset in a chemical shed. The two tools are separate in the
+	registry for that reason and the sidecar publishes only the first, so the
+	worst a lost or replayed call can produce is a draft somebody has to look at.
+
+	EVERY WAREHOUSE IN EVERY LINE IS CHECKED AGAINST THE COMPANY BY THE TOOL —
+	`_resolve_warehouse` refuses one belonging to another entity — so scoping the
+	company here scopes the whole entry, lines included.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {
+		"entry_type": str(entry_type or "").strip(),
+		"company": entity,
+		"items": _receipt_items(items),
+	}
+	for key, value in (
+		("posting_date", posting_date),
+		("source_doctype", source_doctype),
+		("source_name", source_name),
+		("remarks", remarks),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return stock_tools.create_stock_entry(inner).data
+
+
+# ── 112. start_inspection ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("start_inspection", mutating=True, limit=guard.WRITE_LIMIT)
+def start_inspection(
+	user: str,
+	template=None,
+	location=None,
+	location_doctype=None,
+	farm_location_gps=None,
+	company=None,
+	notes=None,
+	visit_id=None,
+	farm_task=None,
+) -> dict:
+	"""Open an inspection visit against one template. Writes no compliance record.
+
+	THE METHOD IS NAMED FOR THE WIZARD, NOT FOR THE TOOL. The seeded
+	`inspection_session` wizard declares `submit_method: start_inspection` and
+	the tool behind it is `start_inspection_session`; the route has to be spelled
+	the way the wizard asks for it or the form a worker just filled in posts to a
+	404. The mapping lives here, in one line, rather than in a dispatcher.
+
+	`worker` and `foreman` ARE NOT DECLARED. The tool takes both and this wrapper
+	forwards neither: the person opening the visit is the caller, and an account
+	that could name somebody else would be filing an inspection against a
+	colleague. `worker` is set from the authenticated employee below.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {
+		"template": str(template or "").strip(),
+		"location": str(location or "").strip(),
+		"company": entity,
+		"worker": _employee(user),
+	}
+	for key, value in (
+		("location_doctype", location_doctype),
+		("farm_location_gps", farm_location_gps),
+		("notes", notes),
+		("visit_id", visit_id),
+		("farm_task", farm_task),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return session_tools.start_inspection_session(inner).data
