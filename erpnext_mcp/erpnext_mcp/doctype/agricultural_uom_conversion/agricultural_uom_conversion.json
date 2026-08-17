@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "How many of one unit are in another, and — where it matters — for which crop. THIS EXISTS BECAUSE ERPNext's OWN `UOM Conversion Factor` IS CROP-BLIND AND THAT IS THE ONE THING AN AGRICULTURAL CONVERSION CANNOT BE. A bin of cherries is about 800 lb and a bin of apples is about 900; ERPNext's table holds one global factor per (from, to) pair, so entering both would overwrite one with the other and entering either would make the site quietly wrong about the other crop. So the crop is part of the key here, and a generic row is the fallback rather than the only option. THE OTHER HALF IS THAT MOST OF THESE NUMBERS ARE NOT EXACT. An acre is exactly 43,560 square feet and a gallon is exactly 128 fluid ounces; a bin is 'about 800 lb' and the real figure depends on the fruit, the fill and the season. `basis` says which kind of number a row holds, so a settlement built on a nominal factor can be told apart from one built on an exact one — and `Exact` with a crop set is refused, because a conversion that varies by crop is by definition not exact.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "from_uom",
+  "to_uom",
+  "factor",
+  "identity_col",
+  "crop",
+  "basis",
+  "is_active",
+  "provenance_section",
+  "source",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The unit being converted FROM — the 'one bin' in 'one bin is 800 pounds'.",
+   "fieldname": "from_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "From Unit",
+   "options": "UOM",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The unit being converted TO — the 'pounds' in 'one bin is 800 pounds'. May not equal `from_uom`: a row saying one bin is one bin is not a conversion, and stored among real ones it is a rounding error waiting to be multiplied by something.",
+   "fieldname": "to_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "To Unit",
+   "options": "UOM",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "How many `to_uom` are in ONE `from_uom`. 800 on a Bin → Lb row means one bin weighs 800 pounds. THE DIRECTION IS STATED IN THAT SENTENCE RATHER THAN LEFT TO A READER because getting it backwards is not a visible error — it is a settlement out by a factor of 640,000 that still looks like a number. Must be greater than zero; a factor of zero would make every quantity vanish and a negative one has no meaning.",
+   "fieldname": "factor",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Factor",
+   "precision": "6",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The crop this factor is true for, when it is only true for one. LEFT BLANK MEANS IT HOLDS FOR EVERYTHING, which is right for acre-to-square-foot and wrong for bin-to-pound. A lookup prefers the crop-specific row and falls back to the generic one, and reports which it used — a caller told '800 lb' without being told whether that was the cherry row or the site-wide guess has been given a number they cannot check.",
+   "fieldname": "crop",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Crop",
+   "options": "Crop",
+   "search_index": 1
+  },
+  {
+   "default": "Nominal",
+   "description": "What kind of number the factor is. EXACT is a definition — 43,560 square feet to an acre, 128 fluid ounces to a gallon — and cannot carry a crop, because a quantity that varies by crop is not a definition. NOMINAL is the trade's rule of thumb: 'a lug is 18 lb'. OPERATION AVERAGE is this farm's own measured figure, which is the best of the three and the only one that improves with the record. The distinction is not bookkeeping: a shrink dispute turns on whether the weight was defined, assumed, or weighed, and a settlement that cannot say which is a settlement with no argument behind it.",
+   "fieldname": "basis",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Basis",
+   "options": "Exact\nNominal\nOperation Average",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether this factor is the one currently in use. Superseded rows are switched off rather than deleted: last season's settlements were computed with them, and a conversion that vanishes takes the explanation of those numbers with it. Only one active row may exist per (from, to, crop) — the parent refuses a second, because two live answers to 'how much does a bin weigh' is the whole failure this doctype exists to prevent.",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "description": "Where the number came from — 'USDA bushel weights table', 'packer contract 2026', 'weighed 340 bins Aug 2025'. REQUIRED ON AN OPERATION AVERAGE and optional otherwise: a farm-specific figure with no account of how it was measured is indistinguishable from a guess somebody typed, and it is the one basis that claims to be evidence.",
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "description": "Anything the columns cannot hold — the fill assumption, the season, the tare treatment.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Agricultural UOM Conversion",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "from_uom,to_uom,crop",
+ "sort_field": "from_uom",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

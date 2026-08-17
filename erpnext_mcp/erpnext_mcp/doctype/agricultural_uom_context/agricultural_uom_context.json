@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:context_name",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "Which units are allowed to be typed where. ERPNext ships around a hundred UOMs and a farm uses nine of them, differently in each place: harvest is counted in bins, lugs and buckets, a spray tank is measured in gallons and fluid ounces, ground is measured in acres, and a unit that is right in one of those is nonsense in the others. WHAT THIS BUYS IS A REFUSAL WITH A LIST IN IT. Without it, a harvest record offered 'Fluid Ounce' has nothing to object with and stores it; with it, the refusal names the three units harvest actually uses. IT IS A CONTEXT AND NOT A DOCTYPE-PER-PLACE because the same list serves a tool, a mobile form and a Desk field, and three copies of 'what harvest is counted in' is how two of them go stale.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "context_name",
+  "is_active",
+  "identity_col",
+  "applies_to",
+  "description_section",
+  "description",
+  "uoms_section",
+  "uoms"
+ ],
+ "fields": [
+  {
+   "description": "What the context is called — 'Harvest', 'Spray', 'Field Area', 'Scale Ticket'. IT IS THE DOCNAME and it is the string a caller passes, so it is written the way somebody says the job rather than the way a table is named.",
+   "fieldname": "context_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Context",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether this context is in use. Switched off rather than deleted, for the same reason a Market is: records written under it name it, and validation that used to run against it should still be explicable a year later.",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The measurement this context is about, which is what makes two contexts comparable — Weight, Volume, Area, Count. NOT THE SAME QUESTION AS THE UNIT LIST BELOW: 'Harvest' and 'Scale Ticket' are two contexts with different allowed units that are both about Weight, and a conversion between their units is meaningful precisely because of that. A context whose rows span two dimensions is refused, because a list mixing gallons and acres is not a unit list, it is two.",
+   "fieldname": "applies_to",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Measures",
+   "options": "Weight\nVolume\nArea\nCount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "What work this context covers, in a sentence — so an operator adding a unit to it can tell whether it belongs.",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "uoms_section",
+   "fieldtype": "Section Break",
+   "label": "Valid Units"
+  },
+  {
+   "description": "The units this context accepts. AT MOST ONE MAY BE THE DEFAULT — two defaults is the same as none, and the parent refuses it — and no unit may appear twice. A context with no rows at all is refused on save: an empty allow-list either forbids everything or permits everything depending on which reader you ask, and both readings have been shipped by somebody.",
+   "fieldname": "uoms",
+   "fieldtype": "Table",
+   "label": "Valid Units",
+   "options": "Agricultural UOM Context Entry",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Agricultural UOM Context",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "context_name,applies_to",
+ "sort_field": "context_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "context_name",
+ "track_changes": 1
+}

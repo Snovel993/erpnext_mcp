@@ -845,7 +845,19 @@
   "usda_api_base_url",
   "usda_market_col",
   "enable_usda_price_sweep",
-  "usda_price_reports"
+  "usda_price_reports",
+  "agronomy_section",
+  "allow_list_crops",
+  "allow_get_crop",
+  "allow_list_markets",
+  "allow_get_market",
+  "allow_list_ag_uom_contexts",
+  "allow_get_uom_conversions",
+  "agronomy_tools_col",
+  "allow_create_crop",
+  "allow_update_crop",
+  "allow_create_market",
+  "allow_update_market"
  ],
  "fields": [
   {
@@ -6431,6 +6443,86 @@
    "fieldname": "usda_price_reports",
    "fieldtype": "Small Text",
    "label": "USDA Report Slugs"
+  },
+  {
+   "fieldname": "agronomy_section",
+   "fieldtype": "Section Break",
+   "label": "Agricultural Master Data"
+  },
+  {
+   "default": "1",
+   "description": "READ. The crop register with varieties counted, plus the crops carrying no pre-harvest interval, no harvest window and no varieties.",
+   "fieldname": "allow_list_crops",
+   "fieldtype": "Check",
+   "label": "List Crops"
+  },
+  {
+   "default": "1",
+   "description": "READ. One crop in full: varieties, rootstocks, pollination groups, water demand by growth stage, and the markets that buy it. Warns when every recorded variety sits in one pollination incompatibility group.",
+   "fieldname": "allow_get_crop",
+   "fieldtype": "Check",
+   "label": "Get Crop"
+  },
+  {
+   "default": "1",
+   "description": "READ. The market register with grade standards counted, plus the active markets with no grades — which is the list that says which breakeven assumptions have nothing behind them.",
+   "fieldname": "allow_list_markets",
+   "fieldtype": "Check",
+   "label": "List Markets"
+  },
+  {
+   "default": "1",
+   "description": "READ. One market in full, its grade ladder sorted by what each grade pays, and the premium spread across that ladder.",
+   "fieldname": "allow_get_market",
+   "fieldtype": "Check",
+   "label": "Get Market"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which units are valid for which work — harvest counts containers, spray measures volume, ground is measured in acres, a scale reports weight.",
+   "fieldname": "allow_list_ag_uom_contexts",
+   "fieldtype": "Check",
+   "label": "List Agricultural UoM Contexts"
+  },
+  {
+   "default": "1",
+   "description": "READ. How many of one unit are in another, for a given crop. Inverts and chains one hop, and always says whether the factor was crop-specific or the generic fallback.",
+   "fieldname": "allow_get_uom_conversions",
+   "fieldtype": "Check",
+   "label": "Get UoM Conversions"
+  },
+  {
+   "fieldname": "agronomy_tools_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a crop with its varieties and its water demand by growth stage. Refuses a duplicate, half a harvest window, two varieties of one name, and years-to-maturity on an annual.",
+   "fieldname": "allow_create_crop",
+   "fieldtype": "Check",
+   "label": "Create Crop"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered crop. Cannot re-key it — the docname is the crop name every other record spells. Child tables are replaced wholesale, never merged.",
+   "fieldname": "allow_update_crop",
+   "fieldtype": "Check",
+   "label": "Update Crop"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register a market with its grade standards. Sizes in millimetres rather than row sizes, which are an inverse scale. Negative premiums are accepted; a defect tolerance outside 0-100 is not.",
+   "fieldname": "allow_create_market",
+   "fieldtype": "Check",
+   "label": "Create Market"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a registered market, including retiring it. Cannot re-key it — last season's settlements spell the docname. The grade ladder is replaced wholesale.",
+   "fieldname": "allow_update_market",
+   "fieldtype": "Check",
+   "label": "Update Market"
   }
  ],
  "index_web_pages_for_search": 0,

@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One variety of one crop: what it is grafted on, who pollinates it, what it yields and how long it takes to get there. EVERY RULE ABOUT A VARIETY IS A RULE ABOUT ITS CROP — whether the name is unique, whether `maturity_years` is meaningful at all — so the checking lives in `crop.py`, where the whole list and the growth cycle are in hand. There is nothing true of one of these rows on its own.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "variety_name",
+  "rootstock",
+  "pollination_group",
+  "expected_yield_per_acre",
+  "maturity_years"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "description": "The cultivar as it is sold and as the block is known by — 'Bing', 'Rainier', 'Honeycrisp'. UNIQUE WITHIN THE CROP, enforced by the parent: two rows called 'Bing' are two rows about one tree, and every read that groups a packout or a yield by variety would count it twice.",
+   "fieldname": "variety_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Variety",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "description": "What it is grafted onto — 'Gisela 6', 'Mazzard', 'M.9'. THE ROOTSTOCK IS HALF THE TREE and it decides the things the scion does not: vigour, final size, planting density, how soon it bears and how it takes wet ground. A yield per acre quoted without one is a number that cannot be compared to the next block.",
+   "fieldname": "rootstock",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rootstock"
+  },
+  {
+   "columns": 2,
+   "description": "The cross-incompatibility group, for the varieties that have one — cherries are 'S1S2', 'S3S4' and so on, apples are numbered bloom groups. WHAT IT IS FOR IS THE ONE QUESTION A BLOCK PLAN CANNOT GET WRONG TWICE: two varieties in the same incompatibility group will not set fruit for each other, and the block finds out four years later. Free text rather than a Select because the notation differs by species and a list would refuse the next one.",
+   "fieldname": "pollination_group",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pollination Group"
+  },
+  {
+   "columns": 2,
+   "description": "What a mature acre of it is expected to give, in the unit the operation counts that crop in — tons for cherries, bins for apples. THE UNIT IS NOT STORED HERE ON PURPOSE: it is the crop's own harvest unit, and a per-row unit would let one crop's varieties be quoted in three of them and silently summed. An expectation, not a record — what actually came off is a Scale Ticket.",
+   "fieldname": "expected_yield_per_acre",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Expected Yield / Acre",
+   "non_negative": 1,
+   "precision": "2"
+  },
+  {
+   "columns": 2,
+   "description": "Years from planting to the first commercial crop. MEANINGFUL ONLY ON A PERENNIAL, and refused outright on an Annual or Biennial crop by the parent — an annual that takes four years to bear is a contradiction, not a long-lived one. What it is really for is capitalisation: the non-bearing years are development cost carried into the orchard's basis rather than expensed against a season that produced nothing, and this is the column that says how many of them there are.",
+   "fieldname": "maturity_years",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Years to Maturity",
+   "non_negative": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Crop Variety",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

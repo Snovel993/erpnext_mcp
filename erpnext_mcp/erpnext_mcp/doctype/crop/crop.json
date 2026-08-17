@@ -1,0 +1,199 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:crop_name",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "What is grown, as a record rather than as a string typed into each block. A Crop carries the four facts every other feature keeps asking for and nobody had anywhere to put: how long it takes to make fruit, when that fruit comes off, how many days must pass between the last spray and the first pick, and which varieties are actually planted. THIS IS A MASTER, NOT A PLANTING. It says what a Sweet Cherry is, not which block has one — Field.crop names the crop growing on a block and stays free text, because a block of table grapes is not a schema change and never was. THE PHI IS THE REASON THIS DOCTYPE EXISTS RATHER THAN A SELECT. A pre-harvest interval is a legal number: spray on Tuesday with a 7-day PHI and fruit picked on Sunday cannot be sold. That number belongs to the crop-and-chemical pair, and until something on the site knew what a crop WAS, the crop half of it had nowhere to live and every check had to take it on trust from the caller.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "crop_name",
+  "scientific_name",
+  "crop_type",
+  "identity_col",
+  "growth_cycle",
+  "is_organic_certified",
+  "harvest_section",
+  "days_to_harvest",
+  "harvest_window_start",
+  "harvest_col",
+  "harvest_window_end",
+  "spray_section",
+  "default_phi_days",
+  "varieties_section",
+  "varieties",
+  "water_section",
+  "water_requirements",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the crop is called in the words a grower uses — 'Sweet Cherry', 'Apple', 'Pear'. IT IS THE DOCNAME, so it is the string every other record spells when it names a crop, and it is why this doctype does not allow rename: a crop that can be re-keyed is a crop whose name on last season's records means something else this season.",
+   "fieldname": "crop_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Crop Name",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "The binomial — 'Prunus avium' for sweet cherry, 'Malus domestica' for apple. Optional, and worth having: a pesticide label, an ODA registration and an export phytosanitary certificate are all written in Latin, and matching them to 'cherry' is a judgement somebody makes twice a season.",
+   "fieldname": "scientific_name",
+   "fieldtype": "Data",
+   "label": "Scientific Name"
+  },
+  {
+   "description": "The commercial grouping the crop is handled and sold in. IT IS A HANDLING CATEGORY, NOT A TAXONOMY — 'Tree Fruit' here means the pome fruit a packing house runs on one line, and 'Stone Fruit' the drupes it runs on another, which is the distinction a packout sheet and a price list actually draw. Where the two ways of grouping disagree, this column follows the packing house, because that is who the number is for. 'Other' is real and is not a placeholder: a cover crop and a nursery block belong to a farm's records without belonging to any of the four.",
+   "fieldname": "crop_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Crop Type",
+   "options": "Tree Fruit\nStone Fruit\nBerry\nVegetable\nOther",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Perennial",
+   "description": "Whether the planting lives across seasons. THIS IS WHAT MAKES `maturity_years` MEANINGFUL OR A CONTRADICTION: a perennial has years of non-bearing growth to capitalise before it earns anything, and an annual has none — so a variety row claiming three years to maturity on an Annual crop is refused rather than stored. Defaulted to Perennial because this app was built for tree fruit and that is the honest default, not a neutral one.",
+   "fieldname": "growth_cycle",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Growth Cycle",
+   "options": "Perennial\nAnnual\nBiennial",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Whether this crop is grown under a certified organic programme on this operation. A FACT ABOUT THE FARM'S PROGRAMME, NOT ABOUT THE SPECIES — apples are not organic, an apple block under an NOP certificate is. It sits here because a crop is where the spray rules are read from and the organic answer changes which materials are even eligible; a farm running conventional and organic blocks of one crop should leave this off and let the block-level record carry it.",
+   "fieldname": "is_organic_certified",
+   "fieldtype": "Check",
+   "label": "Organic Certified"
+  },
+  {
+   "fieldname": "harvest_section",
+   "fieldtype": "Section Break",
+   "label": "Harvest"
+  },
+  {
+   "description": "Days from the start of the season to picking. FOR A PERENNIAL THIS IS DAYS FROM BLOOM, and for an annual it is days from planting — the two are different questions and this one column answers whichever the growth cycle implies, because a farm that grows both does not want two columns of which one is always empty. Left blank when nobody has measured it; zero would claim same-day harvest.",
+   "fieldname": "days_to_harvest",
+   "fieldtype": "Int",
+   "label": "Days to Harvest",
+   "non_negative": 1
+  },
+  {
+   "description": "The month picking normally starts. A WINDOW IS STATED AS BOTH ENDS OR NEITHER: a start with no end is a season nothing closes, and the controller refuses it rather than storing half a window that every reader has to guess the other half of. The window is allowed to wrap the year end — a start of November and an end of February is a real harvest, and refusing it would be refusing the southern hemisphere and the greenhouse both.",
+   "fieldname": "harvest_window_start",
+   "fieldtype": "Select",
+   "label": "Harvest Window Start",
+   "options": "\nJanuary\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
+   "fieldname": "harvest_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The month picking normally finishes. See `harvest_window_start` — both ends or neither, and wrapping the year end is allowed.",
+   "fieldname": "harvest_window_end",
+   "fieldtype": "Select",
+   "label": "Harvest Window End",
+   "options": "\nJanuary\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
+   "fieldname": "spray_section",
+   "fieldtype": "Section Break",
+   "label": "Spray"
+  },
+  {
+   "description": "The pre-harvest interval in days: the minimum that must pass between the last application and the first pick. A FLOOR, NOT THE ANSWER. The binding PHI is the one on the label of the material actually applied, and it varies by chemical on one crop from zero days to thirty; this column is the crop's own default for the case where nothing more specific is known, and a check that finds a label PHI must prefer it. Stored here rather than inferred because zero and 'nobody recorded one' are different facts and a spray gate has to be able to tell them apart — 0 means genuinely no interval, blank means unknown. See `list_crops`, which reports the crops still carrying no PHI.",
+   "fieldname": "default_phi_days",
+   "fieldtype": "Int",
+   "label": "Default PHI (days)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "varieties_section",
+   "fieldtype": "Section Break",
+   "label": "Varieties"
+  },
+  {
+   "description": "The varieties of this crop that are actually planted or actually traded. A CHILD TABLE RATHER THAN A DOCTYPE because a variety has no life apart from its crop: 'Bing' means nothing without 'Sweet Cherry' in front of it, nothing links to a variety on its own, and a top-level doctype would buy a docname nobody needs and a second register to keep in step. Two rows may not share a variety name — a duplicate is two rows about one tree, and every read that groups by variety would double it.",
+   "fieldname": "varieties",
+   "fieldtype": "Table",
+   "label": "Varieties",
+   "options": "Crop Variety"
+  },
+  {
+   "fieldname": "water_section",
+   "fieldtype": "Section Break",
+   "label": "Water Requirements"
+  },
+  {
+   "description": "What the crop needs at each stage of its year. THE STAGE IS THE UNIT, NOT THE MONTH, because bloom moves a fortnight between a warm spring and a cold one and a schedule pinned to April waters the wrong week in both. An irrigation plan reads the stage it is currently in and gets a rate; the calendar that maps stage to date belongs to the season, not to the species. Optional in full — a crop with no rows here simply has no modelled demand, which is honest, and is different from a crop modelled as needing nothing.",
+   "fieldname": "water_requirements",
+   "fieldtype": "Table",
+   "label": "Water Requirements by Growth Stage",
+   "options": "Crop Water Requirement"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Anything the columns cannot hold.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Crop",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "crop_name,scientific_name,crop_type",
+ "sort_field": "crop_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "crop_name",
+ "track_changes": 1
+}

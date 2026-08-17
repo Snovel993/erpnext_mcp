@@ -295,12 +295,53 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# another's analysis. And the register's whole design rests on commodity,
 		# variety, market, package and date being the identity, which a company
 		# column would break by making that key non-unique.
+		# THE v0.82.0 ADDITIONS ARE THE FOUR AGRICULTURAL MASTERS, and each is a
+		# slightly different version of the same argument:
+		#
+		#   * `Crop` is a SPECIES. A sweet cherry is a sweet cherry on both sides
+		#     of a corporate boundary, and the days between bloom and harvest do
+		#     not consult the deed. A per-company copy would mean two rows that
+		#     must agree about botany and no mechanism making them.
+		#   * `Market` is a PLACE IN THE WORLD. Two growers shipping into the
+		#     Pacific Northwest fresh cherry market are shipping into ONE market —
+		#     scoping it would give the site two answers to what a No. 1 is, which
+		#     is the exact failure the doctype exists to prevent. Per-company
+		#     narrowing already exists on the layer where it belongs: the
+		#     SETTLEMENT names both the market and the company.
+		#   * `Agricultural UOM Context` and `Agricultural UOM Conversion` are
+		#     about UNITS. A bin holds what it holds regardless of whose name is
+		#     on the bin, and an operation that weighs its own bins should improve
+		#     the site's figure rather than fork it.
+		#
+		# The docname reason applies to all four as it does to Trade Document
+		# Template: the docname IS the key other records spell — a Market's
+		# `primary_commodity` names a Crop by name, a conversion's docname carries
+		# its crop — so a per-company row would need either duplicates the unique
+		# constraint refuses or a prefixed name every caller would have to spell.
+		# THE v0.87.0 ADDITION IS THE SAME ARGUMENT ABOUT A MARKET. A USDA Price
+		# Quote is what a shipping point district was ASKING for a commodity on a
+		# day — a published fact about a market, not about anybody's operation. It
+		# names no block, no cost, no customer and no crop anybody owns. The
+		# records that carry those are the Breakeven ANALYSES that read it, every
+		# one of which links to Company and is scoped by Frappe exactly as before.
+		#
+		# Scoping it would be wrong rather than merely unnecessary, for the reason
+		# the Merchant Alias paragraph gives: the quotation is public and
+		# site-wide, so a per-company copy would mean the same published number
+		# stored once per entity — two copies of one fact that will eventually
+		# disagree — or a quotation owned by one entity quietly overlaying
+		# another's analysis. And the register's whole design rests on commodity,
+		# variety, market, package and date being the identity, which a company
+		# column would break by making that key non-unique.
 		self.assertEqual(
 			sorted(unscoped),
 			[
+				"Agricultural UOM Context",
+				"Agricultural UOM Conversion",
 				"Asset State Log",
 				"Compliance Regime",
 				"Compliance Rule",
+				"Crop",
 				"Farm Translation",
 				"Federal Tax Table",
 				"I-9 Audit Log",
@@ -308,6 +349,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"Inspection Template",
 				"Labor Break Policy",
 				"MCP Action Log",
+				"Market",
 				"Merchant Alias",
 				"Staged File Chunk",
 				"Staged File Upload Session",

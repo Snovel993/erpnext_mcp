@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 663 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 673 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 324 read tools are **on** by default and can be switched off individually. A
+All 330 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -14343,6 +14343,301 @@ to veto it.
 `shadow_log_feed_enabled` in **ERPNext MCP Settings** switches the propagation
 off for an operation that does not run a chain of command. It is a feature switch
 and not a tool switch — the three reads stay usable for rows already written.
+
+## Agricultural master data (v0.82.0)
+
+Ten tools, five doctypes and three child tables. The three registers everything
+else in this app had been taking on trust from whoever was calling it: **what is
+grown**, **where it is sold**, and **in what units**.
+
+Before this release a spray check asking for a crop's pre-harvest interval, a
+settlement asking what a bin weighed, and a breakeven asking what a market's
+grades pay all got their answer from the caller. The site could not tell a
+considered figure from a plausible one. Now each is a row somebody can read,
+correct, and be held to.
+
+### None of the three is company-scoped
+
+Worth stating plainly, because `company` is accepted-and-reported-as-not-applied
+on several tools in this app and here it is **not accepted at all**:
+
+| Register | Why it belongs to no company |
+| --- | --- |
+| `Crop` | A species. A sweet cherry is a sweet cherry on both sides of a corporate boundary, and the days between bloom and harvest do not consult the deed |
+| `Market` | A place in the world. Two growers shipping into the Pacific Northwest fresh cherry market are shipping into **one** market — per-company copies would give the site two answers to what a No. 1 is |
+| `Agricultural UOM Context` / `Conversion` | A bin holds what it holds regardless of whose name is on it |
+
+Per-company narrowing already exists on the layer where it belongs: a
+**settlement** names both the market and the company.
+
+### `Field.crop` stays free text
+
+Nothing here turns it into a Link, and that is deliberate twice over. It has been
+free text since it shipped on the stated grounds that "a block of table grapes is
+not a schema change"; a Link beside it would give a site two answers to what
+grows on a block with no rule for which wins. And a Link would make migrate
+**order** load-bearing for every other feature that records a crop as a string.
+The upgrade, if somebody wants it, is a patch that seeds `Crop` rows from the
+distinct strings already on the site and only then changes the column — a release
+of its own, not a field option.
+
+### The crop tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window and no varieties |
+| `get_crop` | One crop in full: varieties with rootstock and pollination group, water demand by growth stage, the markets that buy it, the conversions recorded for it |
+| `create_crop` | Register one, with both child tables. **Mutating** |
+| `update_crop` | Change one. Cannot re-key it. **Mutating** |
+
+**A blank PHI is not a PHI of zero.** Zero means genuinely no interval; blank
+means nobody has recorded one. They are reported apart at every level, because a
+gate that conflates them clears fruit a label would hold. And every tool that
+reports a PHI carries the caveat that the **binding** interval is the one printed
+on the label of the material actually applied — on one crop that ranges from zero
+days to thirty, and `default_phi_days` is only the floor for when nothing more
+specific is known.
+
+**Half a harvest window is refused; a wrapped one is not.** A start with no end
+is a season nothing closes. But November to February is a real harvest, so the
+obvious `start <= end` check is deliberately absent — that would be a rule about
+integers wearing the costume of a rule about farming. `harvest_months` is
+computed and wraps correctly, because a caller doing that subtraction itself gets
+it wrong about half the time.
+
+**A contradiction is refused; a judgement is reported.** `maturity_years` on a
+variety of an *Annual* crop is refused — an annual has no non-bearing years to
+capitalise, and both facts cannot be true. Every recorded variety sitting in one
+pollination incompatibility group is only **reported**: they will not set fruit
+for each other and the block finds out four years later, but the pollinizer may
+be in a neighbouring block or simply unrecorded here.
+
+### The market tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_markets` | The register, grades counted, plus the active markets with no grades and the ones with no USDA shipping point |
+| `get_market` | One market, its grade ladder sorted by what each grade pays, and the premium spread across it |
+| `create_market` | Register one with its grade standards. **Mutating** |
+| `update_market` | Change or retire one. Cannot re-key it. **Mutating** |
+
+**`active_without_grade_standards` is the list to read first.** A market with no
+grades has no packout assumption behind it, so any breakeven quoting it is
+quoting a number somebody typed rather than a standard the market enforces.
+
+**`premium_spread_pct` is why a packout forecast is worth making.** It is the
+distance between the best and worst grade a market pays. Where the spread is
+narrow, an error in the projected split costs little; where it is wide, the split
+is the largest single assumption in a breakeven.
+
+**Sizes are millimetres, not row sizes.** Cherries trade by row and apples by
+count per box, and both are *inverse* scales where the bigger fruit carries the
+smaller number — a column holding those would sort backwards in every report.
+Convert once; the sales desk keeps speaking rows.
+
+**A negative premium is normal.** Juice against fresh, orchard run against fancy.
+Bounded below at -100%, past which it is a sign error. A defect tolerance outside
+0–100 is refused outright: stored, it would make every tolerance comparison pass.
+
+**`shipping_point` is a join key, not a description.** USDA Market News publishes
+daily terminal and shipping-point prices keyed on that exact string and on
+nothing else.
+
+### Units, and why ERPNext's own conversion table is not enough
+
+| Tool | What it does |
+| --- | --- |
+| `list_ag_uom_contexts` | Which units are valid for which work, and the default for each |
+| `get_uom_conversions` | How many of one unit are in another, for a given crop, and where the number came from |
+
+ERPNext's `UOM Conversion Factor` holds **one global factor per unit pair**. A
+bin of cherries is about 800 lb and a bin of apples about 900, so entering both
+overwrites one with the other and entering either makes the site quietly wrong
+about the other crop. Hence a register where **the crop is part of the key**.
+
+```
+                    resolution order
+crop-specific row  ─┐
+generic row        ─┼─►  factor, plus WHICH of these produced it
+inverted row       ─┤
+one-hop chain      ─┘
+```
+
+`get_uom_conversions` **resolves rather than looks up**. It will invert a row
+recorded the other way round — "one bin is 800 lb" and "one lb is a 800th of a
+bin" are the same fact, and requiring both to be entered would require an
+operator to keep two rows in step by hand. It will chain through **one**
+intermediate unit (bins → pounds → tons) and no more: past that it is multiplying
+three nominal figures together and the compounding error exceeds the answer's
+worth. A chain reports the **weaker** of its two bases, because an exact hop
+composed with a nominal one is nominal.
+
+**`basis` is not bookkeeping.** `Exact` is a definition — 128 fluid ounces to a
+gallon, 43,560 square feet to an acre — and cannot carry a crop, because a
+quantity that varies by fruit is not a definition. `Nominal` is the trade's rule
+of thumb: right enough to plan with, not right enough to settle a dispute with.
+`Operation Average` is the farm's own weighed figure, it must cite a source, and
+it wins every lookup. A shrink dispute turns on whether the weight was defined,
+assumed, or weighed.
+
+**Three different refusals, because they need three different actions.** No row
+at all; no *active* row (a superseded factor is kept switched off so last
+season's settlements stay explicable, and is not consulted); or rows for other
+crops and none for this one — which is correct rather than missing. Guessing
+there is how a settlement goes wrong by a factor nobody traces.
+
+**Harvest and Scale Ticket are two contexts, not one list.** A bin is a
+*container* and a pound is a *weight*. A field crew hands in bins and the shed
+reports pounds — two measurements of one delivery, and a single list accepting
+either is a list that lets them be summed.
+
+### What is seeded, and what that is worth
+
+Install and every migrate lay down a starting book: three crops (Sweet Cherry,
+Apple, Pear) with their varieties, rootstocks, pollination groups and water
+demand by growth stage; three markets with grade ladders; four unit contexts; and
+the conversions between them. It only ever creates what is not there, checked by
+docname, so an operator's own figure is never overwritten and a deleted record is
+never resurrected.
+
+**The numbers are a starting book, not your farm's.** Every conversion but the
+three definitions is `Nominal`, the yields are expectations, and the grade
+premiums are illustrative *shapes* rather than this season's prices. An operation
+that leaves them untouched and quotes them at a lender has misused them —
+`list_markets` reports which markets still carry no reviewed grades precisely so
+the ones nobody looked at stay visible.
+
+On a Frappe bench with no ERPNext there is no `UOM` master, so the units and the
+conversions that link to them are skipped **by name** while the crops and markets,
+which link to neither, are seeded anyway.
+---
+
+# Breakeven calculator (v0.87.0)
+
+*What price does this crop have to make?* Five tools over one record, and the
+record is a **perspective on the ledger the farm already keeps**. Nothing here
+posts, nothing is a journal entry, and no number it produces changes what the
+financial statements say. What a Breakeven Analysis adds to the chart of accounts
+is the one thing a chart of accounts cannot hold: which accounts stop mattering
+when the crop gets bigger.
+
+| Tool | What it does |
+| --- | --- |
+| `create_breakeven_analysis` | Register a crop, a volume and a price to model. Creates; does **not** compute |
+| `compute_breakeven` | Read the expense accounts, classify them, answer the question — and store every intermediate |
+| `get_breakeven_analysis` | One analysis in full, with every cost line and **who classified it** |
+| `list_breakeven_analyses` | The register, naming the rows that are not answers |
+| `get_breakeven_sensitivity` | What-if over one variable across a range. Stores nothing |
+
+## A fruit farm has two volumes, and everything follows from that
+
+A textbook breakeven has one. Picking, hauling and field bins are bought for
+**everything that comes off the trees**; cartons, packing labour, freight and
+commission are bought only for **what packs out**. So when packout falls from
+85% to 60%, the second pile falls with it and the first does not — it spreads
+over fewer sellable boxes. Every cost line therefore carries a `volume_basis`,
+and the arithmetic is:
+
+```
+variable cost per sellable unit  =  vh / p  +  vs
+cull credit per sellable unit    =  c · (1 − p) / p
+contribution margin per unit     =  P + cull credit − variable cost
+```
+
+Each packed box carries `1/p` harvested units of picking with it and brings
+`(1−p)/p` culls' worth of juice money along. A model with a **single** variable
+pile gets the direction of a packout change right and the magnitude wrong, which
+is the more dangerous of the two errors: it looks like an answer.
+
+The **cull credit is not decoration**. Thirty percent culls at juice price is not
+thirty percent of the crop earning nothing, and a model that treated it that way
+would make every light-packout scenario look worse than it is — the direction
+that leaves fruit on the tree that should have been picked.
+
+## The packout slider is an argument to `compute_breakeven`
+
+```json
+{"name": "Gala 2026 - ETC", "packout_pct": 62}
+```
+
+One call, one number. The analysis is recomputed at that packout and keeps it, so
+the record always says which packout its stored results answer. `breakeven_packout_pct`
+is the same question read backwards — *"we need 74% out of this block"* is a
+target a packhouse can be given, and a breakeven revenue is not.
+
+## Every line says who classified it
+
+Three sources, best evidence first, stored on every line:
+
+* **Account** — an operator classified the account itself with
+  `breakeven_cost_behavior`, installed on `Account` as a Custom Field. Said once,
+  true for every analysis afterwards.
+* **Override** — this analysis was told to treat one account differently, once,
+  and nothing was written to the Account.
+* **Heuristic** — nobody has said, so the account's name and ERPNext type were
+  read and a guess was made.
+
+The heuristic is genuinely useful *and* genuinely a guess, and the design turns
+on holding both at once. A first run on a real chart of accounts classifies most
+of it correctly and hands back a number in a minute rather than an afternoon —
+and reports how many lines it guessed at, in the result, in
+`computation_warnings`, and again on every read. **A breakeven resting on forty
+guessed classifications is a different object from one resting on none**, and the
+person about to quote it to a lender is entitled to know which they have.
+
+An override naming an account that is not an expense account of the company is
+**refused**, not ignored: a dropped override leaves the account being guessed at
+while the caller believes they classified it, and the result would look identical.
+
+**Income tax is excluded by rule, not by heuristic.** At breakeven there is no
+pre-tax income to tax, so a model carrying the tax line would demand the farm
+cover a liability it does not have.
+
+## What the reads refuse to do
+
+**No breakeven quantity where the contribution margin is not positive.** There is
+no such quantity — every additional box loses money — and the arithmetic limit is
+an enormous number that reads as a hard target. `breakeven_units` comes back
+`null` and the reason is stated. The breakeven **price** is still reported, and
+there it is the number that matters: it says how far the price has to come up
+before volume helps at all.
+
+**No conversion between packages on the market overlay.** A breakeven per 40-lb
+box compared against a USDA quotation per 20-lb carton is out by a factor of two
+and looks entirely plausible. Both packages are reported next to the spread and
+neither is converted, because pack style is a judgement this app has no basis to
+make.
+
+**No writing from a read.** `get_breakeven_sensitivity` answers whatever band it
+is asked for and stores nothing; `compute_breakeven` stores a standard ±10/±20%
+band across all five variables. What is in the register depends on who ran a
+computation, not on who was browsing.
+
+**An edited input goes stale rather than recomputing.** Change the price in the
+Desk and the record flips to `Stale` with its old results intact. A breakeven
+that changed underneath the person reading it, keeping the same `computed_on`, is
+worse than one that says it is out of date.
+
+## The market overlay reads a register, not the internet
+
+USDA AMS Market News publishes shipping point prices — what a district was asking
+f.o.b. — and every quotation this app sees is kept as a `USDA Price Quote`. The
+overlay reads **the register**, which is what makes it work in a farm office
+whose link is down and on a site that has never configured an API key at all. A
+grower with a broker's bid in hand has a better number than any district average,
+and `compute_breakeven(market_price=…)` stores it as its own labelled kind of
+source.
+
+Fetching is opt-in twice over: a MARS API key in settings, and either
+`refresh_usda_prices` with a report slug or the nightly sweep, which **ships
+off**. No report slugs are shipped — AMS identifies reports by slugs an operator
+looks up for the districts they actually ship into, and a list invented here
+would be right for one region and a nightly 404 everywhere else.
+
+A quotation belongs to **no company**. A shipping point price is a fact about a
+market, not about anybody's operation; the records that carry the operation are
+the analyses that read it, and every one of those links to Company and is scoped
+by Frappe exactly as before.
 
 ## Agricultural master data (v0.82.0)
 

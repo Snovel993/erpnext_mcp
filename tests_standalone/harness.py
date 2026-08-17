@@ -1601,6 +1601,20 @@ APP_DOCTYPES = {
 	"Breakeven Cost Line": "breakeven_cost_line",
 	"Breakeven Scenario": "breakeven_scenario",
 	"USDA Price Quote": "usda_price_quote",
+	# v0.82.0, agricultural master data. The three registers every other feature
+	# had been taking on trust from whoever was calling it: what is grown, where
+	# it is sold, and in what units. `Crop` and `Market` are deliberately NOT
+	# company-scoped — a species is a species and a market is a place in the
+	# world — which is why neither carries the `company` column almost
+	# everything else in this map does. See `tools/agronomy.py`.
+	"Crop": "crop",
+	"Crop Variety": "crop_variety",
+	"Crop Water Requirement": "crop_water_requirement",
+	"Market": "market",
+	"Market Grade Standard": "market_grade_standard",
+	"Agricultural UOM Context": "agricultural_uom_context",
+	"Agricultural UOM Context Entry": "agricultural_uom_context_entry",
+	"Agricultural UOM Conversion": "agricultural_uom_conversion",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -4245,6 +4259,28 @@ CHILD_TABLE_SOURCES = {
 	# real templates would read as a list of empty ones.
 	"Reporting Template Section": (("Reporting Template", "sections"),),
 	"Disclosure Checklist Item": (("Disclosure Checklist", "items"),),
+	# v0.82.0. All four are read directly with a `parent`/`parenttype` filter by
+	# `tools/agronomy.py`, parent unloaded, and for one reason in each case:
+	#
+	#   * `Crop Variety` and `Market Grade Standard` — `list_crops` and
+	#     `list_markets` count and name the child rows of EVERY row in the
+	#     register in one query. Loading each parent to count its children is a
+	#     document load per master paid for one integer, on a read whose whole
+	#     job is to be the cheap overview.
+	#   * `Crop Water Requirement` — `get_crop` reads the stages without the
+	#     parent for symmetry with the varieties beside it.
+	#   * `Agricultural UOM Context Entry` — `list_ag_uom_contexts` gathers the
+	#     units of every context at once, for the same reason.
+	#
+	# Without these entries every count would come back zero and a register full
+	# of varieties and grades would read as a register of empty masters — which
+	# is exactly the "active market with no grade standards" gap `list_markets`
+	# reports, so the double would have manufactured the finding it exists to
+	# surface.
+	"Crop Variety": (("Crop", "varieties"),),
+	"Crop Water Requirement": (("Crop", "water_requirements"),),
+	"Market Grade Standard": (("Market", "grade_standards"),),
+	"Agricultural UOM Context Entry": (("Agricultural UOM Context", "uoms"),),
 }
 
 

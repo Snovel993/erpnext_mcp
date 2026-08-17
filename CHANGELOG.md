@@ -341,6 +341,138 @@ modelling deletes a real bench refuses and now say `force=True` explicitly.
 v0.17.1 — a new login QR already invalidates the previous token. Gating it behind
 a settings switch would only add a way to turn the protection off site-wide.
 
+## 0.82.0 — 2026-08-16 — what a bin weighs, and who decided
+
+Agricultural master data. Five doctypes, three child tables, ten tools — the
+three registers everything else in this app had been taking on trust from
+whoever happened to be calling it: what is grown, where it is sold, and in what
+units.
+
+A spray check asking for a crop's pre-harvest interval, a settlement asking what
+a bin weighed, and a breakeven asking what a market's grades pay all got their
+answer from the caller. The site could not tell a considered figure from a
+plausible one, and neither could anybody reading the record a year later.
+
+### None of the three belongs to a company
+
+Every other register in this app is entity-scoped and these are deliberately
+not. A `Crop` is a **species** — a sweet cherry is a sweet cherry on both sides
+of a corporate boundary. A `Market` is a **place in the world**: two growers
+shipping into the Pacific Northwest fresh cherry market are shipping into *one*
+market, and scoping it would give a single site two answers to what a No. 1 is,
+which is the failure the doctype exists to prevent. A unit is a unit.
+
+Per-company narrowing already exists where it belongs — a settlement names both
+the market and the company. `test_permissions` asserts the four unscoped
+doctypes with the argument written beside them, so a later release that adds a
+company column has to delete a paragraph to do it.
+
+### `Field.crop` stays free text
+
+Nothing here turns it into a Link, for two reasons. A Link beside the old Data
+column gives a site two answers to what grows on a block with no rule for which
+wins. And a Link makes migrate **order** load-bearing: three other features were
+landing into this tree the same day, each recording a crop as a string, and one
+of them shipping a Link that lands before this release kills `bench migrate` on
+`LinkValidationError` — the failure `harness.LinkValidationError` was written to
+model after v0.12.0 hit it live.
+
+The upgrade is a patch that seeds `Crop` rows from the distinct strings already
+on the site and only then changes the column, folding case when it dedupes. That
+is a release of its own.
+
+### Blank is not zero, and the PHI is where it matters
+
+A `default_phi_days` of `0` means genuinely no interval. A null means nobody has
+recorded one. `list_crops` reports the second as a gap rather than folding it
+into the first, because a gate that reads a missing PHI as zero clears fruit a
+label would hold. Every tool that reports a PHI also reports that the **binding**
+interval is the one printed on the label of the material actually applied — on a
+single crop that ranges from zero days to thirty.
+
+### Two window rules that look alike and are opposites
+
+Half a harvest window is refused: a start with no end is a season nothing
+closes. A window that **wraps** the year is accepted, because November to
+February is a real harvest and the obvious `start <= end` check would be a rule
+about integers wearing the costume of a rule about farming. `harvest_months` is
+computed and wraps correctly.
+
+### A contradiction is refused; a judgement is reported
+
+`maturity_years` on a variety of an *Annual* crop is refused — an annual has no
+non-bearing years to capitalise, and both facts cannot be true. Every recorded
+variety sitting in one pollination incompatibility group is only **reported**:
+they will not set fruit for each other and the block finds out four years later,
+but the pollinizer may be in a neighbouring block or simply unrecorded here.
+
+### Why ERPNext's own conversion table could not hold this
+
+`UOM Conversion Factor` holds one global factor per unit pair. A bin of cherries
+is about 800 lb and a bin of apples about 900 — the same stack of boxes, a
+hundred pounds apart. Entering both overwrites one with the other; entering
+either makes the site quietly wrong about the other crop.
+
+So `Agricultural UOM Conversion` makes the **crop part of the key**, with a
+generic row as the fallback rather than the only option. `get_uom_conversions`
+resolves rather than looks up: it prefers the crop-specific row, inverts a row
+recorded the other way round, chains through **one** intermediate unit and no
+more, reports the **weaker** of two bases on a chain, and always says which of
+those it did.
+
+`basis` is not bookkeeping. `Exact` is a definition and **cannot carry a crop**.
+`Nominal` is the trade's rule of thumb — right enough to plan with, not right
+enough to settle a dispute with. `Operation Average` is the farm's own weighed
+figure, must cite a source, and wins every lookup. A shrink dispute turns on
+whether the weight was defined, assumed, or weighed.
+
+Three refusals, because they need three different actions: no row at all; no
+*active* row (a superseded factor is kept switched off so old settlements stay
+explicable, and is not consulted); or rows for other crops and none for this one
+— which is correct rather than missing, and the refusal names the crops that do
+have one.
+
+### Harvest and Scale Ticket are two contexts, not one list
+
+A bin is a container and a pound is a weight. A field crew hands in bins and the
+shed reports pounds — two measurements of one delivery, and a single list
+accepting either is a list that lets them be summed. An empty unit list is
+refused outright: an allow-list with no rows either forbids everything or
+permits everything depending on who reads it.
+
+### Sizes are millimetres, not row sizes
+
+Cherries trade by row and apples by count per box, and both are *inverse* scales
+where the bigger fruit carries the smaller number — a column holding those would
+sort backwards in every report. `max_defect_pct` is bounded 0–100; `premium_pct`
+is bounded only below, at -100, because a grade worth less than the base is the
+normal case and a column refusing negatives would make every operation invent a
+base grade nothing falls under.
+
+### What is seeded
+
+Sweet Cherry (Bing, Rainier, Sweetheart, Skeena, Lapin), Apple (Fuji, Gala,
+Honeycrisp) and Pear (Bartlett, Anjou) with rootstocks, pollination groups,
+yields, maturity years and water demand at seven growth stages; three markets
+with grade ladders and USDA shipping points; four unit contexts and the
+conversions between them. Idempotent by docname, so an operator's own figure is
+never overwritten and a deleted record is never resurrected.
+
+**The numbers are a starting book, not your farm's** — every conversion but the
+three definitions is Nominal, the yields are expectations, and the grade premiums
+are illustrative shapes rather than this season's prices. On a Frappe bench with
+no ERPNext there is no `UOM` master, so the units and the conversions that link
+to them are skipped by name while the crops and markets are seeded anyway.
+
+### Tools
+
+`list_crops`, `get_crop`, `list_markets`, `get_market`, `list_ag_uom_contexts`
+and `get_uom_conversions` ship **on**. `create_crop`, `update_crop`,
+`create_market` and `update_market` ship **off**. Both update tools replace child
+tables wholesale when passed and never merge — a merge needs a stable row key and
+these rows have none a caller can see. Neither register can be re-keyed: the
+docname is the name every other record spells.
+
 ## 0.81.0 — 2026-08-16 — the control that can be switched off
 
 IPO readiness, phases four to six: the governance domain. Seven doctypes,

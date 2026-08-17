@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One unit a context accepts. THE LINK IS TO ERPNext's OWN UOM AND NOT TO A STRING, which is the whole reason this row is worth a table: a context listing the word 'Bin' against a site that has no Bin unit is an allow-list that permits something nothing else can store. The install seeds the nine agricultural units into UOM before it seeds any context, so the link always has a target. Every rule about an entry — no duplicates, at most one default, one dimension per context — is a rule about the list it is in, so the checking lives in `agricultural_uom_context.py`.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "uom",
+  "is_default",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "description": "The unit, as ERPNext's UOM register has it. A Link rather than free text: an allow-list naming a unit the site cannot store is worse than no allow-list, because it reads as permission.",
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Unit",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "description": "Whether this is the unit a form offers first. AT MOST ONE PER CONTEXT, enforced by the parent — two defaults is the same as none, and which one won would depend on row order. Optional in full: a context with no default is a context where the picker should make somebody choose, which for harvest units is arguably the right answer.",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Default"
+  },
+  {
+   "columns": 6,
+   "description": "Why this unit is on the list, where that is not obvious — 'field crews count these, the shed converts them'.",
+   "fieldname": "notes",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Agricultural UOM Context Entry",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

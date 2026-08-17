@@ -45,6 +45,7 @@ from .tools import (
 	accidents,
 	accounts,
 	advisory,
+	agronomy,
 	anchors,
 	asset_status,
 	asset_tags,
@@ -22801,6 +22802,322 @@ TOOLS = {
 		title="Get breakeven sensitivity",
 		available=_needs_doctype("Breakeven Analysis"),
 		requires=_BREAKEVEN_REQUIRES,
+	),
+	# ── v0.82.0: agricultural master data — crops, markets, units ────────────
+	"list_crops": _tool(
+		agronomy.list_crops,
+		"The crop register: every crop with its type, growth cycle, harvest window, "
+		"pre-harvest interval and the varieties planted — plus a count by type and "
+		"three lists of what is missing. Read-only.\n\n"
+		"THE THREE LISTS AT THE END ARE THE REPORT. A crop with no PHI recorded is a "
+		"crop a spray gate has nothing to fall back on for; a crop with no harvest "
+		"window is one nothing can schedule against; a crop with no varieties is one "
+		"every packout grouped by variety will find empty.\n\n"
+		"A NULL PHI IS NOT A PHI OF ZERO. Zero means genuinely no interval; null "
+		"means nobody has recorded one. They are reported apart because a gate that "
+		"conflates them clears fruit it should hold.",
+		{
+			"crop_type": _field(_STRING, "Tree Fruit, Stone Fruit, Berry, Vegetable or Other."),
+			"growth_cycle": _field(_STRING, "Perennial, Annual or Biennial."),
+			"is_organic_certified": _field(
+				_BOOLEAN, "true for only certified-organic crops, false for only the rest."
+			),
+			"limit": _LIMIT,
+		},
+		title="List crops",
+		available=_needs_doctype("Crop"),
+		requires="the Crop DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_crop": _tool(
+		agronomy.get_crop,
+		"One crop in full: varieties with rootstock and pollination group, water "
+		"requirement by growth stage, the markets that name it as their primary "
+		"commodity, and every unit conversion recorded for it. Read-only.\n\n"
+		"IT NAMES THE AGRONOMIC PROBLEMS IN SENTENCES. Chiefly the one a block plan "
+		"cannot get wrong twice: if every recorded variety sits in one pollination "
+		"incompatibility group they will not set fruit for each other, and the block "
+		"finds out four years later. Reported, never refused — the pollinizer may be "
+		"in a neighbouring block or simply unrecorded here.\n\n"
+		"`harvest_months` IS COMPUTED AND WRAPS THE YEAR. A window of November to "
+		"February is four months, not minus eight, and a caller doing that "
+		"subtraction itself gets it wrong about half the time.",
+		{
+			"crop": _field(_STRING, "The Crop docname — 'Sweet Cherry'. Matched case-insensitively."),
+		},
+		required=("crop",),
+		title="Get a crop",
+		available=_needs_doctype("Crop"),
+		requires="the Crop DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_crop": _tool(
+		agronomy.create_crop,
+		"MUTATING (default OFF). Register one crop with its varieties and its water "
+		"requirement by growth stage.\n\n"
+		"THE DOCNAME IS THE CROP NAME and rename is off: every record that names a "
+		"crop spells this string, so renaming one is a new crop plus a migration of "
+		"what pointed at the old one, not an edit.\n\n"
+		"REFUSES: a crop already registered; a harvest window with one end and not "
+		"the other, because half a window is a season nothing closes; two varieties "
+		"with one name; two water rows for one growth stage; years-to-maturity on a "
+		"variety of an Annual or Biennial crop, which is a contradiction rather than "
+		"a long number; a crop coefficient above 1.5, which is a decimal point in the "
+		"wrong place.\n\n"
+		"ALLOWS a harvest window that WRAPS THE YEAR — November to February is a real "
+		"harvest, and refusing it would be a rule about integers dressed as a rule "
+		"about farming.\n\n"
+		"WARNS without refusing: no PHI, no harvest window, no varieties.",
+		{
+			"crop_name": _field(_STRING, "What the crop is called — 'Sweet Cherry'. Becomes the docname."),
+			"crop_type": _field(_STRING, "Tree Fruit, Stone Fruit, Berry, Vegetable or Other."),
+			"scientific_name": _field(_STRING, "The binomial — 'Prunus avium'. What a pesticide label is written in."),
+			"growth_cycle": _field(_STRING, "Perennial, Annual or Biennial. Default Perennial."),
+			"days_to_harvest": _field(
+				_INTEGER, "Days from bloom for a perennial, from planting for an annual."
+			),
+			"harvest_window_start": _field(_STRING, "Month picking starts — 'June'. Both ends or neither."),
+			"harvest_window_end": _field(_STRING, "Month picking finishes — 'August'. Both ends or neither."),
+			"default_phi_days": _field(
+				_INTEGER,
+				"The crop's own pre-harvest interval floor, in days. NOT the binding number — "
+				"that is on the label of the material actually applied. Omit rather than "
+				"passing 0 if nobody has recorded one; the two are different facts.",
+			),
+			"is_organic_certified": _field(_BOOLEAN, "Grown under a certified organic programme here."),
+			"varieties": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The varieties planted: [{"variety_name": "Bing", "rootstock": "Mazzard", '
+				'"pollination_group": "S3S4", "expected_yield_per_acre": 4.5, "maturity_years": 5}]. '
+				"An unknown key is refused rather than dropped.",
+			),
+			"water_requirements": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'Demand by stage: [{"growth_stage": "Bloom", "crop_coefficient_kc": 0.75, '
+				'"water_inches_per_week": 1.2, "notes": "..."}]. Stages: Dormant, Bud Break, '
+				"Bloom, Fruit Set, Fruit Development, Harvest, Post-Harvest.",
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("crop_name", "crop_type"),
+		mutating=True,
+		title="Create a crop",
+		available=_needs_doctype("Crop"),
+		requires="the Crop DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_crop": _tool(
+		agronomy.update_crop,
+		"MUTATING (default OFF). Change a registered crop: type, growth cycle, "
+		"harvest window, days to harvest, PHI, organic status, notes, and either "
+		"child table. Every change is echoed as before → after.\n\n"
+		"CANNOT re-key: crop_name is refused because it is the docname.\n\n"
+		"CHILD TABLES ARE REPLACED WHOLESALE when passed, never merged — a merge "
+		"needs a stable row key and these rows have none a caller can see. Omitting "
+		"the argument leaves the table alone; passing an empty list is how a caller "
+		"genuinely clears it.",
+		{
+			"crop": _field(_STRING, "The Crop docname. Matched case-insensitively."),
+			"crop_type": _field(_STRING, "New type."),
+			"scientific_name": _field(_STRING, "New binomial. Empty string clears it."),
+			"growth_cycle": _field(_STRING, "New cycle."),
+			"days_to_harvest": _field(_INTEGER, "New day count."),
+			"harvest_window_start": _field(_STRING, "New start month."),
+			"harvest_window_end": _field(_STRING, "New end month."),
+			"default_phi_days": _field(_INTEGER, "New PHI floor in days."),
+			"is_organic_certified": _field(_BOOLEAN, "New organic flag."),
+			"varieties": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The complete new variety list. Replaces the existing one outright.",
+			),
+			"water_requirements": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The complete new water requirement list. Replaces the existing one outright.",
+			),
+			"notes": _field(_STRING, "New notes."),
+			"crop_name": _field(_STRING, "Always refused — it is the docname."),
+		},
+		required=("crop",),
+		mutating=True,
+		title="Update a crop",
+		available=_needs_doctype("Crop"),
+		requires="the Crop DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_markets": _tool(
+		agronomy.list_markets,
+		"The market register: every outlet with its type, region, country, primary "
+		"commodity, USDA shipping point and how many grade standards it carries — "
+		"plus a count by type and the two gaps that matter for planning. Read-only.\n\n"
+		"`active_without_grade_standards` IS THE LIST TO READ FIRST. A market with no "
+		"grades has no packout assumption behind it, so any breakeven quoting it is "
+		"quoting a number somebody typed rather than a standard the market enforces.\n\n"
+		"`without_usda_shipping_point` is the list that cannot be joined to a USDA "
+		"Market News price series — that join is on the shipping-point string and on "
+		"nothing else.\n\n"
+		"NO COMPANY ARGUMENT, and that is the design: a market is a place in the "
+		"world, not a thing a company owns. Two growers shipping into the Pacific "
+		"Northwest fresh cherry market are shipping into ONE market.",
+		{
+			"market_type": _field(_STRING, "Fresh, Processing, Export or Organic."),
+			"is_active": _field(_BOOLEAN, "true for only live markets, false for only retired ones."),
+			"region": _field(_STRING, "Trade region — 'Pacific Northwest', 'Asia/Pacific'."),
+			"country": _field(_STRING, "Destination country."),
+			"primary_commodity": _field(_STRING, "Only markets whose primary commodity is this Crop."),
+			"limit": _LIMIT,
+		},
+		title="List markets",
+		available=_needs_doctype("Market"),
+		requires="the Market DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_market": _tool(
+		agronomy.get_market,
+		"One market in full, with its grade ladder sorted by what each grade pays "
+		"rather than by row order, the premium spread across that ladder, and the "
+		"crop it is mainly for. Read-only.\n\n"
+		"`premium_spread_pct` IS WHY A PACKOUT FORECAST IS WORTH MAKING. It is the "
+		"distance between the best and worst grade this market pays: where the spread "
+		"is narrow an error in the projected split costs little, and where it is wide "
+		"the split is the largest single assumption in a breakeven.\n\n"
+		"It names the planning gaps in sentences — an active market with no grades, "
+		"no USDA shipping point, or a grade ladder with no sizes on it, which cannot "
+		"be applied to a measured size distribution.",
+		{
+			"market": _field(_STRING, "The Market docname. Matched case-insensitively."),
+		},
+		required=("market",),
+		title="Get a market",
+		available=_needs_doctype("Market"),
+		requires="the Market DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_market": _tool(
+		agronomy.create_market,
+		"MUTATING (default OFF). Register one market with its grade standards: grade "
+		"name, minimum size in millimetres, defect tolerance, pack style and the "
+		"premium over base.\n\n"
+		"SIZES ARE IN MILLIMETRES, NOT ROW SIZES. Cherries trade by row and apples by "
+		"count per box, and both are INVERSE scales where the bigger fruit has the "
+		"smaller number — a column holding those would sort backwards in every report. "
+		"Convert once, here; the sales desk keeps speaking rows.\n\n"
+		"A NEGATIVE PREMIUM IS NORMAL and is accepted: juice against fresh, orchard "
+		"run against fancy. It is bounded below at -100%, past which it is a sign "
+		"error. A defect tolerance outside 0-100 is refused outright — stored, it "
+		"would make every tolerance comparison pass.\n\n"
+		"REFUSES a market already registered: there is one Pacific Northwest fresh "
+		"cherry market, and a second record for it would give the site two answers to "
+		"what a No. 1 is.",
+		{
+			"market_name": _field(_STRING, "What the outlet is called. Becomes the docname."),
+			"market_type": _field(_STRING, "Fresh, Processing, Export or Organic."),
+			"region": _field(_STRING, "Trade region — 'Pacific Northwest'."),
+			"country": _field(_STRING, "Destination country. Blank for domestic."),
+			"currency": _field(_STRING, "What this market's prices are quoted in. Blank means the company's."),
+			"primary_commodity": _field(_STRING, "The Crop this market is mainly for."),
+			"shipping_point": _field(
+				_STRING,
+				"The USDA Market News shipping point, spelled as USDA spells it. A join key, "
+				"not a description.",
+			),
+			"is_active": _field(_BOOLEAN, "Default true."),
+			"grade_standards": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'[{"grade_name": "US No. 1", "min_size_mm": 25.4, "max_defect_pct": 5, '
+				'"pack_style": "15 lb clamshell", "premium_pct": 0}]. An unknown key is refused.',
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("market_name", "market_type"),
+		mutating=True,
+		title="Create a market",
+		available=_needs_doctype("Market"),
+		requires="the Market DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_market": _tool(
+		agronomy.update_market,
+		"MUTATING (default OFF). Change a registered market: type, region, country, "
+		"currency, primary commodity, USDA shipping point, whether it is active, and "
+		"the whole grade ladder. Every change is echoed as before → after.\n\n"
+		"CANNOT re-key: market_name is refused because last season's settlements "
+		"spell it. RETIRE rather than delete — set is_active false, which keeps the "
+		"history readable and takes the market out of every planning list.\n\n"
+		"grade_standards is REPLACED WHOLESALE when passed, never merged.",
+		{
+			"market": _field(_STRING, "The Market docname. Matched case-insensitively."),
+			"market_type": _field(_STRING, "New type."),
+			"region": _field(_STRING, "New region. Empty string clears it."),
+			"country": _field(_STRING, "New country. Empty string clears it."),
+			"currency": _field(_STRING, "New currency. Empty string clears it."),
+			"primary_commodity": _field(_STRING, "New primary Crop. Empty string clears it."),
+			"shipping_point": _field(_STRING, "New USDA shipping point. Empty string clears it."),
+			"is_active": _field(_BOOLEAN, "false retires the market without deleting it."),
+			"grade_standards": _field(
+				{"type": "array", "items": {"type": "object"}},
+				"The complete new grade ladder. Replaces the existing one outright.",
+			),
+			"notes": _field(_STRING, "New notes."),
+			"market_name": _field(_STRING, "Always refused — it is the docname."),
+		},
+		required=("market",),
+		mutating=True,
+		title="Update a market",
+		available=_needs_doctype("Market"),
+		requires="the Market DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_ag_uom_contexts": _tool(
+		agronomy.list_ag_uom_contexts,
+		"Which units are valid for which work: harvest counts bins, lugs and "
+		"buckets, spray measures gallons and fluid ounces, ground is measured in "
+		"acres, a scale reports pounds and tons. Each context names its default unit "
+		"and what it measures. Read-only.\n\n"
+		"HARVEST AND SCALE TICKET ARE TWO CONTEXTS, NOT ONE LIST, because a bin is a "
+		"CONTAINER and a pound is a WEIGHT. A field crew hands in bins and the shed "
+		"reports pounds — two measurements of one delivery. A single list accepting "
+		"either is a list that lets them be summed. Cross between them with "
+		"get_uom_conversions.\n\n"
+		"WHAT THIS BUYS IS A REFUSAL WITH A LIST IN IT: a harvest record offered "
+		"'Fluid Ounce' can name the three units harvest actually uses instead of "
+		"storing it.",
+		{
+			"is_active": _field(_BOOLEAN, "true for only live contexts, false for only retired ones."),
+			"applies_to": _field(_STRING, "Weight, Volume, Area or Count."),
+		},
+		title="List agricultural UoM contexts",
+		available=_needs_doctype("Agricultural UOM Context"),
+		requires=(
+			"the Agricultural UOM Context DocType, which ships with erpnext_mcp — run `bench migrate`"
+		),
+	),
+	"get_uom_conversions": _tool(
+		agronomy.get_uom_conversions,
+		"How many of one unit are in another, and where that number came from. "
+		"Read-only.\n\n"
+		"THE CROP IS PART OF THE KEY, which is the whole reason this does not read "
+		"ERPNext's own UOM Conversion Factor: a bin of cherries is about 800 lb and a "
+		"bin of apples about 900, and one global factor per unit pair is necessarily "
+		"wrong about one of them. A crop-specific row wins; a generic row is the "
+		"fallback; the answer always says which was used.\n\n"
+		"IT RESOLVES RATHER THAN LOOKS UP. It will invert a row recorded the other "
+		"way round — 'one bin is 800 lb' and 'one lb is a 800th of a bin' are the "
+		"same fact — and chain through ONE intermediate unit (bins → pounds → tons). "
+		"One hop and no more: past that it is multiplying three nominal figures "
+		"together and the compounding error exceeds the answer's worth. A chain "
+		"reports the WEAKER of its two bases, because an exact hop composed with a "
+		"nominal one is nominal.\n\n"
+		"THE REFUSALS ARE THREE DIFFERENT SENTENCES because they need three different "
+		"actions: no row at all, no ACTIVE row (a superseded factor is kept switched "
+		"off so old settlements stay explicable, and is not consulted), or rows for "
+		"other crops and none for this one — which is correct rather than missing, "
+		"and guessing is how a settlement goes wrong by a factor nobody traces.",
+		{
+			"from_uom": _field(_STRING, "The unit converted FROM — the 'one bin' in 'one bin is 800 pounds'."),
+			"to_uom": _field(_STRING, "The unit converted TO — the 'pounds'."),
+			"crop": _field(
+				_STRING,
+				"Optional. Prefer the factor recorded for this Crop. Omit for the generic one.",
+			),
+		},
+		required=("from_uom", "to_uom"),
+		title="Get a UoM conversion",
+		available=_needs_doctype("Agricultural UOM Conversion"),
+		requires=(
+			"the Agricultural UOM Conversion DocType, which ships with erpnext_mcp — run `bench migrate`"
+		),
 	),
 }
 

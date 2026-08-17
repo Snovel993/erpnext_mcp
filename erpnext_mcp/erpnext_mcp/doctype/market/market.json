@@ -1,0 +1,174 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:market_name",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "An outlet the fruit is sold into, and the grade standards that outlet packs to. A MARKET IS A PLACE IN THE WORLD, NOT A THING A COMPANY OWNS, which is why there is no company column: two growers shipping into the Pacific Northwest fresh cherry market are shipping into ONE market, and giving each of them a private copy of it would give the site two answers to what a No. 1 is. WHAT IT IS FOR IS THE PACKOUT ASSUMPTION. A breakeven is only as good as the split it assumes between what packs out as fresh and what falls to processing, and that split is a property of the grade standards the market enforces — row sizes, defect tolerances, pack styles — not a number somebody types into a spreadsheet each spring. `shipping_point` is the join to USDA Market News, which publishes daily terminal prices keyed on it and on nothing else.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "market_name",
+  "market_type",
+  "is_active",
+  "identity_col",
+  "primary_commodity",
+  "currency",
+  "geography_section",
+  "region",
+  "country",
+  "geography_col",
+  "shipping_point",
+  "grades_section",
+  "grade_standards",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the outlet is called, in the words the sales desk uses — 'Pacific Northwest Fresh Cherry', 'Washington Processing'. IT IS THE DOCNAME, so it is the string a settlement, a price assumption and a packout target all spell, and the doctype does not allow rename for the same reason Crop does not: a market that can be re-keyed is a market whose name on last season's settlements means something else this season.",
+   "fieldname": "market_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Market Name",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "What kind of outlet it is, which is the single strongest predictor of what a pound is worth. Fresh pays multiples of Processing for the same fruit off the same tree; Export adds a phytosanitary and cold-treatment regime that changes what is even shippable; Organic is a price premium that exists only against a certificate. FOUR VALUES, NOT A FREE-TEXT FIELD, because every one of them changes a downstream calculation and a fifth spelling of 'fresh' would silently fall out of all of them.",
+   "fieldname": "market_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Market Type",
+   "options": "Fresh\nProcessing\nExport\nOrganic",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether this outlet is currently one the operation sells into. A MARKET IS RETIRED, NEVER DELETED: last season's settlements name it, and a deleted market turns those into rows pointing at nothing. Switching it off keeps the history readable and takes the market out of every planning list.",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The crop this market is mainly for. A LINK, BECAUSE THIS IS THE ONE PLACE THE TWO REGISTERS GENUINELY MEET: a grade standard quoting a minimum row size in millimetres is a statement about a specific fruit, and a market whose commodity is a free-text string can carry a cherry sizing standard under the word 'apple' with nothing to object. Optional — a mixed processing outlet that takes whatever is offered honestly has no primary commodity, and forcing one would make the site's answer less true, not more.",
+   "fieldname": "primary_commodity",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Primary Commodity",
+   "options": "Crop",
+   "search_index": 1
+  },
+  {
+   "description": "The currency this market's prices are quoted in. It matters on Export and almost nowhere else, which is exactly why it is a column rather than an assumption: a Japanese or Korean cherry programme is quoted and settled in a currency that is not the company's, and a premium percentage read off a JPY grade sheet against a USD cost base is wrong by whatever the yen did that month. Left blank means the company's own currency.",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "geography_section",
+   "fieldtype": "Section Break",
+   "label": "Geography"
+  },
+  {
+   "description": "The growing or selling district, as the trade names it — 'Pacific Northwest', 'Columbia Basin', 'Asia/Pacific'. Free text on purpose: these are trade regions rather than administrative ones, they overlap, and no list of them is ever finished.",
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Region"
+  },
+  {
+   "description": "The destination country. A Link to Frappe's own Country list rather than free text, because this column has exactly one job that free text cannot do: an export programme's rules are keyed on the destination, and 'S. Korea', 'South Korea' and 'Korea, Republic of' typed on three settlements are three countries as far as any grouping is concerned. Blank for a domestic market rather than the home country repeated on every row.",
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "geography_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The USDA Market News shipping point for this market — 'Yakima Valley and Wenatchee District Washington', 'Oregon and Washington'. THIS IS A JOIN KEY AND NOT A DESCRIPTION, which is the whole reason it is its own column beside `region`: USDA publishes daily terminal and shipping-point prices keyed on this exact string, and a market carrying it can have an outside price series attached to it without anybody deciding by hand which report is about this fruit. Spell it as USDA spells it, not as the district is spoken.",
+   "fieldname": "shipping_point",
+   "fieldtype": "Data",
+   "label": "USDA Shipping Point"
+  },
+  {
+   "fieldname": "grades_section",
+   "fieldtype": "Section Break",
+   "label": "Grade Standards"
+  },
+  {
+   "description": "What this market will take and what it pays for it. A CHILD TABLE RATHER THAN A DOCTYPE for the same reason Crop Variety is one: a grade has no life apart from the market that enforces it — 'No. 1' means different sizes and different tolerances in a fresh programme and an export programme, and a shared grade register would have to pick one of them. Two rows may not share a grade name within one market. THESE ROWS ARE THE PACKOUT ASSUMPTION a breakeven reads: the premium column is what turns a projected size distribution into a projected price.",
+   "fieldname": "grade_standards",
+   "fieldtype": "Table",
+   "label": "Grade Standards",
+   "options": "Market Grade Standard"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "Anything the columns cannot hold — the cold treatment schedule, the broker, the season the programme opens.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Market",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "market_name,market_type,region,shipping_point",
+ "sort_field": "market_name",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "market_name",
+ "track_changes": 1
+}

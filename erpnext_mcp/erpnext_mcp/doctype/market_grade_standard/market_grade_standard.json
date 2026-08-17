@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One grade in one market: how big the fruit has to be, how much damage is tolerated, how it is packed and what the market pays for it over the base. THE FOUR COLUMNS ARE ONE SENTENCE — 'fruit at least this big with at most this much defect, packed this way, is worth this much more' — and splitting them across records would let a size standard exist with no price behind it, which is a standard nobody can plan against. Every rule about a grade is a rule about its market, so the checking lives in `market.py`; there is nothing true of one of these rows on its own.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "grade_name",
+  "min_size_mm",
+  "max_defect_pct",
+  "pack_style",
+  "premium_pct"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "description": "The grade as the market names it — 'Extra Fancy', 'US No. 1', 'Orchard Run', 'Juice'. UNIQUE WITHIN THE MARKET, enforced by the parent: two rows called 'No. 1' are two prices for one grade, and whichever a packout read first would decide the season's revenue assumption with nothing recording that a second answer existed.",
+   "fieldname": "grade_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Grade",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "description": "The smallest fruit this grade accepts, across the widest point, in millimetres. MILLIMETRES AND NOT ROW SIZE, deliberately: cherries are traded by row (9-row, 10-row, 11-row) and apples by count per box, and both are inverse scales where the bigger fruit has the SMALLER number — a column holding row sizes would sort backwards in every report and add nothing a millimetre does not say. Convert once, here, and let the sales desk keep speaking rows.",
+   "fieldname": "min_size_mm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Min Size (mm)",
+   "non_negative": 1,
+   "precision": "1"
+  },
+  {
+   "columns": 2,
+   "description": "The share of a lot that may carry defects and still make this grade, as a percentage. Bounded 0 to 100 and refused outside it — a 'max defect' above 100 is a transcription of something else, and storing it would make a tolerance comparison pass everything. Zero is a real value and means a grade with no tolerance at all, which export programmes do write.",
+   "fieldname": "max_defect_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Max Defect %",
+   "precision": "2"
+  },
+  {
+   "columns": 2,
+   "description": "How the market wants it packed — '15 lb clamshell', '20 lb bulk', '2-layer tray'. IT BELONGS TO THE GRADE AND NOT TO THE MARKET because one outlet takes several, and the pack is what the premium is quoted against: the same fruit in a clamshell and in bulk is two different prices for reasons that have nothing to do with the fruit.",
+   "fieldname": "pack_style",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pack Style"
+  },
+  {
+   "columns": 2,
+   "description": "What this grade is worth relative to the market's base price, as a percentage. MAY BE NEGATIVE, and that is the point: a grade below the base — orchard run against fancy, juice against fresh — is a discount, and a column that refused negatives would make every operation invent a base grade nothing falls under. Bounded below at -100, which would be fruit given away; anything past that is a sign error.",
+   "fieldname": "premium_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Premium %",
+   "precision": "2"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Market Grade Standard",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

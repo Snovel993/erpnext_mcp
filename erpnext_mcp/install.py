@@ -154,6 +154,7 @@ def after_install() -> None:
 	_receipt_intelligence_fields()
 	_translations()
 	_breakeven_account_fields()
+	_agricultural_masters()
 	frappe.db.commit()
 
 
@@ -192,6 +193,55 @@ def after_migrate() -> None:
 	_trade_documents()
 	_reporting_templates()
 	_translations()
+	_breakeven_account_fields()
+	_agricultural_masters()
+
+
+def _agricultural_masters() -> None:
+	"""Seed the starting book of crops, markets, units and conversions. v0.82.0.
+
+	THE JOB THAT MAKES THE OTHER FEATURES ANSWERABLE. Until this runs, a spray
+	check asking what a crop's pre-harvest interval is, a settlement asking what
+	a bin weighed, and a breakeven asking what a market's grades pay all have to
+	take the answer from whoever called them. After it, each of those is a row an
+	operator can read and correct.
+
+	IT ONLY EVER CREATES WHAT IS NOT THERE, checked by docname across every row
+	rather than only the live ones — the same contract as `_inspection_templates`
+	and `_compliance_rules`, and the same reason `test_hooks.py` forbids the word
+	`fixtures` by name. An operator who replaced the nominal cherry bin weight
+	with their own weighed figure keeps it. One who deleted a market they do not
+	sell into does not get it back on the next migrate.
+
+	IT CANNOT TAKE AN INSTALL DOWN. Every record is attempted alone; a failure is
+	printed and stepped over. On a Frappe bench with no ERPNext there is no UOM
+	master, so the units and the conversions that link to them are skipped BY
+	NAME — while the crops and markets, which link to neither, are seeded anyway.
+	Losing the unit register on such a bench is correct: there is nothing on it
+	that could store a quantity in those units.
+	"""
+	try:
+		from . import agronomy_seed
+
+		report = agronomy_seed.seed_agricultural_masters()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the agricultural master data was not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} agricultural master record(s) — three "
+			"crops with their varieties and water demand by growth stage, three markets with "
+			"their grade ladders, four unit contexts and the conversions between them. THE "
+			"NUMBERS ARE A STARTING BOOK, NOT YOUR FARM'S: every conversion but the three "
+			"definitions is Nominal, the yields are expectations and the grade premiums are "
+			"illustrative shapes rather than this season's prices. list_crops and list_markets "
+			"report what is still missing; replace a nominal factor with your own weighed figure "
+			"using an Operation Average basis and it wins every lookup."
+		)
+	for skipped in report.get("skipped") or ():
+		print(f"erpnext_mcp: skipped {skipped.get('name')} — {skipped.get('reason')}")
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed {failure.get('name')} — {failure.get('reason')}")
 	_breakeven_account_fields()
 
 
