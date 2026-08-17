@@ -723,11 +723,50 @@ def _caller_language(user: str, employee: str = "") -> str:
 	holding it now — see `Employee.preferred_language`, which this reads. An
 	empty answer is a real one and is left empty rather than defaulted, so a
 	narrative entry says "nobody told me" rather than "English".
+
+	DELIBERATELY NOT `_response_language` BELOW, and the difference is the whole
+	point of having two functions. This one TAGS A RECORD — `source_language` on
+	a voice note is a claim about what language somebody spoke, and an
+	`Accept-Language` header is not evidence of that. The other one CHOOSES A
+	RENDERING, where the header is a reasonable guess and a wrong guess costs
+	somebody a re-read rather than a mislabelled personnel record.
 	"""
 	try:
 		return wizard_tools.preferred_language(user, employee)
 	except Exception:  # pragma: no cover - a site without the column
 		return ""
+
+
+def _response_language(language=None, employee: str = "") -> tuple:
+	"""`(code, source)` — what language to RENDER this response in. Never raises.
+
+	`Employee.preferred_language` first, `Accept-Language` second, English last.
+	`guard._stamp_language` already did this work at the top of the request, so
+	this normally just reads the answer back off `frappe.local` — the parameters
+	are for the two cases where it cannot: a caller naming a language explicitly
+	(an operator previewing Spanish), and an employee whose record the guard did
+	not resolve because the endpoint had not looked it up yet.
+
+	See `tools/translations.py` for why the header LOSES to the column, and why
+	the source is returned rather than discarded: "why is this worker seeing
+	English" is a support question with exactly four possible answers.
+	"""
+	try:
+		from ..tools import translations
+
+		explicit = translations.normalize_language(str(language or ""))
+		if explicit:
+			return explicit, "explicit"
+		if employee:
+			stated = translations.normalize_language(translations.preferred_language(employee=employee))
+			if stated:
+				return stated, "employee"
+		established = guard.caller_language()
+		if established:
+			return established, guard.caller_language_source() or "default"
+		return translations.DEFAULT_LANGUAGE, "default"
+	except Exception:  # pragma: no cover - the language must never break a call
+		return "en", "default"
 
 
 def _unit_is_reachable(unit: str, allowed: list) -> bool:
@@ -8050,3 +8089,116 @@ def scan_valve(
 	toggled["scan_recorded"] = True
 	toggled["toggled"] = True
 	return toggled
+
+
+# ── 103. get_translation_bundle ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_translation_bundle", limit=guard.READ_LIMIT)
+def get_translation_bundle(user: str, language=None, category=None, key_prefix=None) -> dict:
+	"""Every string this handset needs, in the worker's language, in one call.
+
+	WHAT THE HANDSET PULLS AT LOGIN instead of asking for one string at a time.
+	Forty phones each fetching a label when they need it is forty phones with a
+	loading spinner where a button should be; this is one call whose answer is
+	cached on the device until the next login.
+
+	THE LANGUAGE IS THE WORKER'S, AND `Accept-Language` IS THE FALLBACK. In that
+	order, and never the other way round: this app's claim to have communicated a
+	hazard "in a manner the employee can understand" (OSHA 1910.1200(h), WPS 40
+	CFR 170.501) rests on `Employee.preferred_language` — a column somebody
+	filled in about a person — and not on a device setting. A phone set to
+	English by whoever handed it over says nothing about who is holding it now.
+
+	The header IS honoured where the column is empty, because a site that has not
+	filled it in yet is better served by the phone's guess than by English, and
+	because a worker who set their own phone to Spanish has told us something.
+	`language_source` says which of the two answered, so "why is this person
+	seeing English" is answerable without reading the server.
+
+	A MISSING TRANSLATION IS SERVED AS ENGLISH AND IS LISTED IN `untranslated`.
+	Never a blank, never the raw key, never a refusal. A blank is a screen a
+	worker cannot act on; a raw key is what a system shows when it has given up;
+	a refusal locks a crew out of a flow over one sentence. `untranslated` is
+	what makes the gap findable from the Desk rather than discoverable by
+	somebody standing in front of a screen they cannot read.
+
+	`category` narrows to one group — "Task Types", "Shift Status", "Error
+	Messages" — and `key_prefix` narrows to a dotted prefix, which is the same
+	thing for a client that thinks in keys. Both optional; the whole catalogue is
+	small enough to send.
+	"""
+	from ..tools import translations
+
+	employee = fieldwork._employee_for(user) or ""
+	resolved, source = _response_language(language, employee)
+
+	group = str(category or "").strip()
+	prefix = str(key_prefix or "").strip()
+
+	# `bundle` MERGES the English fall-back in, which is exactly what the handset
+	# wants and exactly why the result cannot answer "what fell back". So the
+	# register is asked separately for the keys that genuinely exist in this
+	# language, and the gap is the difference.
+	strings = translations.bundle(resolved, category=group, prefix=prefix)
+	untranslated: list = []
+	if resolved != translations.DEFAULT_LANGUAGE:
+		have = set(_native_keys(resolved, group, prefix))
+		untranslated = sorted(key for key in strings if key not in have)
+
+	out = {
+		"language": resolved,
+		"language_source": source,
+		"employee": employee or None,
+		"category": group or None,
+		"key_prefix": prefix or None,
+		"count": len(strings),
+		"strings": strings,
+		"untranslated": untranslated,
+		"untranslated_count": len(untranslated),
+		"languages_available": list(translations.LANGUAGES),
+		"default_language": translations.DEFAULT_LANGUAGE,
+	}
+	if untranslated:
+		out["translation_note"] = (
+			f"{len(untranslated)} string(s) have no {resolved} translation on this site and are "
+			f"served in {translations.DEFAULT_LANGUAGE}. They are listed so the gap is findable "
+			"from the Desk — a screen half in one language is worse than one consistently in the "
+			"wrong one, and a blank is worse than both."
+		)
+	if source == "header":
+		out["language_note"] = (
+			"This worker's Employee record has no preferred_language, so the phone's "
+			"Accept-Language header was used. THAT IS A GUESS AND NOT EVIDENCE: hazard "
+			"communication and pesticide safety training have to be delivered in a language the "
+			"worker understands, and proving that means the column, not the device. Ask them and "
+			"fill it in."
+		)
+	elif source == "default" and not employee:
+		out["language_note"] = (
+			"This login has no Employee record and the phone sent no Accept-Language, so this is "
+			"English by default rather than by anybody's choice."
+		)
+	return out
+
+
+def _native_keys(language: str, category: str = "", prefix: str = "") -> list:
+	"""Which keys genuinely exist in `language` on this site. Never raises.
+
+	Separate from `translations.bundle` because that function's whole job is to
+	MERGE the fall-back in, which makes its result unable to answer "what fell
+	back". One query, and the answer is what `untranslated` is computed from.
+	"""
+	from ..tools import translations
+
+	filters = {"language": language, "enabled": 1}
+	if category:
+		filters["category"] = category
+	if prefix:
+		filters["translation_key"] = ["like", f"{prefix}%"]
+	try:
+		return [
+			str(key)
+			for key in frappe.db.get_all(translations.DOCTYPE, filters=filters, pluck="translation_key") or []
+		]
+	except Exception:  # pragma: no cover - a site mid-migrate
+		return []

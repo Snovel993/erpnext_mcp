@@ -666,6 +666,12 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 			doc.last_refreshed = frappe.utils.now()
 			_write_regimes(doc, observation, rule)
 			doc.insert(ignore_permissions=True)
+			# v0.85.0. ONLY ON "created", NEVER ON A REFRESH. The sweep refreshes
+			# every open alert every night; a copy per refresh would be one row
+			# per alert per night forever, and a feed that grows without bound is
+			# a feed nobody opens. Raising an alert is the event; noticing it is
+			# still true is not.
+			_shadow_alert(doc)
 		return "created"
 
 	reopening = bool(frappe.utils.cint(row.get("auto_dismissed")))
@@ -699,6 +705,59 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 		doc.dismissed_reason = None
 	doc.save(ignore_permissions=True)
 	return "reopened" if reopening else "refreshed"
+
+
+def _shadow_alert(doc) -> None:
+	"""Send a newly raised alert up the chain, frozen. Never raises. v0.85.0.
+
+	IMPORTED INSIDE THE FUNCTION on purpose. `alerts` is imported by `tools`
+	(dispatch generates work from alerts), so a module-level `from ..tools import
+	shadow_log` here would put a cycle in the import graph for the sake of one
+	call — and this package's whole job is to be importable early enough that the
+	nightly sweep can run.
+
+	WHO A COMPLIANCE ALERT IS ABOUT, AND WHAT HAPPENS WHEN IT IS NOBODY. An
+	expiring I-9 or a lapsed certificate is about a PERSON, and the chain above
+	that person is the chain to walk. A stale water test, an uninspected cabin or
+	an overdue filing is about the OPERATION — there is no subject, so there is
+	no chain, and `shadow_log.propagate` routes it to whoever sits at the top of
+	the company at level 3 instead. Both are right; a feed that raised nothing
+	for the second kind would leave the whole compliance half of this release
+	decorative, and one that invented a level-1 recipient for it would put a
+	water test in a foreman's crew feed.
+
+	Never raises, and the reason is sharper here than at the other three call
+	sites: this runs inside the NIGHTLY SWEEP, with nobody watching, and an
+	exception would take the rest of the sweep's alerts down with it. See
+	`hooks.py` on the bar every scheduled job in this app has to clear.
+	"""
+	try:
+		from ..tools import shadow_log
+
+		source_doctype = str(doc.source_doctype or "")
+		source_docname = str(doc.source_docname or "")
+		subject = ""
+		if source_doctype and source_docname and doctype_exists(source_doctype):
+			try:
+				row = frappe.db.get_value(source_doctype, source_docname, "*", as_dict=True) or {}
+			except Exception:  # pragma: no cover - a doctype with no such row
+				row = {}
+			subject = str(row.get("employee") or "").strip()
+
+		shadow_log.propagate(
+			event_type=shadow_log.EVENT_ALERT_RAISED,
+			source_doctype=ALERT_DOCTYPE,
+			source_name=doc.name,
+			subject_employee=subject,
+			company=str(doc.company or ""),
+			occurred_at=str(doc.first_seen or "") or frappe.utils.now(),
+			summary=(
+				f"{doc.severity or 'Warning'}: {doc.alert_message}"
+				+ (f" (due {doc.due_date})" if doc.due_date else "")
+			),
+		)
+	except Exception:  # pragma: no cover - the sweep must survive anything
+		pass
 
 
 def regimes_for_alerts(names) -> dict:

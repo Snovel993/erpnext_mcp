@@ -1,0 +1,160 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:translation_id",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One string, in one language. NOT Frappe's own Translation doctype, which translates the framework's own UI against a source string — this one is keyed by a STABLE KEY an app writes ('shift.status.open'), so the English can be reworded without orphaning the Spanish. A farm workforce in this region works in English and Spanish, and hazard communication, pesticide safety training and heat-illness training are all required to be delivered in a language the worker understands; this table is what lets the app prove which language somebody was served in.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "translation_id",
+  "translation_key",
+  "language",
+  "identity_col",
+  "category",
+  "enabled",
+  "value_section",
+  "value",
+  "meta_section",
+  "shipped_default",
+  "operator_edited",
+  "meta_col",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "The docname: the key and the language joined by '::'. Hidden and computed — it exists so one key in one language is one row and a second write to the same pair updates rather than duplicates, which is what makes the seeder safe to run on every migrate.",
+   "fieldname": "translation_id",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Translation ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "The stable key an app names this string by — 'task_type.harvest', 'error.shift.already_open', 'wizard.accident.step.when.label'. DOTTED AND LOWERCASE by convention so a prefix is a group: list_translations filters on 'error.' and gets the error catalogue. It is never the English text: rewording a sentence must not orphan its Spanish.",
+   "fieldname": "translation_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Translation Key",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "en",
+   "description": "ISO 639-1 code. The two this app ships strings in are the two this workforce reads; the column is a Select rather than free text so a typo ('sp', 'ES-mx') becomes a refusal instead of a row nobody will ever look up. Adding a third language is adding an option here and rows below it — no code changes.",
+   "fieldname": "language",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Language",
+   "options": "en\nes",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "How the register groups. Chosen so a translator can be handed one afternoon's worth of one kind of string rather than an alphabetical list of everything: every error message reads the same way, every shift status is two words.",
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "\nTask Types\nWizard Labels\nCompliance Forms\nShift Status\nError Messages\nUnits and Time\nOther"
+  },
+  {
+   "default": "1",
+   "description": "A disabled row is not served and falls back as if it were absent. It is how a translation somebody disputes is withdrawn WITHOUT deleting it — a wrong Spanish string a worker acted on is evidence, and the record of what they were shown has to survive the correction.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "value_section",
+   "fieldtype": "Section Break",
+   "label": "The String"
+  },
+  {
+   "description": "What the worker reads. May contain {placeholders} in braces, which the caller fills — THE PLACEHOLDER NAMES MUST MATCH THE ENGLISH ROW'S, because a Spanish string naming a placeholder the caller does not supply renders a brace to somebody standing in a block.",
+   "fieldname": "value",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Value",
+   "reqd": 1
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "0",
+   "description": "This row was written by install_translations rather than typed. It is what lets a later release tell its own seed data from an operator's, and it is half of the non-overwrite rule below.",
+   "fieldname": "shipped_default",
+   "fieldtype": "Check",
+   "label": "Shipped Default",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Somebody edited this string on purpose. THE SEEDER NEVER OVERWRITES A ROW CARRYING THIS — a farm whose crew kept misreading a shipped phrase reworded it, and a migration that put the shipped wording back every upgrade would make the whole register decorative.",
+   "fieldname": "operator_edited",
+   "fieldtype": "Check",
+   "label": "Operator Edited",
+   "read_only": 1
+  },
+  {
+   "fieldname": "meta_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "For the translator: what this string is for, where it appears, what the placeholders mean. A Spanish translation of a two-word label with no context is a guess.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Translation",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Compliance Officer",
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "translation_key,language,category,value",
+ "sort_field": "translation_key",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "translation_key",
+ "track_changes": 1
+}

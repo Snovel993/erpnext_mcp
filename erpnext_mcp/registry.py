@@ -114,6 +114,7 @@ from .tools import (
 	rules,
 	sales,
 	sessions,
+	shadow_log,
 	shifts,
 	shipments,
 	signatures,
@@ -128,6 +129,7 @@ from .tools import (
 	taxforms,
 	trade,
 	training,
+	translations,
 	universal_scan,
 	uploads,
 	valves,
@@ -22364,6 +22366,199 @@ TOOLS = {
 		requires=_ASSIGNMENT_REQUIRES,
 	),
 
+	# ── v0.85.0: the string register ────────────────────────────────────────
+	"list_translations": _tool(
+		translations.list_translations,
+		"What this site says, in which languages — and WHICH KEYS ARE MISSING A "
+		"TRANSLATION, which is the question this tool mostly exists to answer. "
+		"Read-only.\n\n"
+		"KEYED BY A STABLE KEY, NOT BY THE ENGLISH. `shift.status.open`, "
+		"`error.task.already_done`, `task_type.harvest`. That is the difference "
+		"from Frappe's own Translation doctype and it is not stylistic: keyed by "
+		"source text, rewording an English sentence silently orphans its Spanish, "
+		"and 'Open' the shift status and 'Open' the button cannot hold different "
+		"Spanish. Nothing here touches Frappe's register; the two answer "
+		"different questions.\n\n"
+		"THE PREFIX IS THE GROUPING. `key_prefix='error.'` hands somebody the "
+		"whole error catalogue to translate in one afternoon; `category` does the "
+		"same by theme.\n\n"
+		"`missing_only` NARROWS TO THE GAP. Pass a language and it lists every "
+		"key that exists in English and not in that language — each of which "
+		"serves English to a reader who cannot read it AND SAYS SO, which is the "
+		"right failure and still a failure.",
+		{
+			"language": _field(_STRING, "ISO code — 'es'. Omit for every language."),
+			"category": _field(
+				_STRING,
+				"Task Types, Wizard Labels, Compliance Forms, Shift Status, Error Messages, "
+				"Units and Time, or Other.",
+			),
+			"key_prefix": _field(_STRING, "Dotted prefix, e.g. 'error.' or 'shift.status.'."),
+			"missing_only": _field(
+				_BOOLEAN,
+				"Only keys with no translation in `language`. Needs `language` to mean anything.",
+			),
+			"include_disabled": _field(_BOOLEAN, "Include withdrawn strings."),
+			"limit": _field(_INTEGER, "Maximum rows. Capped at 500."),
+		},
+		title="List translations",
+		available=_needs_doctype("Farm Translation"),
+		requires="the Farm Translation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_translation": _tool(
+		translations.get_translation,
+		"One key, resolved into the caller's language — with what it says in "
+		"every other language and whether this answer fell back. Read-only.\n\n"
+		"WHOSE LANGUAGE: the Employee's `preferred_language` unless you name one. "
+		"NEVER a device locale — a phone set to English by whoever handed it over "
+		"says nothing about who is holding it now, and this app's claim to have "
+		"communicated a hazard 'in a manner the employee can understand' rests on "
+		"a column somebody filled in about a person.\n\n"
+		"A MISSING TRANSLATION COMES BACK AS ENGLISH WITH `fell_back` TRUE. Never "
+		"a blank, never the raw key, never a refusal. A MISSING KEY is a "
+		"different failure and is refused by name: a key the app asks for and "
+		"nobody seeded is a bug or an un-run migrate, while a key with English "
+		"and no Spanish is a translator's to-do.",
+		{
+			"key": _field(_STRING, "The translation key, e.g. 'shift.status.open'."),
+			"language": _field(_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."),
+			"employee": _field(_STRING, "Whose language preference to read."),
+			"user": _field(_STRING, "Or the login, resolved to their Employee."),
+		},
+		required=("key",),
+		title="Get a translation",
+		available=_needs_doctype("Farm Translation"),
+		requires="the Farm Translation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"update_translation": _tool(
+		translations.update_translation,
+		"MUTATING (default OFF). Write or correct one string in one language.\n\n"
+		"THE ROW BECOMES YOURS. Anything written here is flagged "
+		"`operator_edited`, and the shipped seeder never overwrites such a row "
+		"again — so a farm that reworded a phrase its crew kept misreading keeps "
+		"the rewording through every upgrade. An UNEDITED shipped row IS "
+		"refreshed by a later release, which is what lets this app fix its own "
+		"mistranslations on sites that never touched them.\n\n"
+		"PLACEHOLDERS ARE CHECKED AGAINST THE ENGLISH AND A MISMATCH IS REFUSED "
+		"BEFORE ANYTHING IS WRITTEN. A Spanish string naming `{bloque}` where the "
+		"English names `{block}` is not a wording difference — the caller fills "
+		"by NAME, so it prints a literal brace to a worker, or silently drops the "
+		"value they were meant to act on.\n\n"
+		"IT ADDS KEYS AS WELL AS TRANSLATIONS. A key this app has never heard of "
+		"is written, which is how a site labels something this app does not ship "
+		"a word for. Keys are dotted and lowercase because the prefix is what "
+		"`list_translations` groups by.",
+		{
+			"key": _field(_STRING, "The translation key. Dotted, lowercase, at least two parts."),
+			"language": _field(_STRING, "ISO code — 'en' or 'es'."),
+			"value": _field(_STRING, "What the worker reads. May contain {placeholders}."),
+			"category": _field(
+				_STRING,
+				"Task Types, Wizard Labels, Compliance Forms, Shift Status, Error Messages, "
+				"Units and Time, or Other. Inferred for a shipped key.",
+			),
+			"notes": _field(_STRING, "For the translator: what this string is for and where it appears."),
+			"enabled": _field(_BOOLEAN, "Untick to withdraw a disputed string without deleting it."),
+		},
+		required=("key", "language", "value"),
+		mutating=True,
+		idempotent=True,
+		title="Update a translation",
+		available=_needs_doctype("Farm Translation"),
+		requires="the Farm Translation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.85.0: the shadow log RACI feed ───────────────────────────────────
+	"list_shadow_log_entries": _tool(
+		shadow_log.list_shadow_log_entries,
+		"What went up the chain of command: one FROZEN copy per level, per "
+		"event. Read-only.\n\n"
+		"THIS IS NOT A NOTIFICATION LIST. Each row carries a snapshot of the "
+		"source record's values AT THE MOMENT IT HAPPENED, so a supervisor who "
+		"acknowledged a session of 412 buckets acknowledged 412 — and a later "
+		"recount to 380 is a second fact rather than a silent rewrite of the "
+		"first. It is also a redundant BACKUP: three levels hold three copies, "
+		"deliberately not linked to the source, so deleting the original does not "
+		"take the account of it.\n\n"
+		"THE LEVEL IS A DISTANCE, NOT A TITLE. 1 is the subject's direct "
+		"supervisor, 2 is theirs, 3 is the one above that. A crew whose "
+		"`reports_to` chain is two deep produces two copies and not three — "
+		"inventing a recipient would put somebody's name against work they were "
+		"never told about.\n\n"
+		"AN EMPTY FEED IS A REAL ANSWER and is not the same as a broken one: "
+		"nobody may report to that person, the feed may be switched off, or "
+		"nothing may have happened below them. Call it without `employee` to see "
+		"whether the feed is producing anything at all.",
+		{
+			"employee": _field(_STRING, "Whose feed — the RECIPIENT, not who the event was about."),
+			"level": _field(_INTEGER, "1 direct supervisor, 2 manager, 3 owner."),
+			"acknowledged": _field(_BOOLEAN, "False for the unread ones, which is the usual question."),
+			"event_type": _field(
+				_STRING,
+				"Bucket Session Synced, Shift Closed, Compliance Alert Raised, or Farm Task Completed.",
+			),
+			"source_doctype": _field(_STRING, "Narrow to copies of one kind of record."),
+			"source_name": _field(_STRING, "Every level's copy of one specific record."),
+			"subject_employee": _field(_STRING, "Who the events were ABOUT, rather than who was told."),
+			"company": _COMPANY,
+			"limit": _field(_INTEGER, "Maximum rows. Capped at 500."),
+		},
+		title="List shadow log entries",
+		available=_needs_doctype("Shadow Log Entry"),
+		requires="the Shadow Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_shadow_log_entry": _tool(
+		shadow_log.get_shadow_log_entry,
+		"One copy in full: the frozen snapshot, whether its hash still matches, "
+		"and whether the source record still exists. Read-only.\n\n"
+		"THE SNAPSHOT AND THE SOURCE ARE REPORTED SEPARATELY AND NEVER MERGED. "
+		"The whole value of the row is that the two can disagree — a reader who "
+		"cannot see the disagreement has the feed a notification would have given "
+		"them.\n\n"
+		"`snapshot_intact` FALSE MEANS SOMEBODY WENT ROUND THE CONTROLLER, which "
+		"refuses any change to a snapshot after insert. The copy is still shown, "
+		"because hiding it would hide the evidence of the alteration.\n\n"
+		"`source_still_exists` FALSE IS THE CASE THIS FEED EXISTS FOR: the "
+		"snapshot is now the only record of what happened.",
+		{
+			"name": _field(_STRING, "The docname, e.g. 'Shift Closed::Farm Shift::SHIFT-2026-00042::HR-EMP-0003'."),
+		},
+		required=("name",),
+		title="Get a shadow log entry",
+		available=_needs_doctype("Shadow Log Entry"),
+		requires="the Shadow Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"acknowledge_shadow_log": _tool(
+		shadow_log.acknowledge_shadow_log,
+		"MUTATING (default OFF). Record that the recipient has seen one copy.\n\n"
+		"IT ACKNOWLEDGES THE SNAPSHOT, NOT THE SOURCE. If the source record is "
+		"corrected afterwards, this acknowledgement does not silently become an "
+		"acknowledgement of the correction — which is the audit failure the "
+		"frozen copy exists to prevent.\n\n"
+		"ONE-WAY AND SAFE TO RETRY. An acknowledgement cannot be withdrawn: 'I "
+		"saw this' is a statement about the past, and clearing the tick would "
+		"leave no trace of either the seeing or the later dispute. A second call "
+		"on an already-acknowledged row changes nothing and says so with "
+		"`x_idempotent`, because a phone that lost its response and retried is "
+		"the ordinary case and must not have to choose between retrying and being "
+		"correct.\n\n"
+		"It writes NOTHING to the source record. Disputing what happened is a "
+		"separate act against that record, where somebody will read it.",
+		{
+			"name": _field(_STRING, "The Shadow Log Entry docname."),
+			"note": _field(
+				_STRING,
+				"Anything the recipient wanted to say. Optional — an acknowledgement is not a "
+				"review, and requiring a sentence makes it something nobody does.",
+			),
+			"acknowledged_at": _field(_STRING, "When, if not now. For a queued handset catching up."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Acknowledge a shadow log entry",
+		available=_needs_doctype("Shadow Log Entry"),
+		requires="the Shadow Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 }
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype

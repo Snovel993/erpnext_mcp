@@ -516,6 +516,13 @@ ROUTES = (
 	# answer in the caller's own language off `Employee.preferred_language`.
 	Route("/mobile", mobile_api.get_wizard_definition),
 	Route("/mobile", mobile_api.list_wizard_definitions),
+	# v0.85.0. The string bundle a handset pulls once at login instead of asking
+	# for one label at a time. A read, gated on enrolment alone, and the one
+	# route on this table whose answer depends on WHO IS ASKING rather than what
+	# they asked for: `Employee.preferred_language` decides the language, with
+	# the request's own `Accept-Language` as the fallback where that column is
+	# empty. Never the other way round — see `tools/translations.py`.
+	Route("/mobile", mobile_api.get_translation_bundle),
 	# v0.80.0. Trade documentation: four reads and one write. The write is a
 	# DRIVER'S CONFIRMATION and not the desk's tool — `confirm_shipment_movement`
 	# takes 'departed' or 'delivered' and its signature carries neither `status`

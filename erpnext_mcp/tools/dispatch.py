@@ -93,7 +93,7 @@ from ..erpnext_mcp.doctype.farm_task_assignment.farm_task_assignment import (
 )
 from ..errors import ToolError
 from ..result import ToolResult
-from . import inspections
+from . import inspections, shadow_log
 from .housing import EMPLOYEE, hr_installed
 
 FARM_TASK = "Farm Task"
@@ -1849,6 +1849,46 @@ def complete_farm_task(args: dict) -> ToolResult:
 			"what the sweep said. Rules outside that narrowing are untouched and reach the "
 			"scheduled pass as they always did."
 		)
+	# v0.85.0. THE COMPLETION GOES UP THE CHAIN, FROZEN. It runs last, after the
+	# record, the stock movement, the spray windows and the compliance
+	# re-evaluation, so the snapshot freezes the completion as it finally stands
+	# rather than half-way through. `propagate` never raises, so nothing below
+	# here can cost somebody a filed piece of work — the same promise the
+	# `stock_note` paragraph above makes about a failed drawdown.
+	#
+	# THE SUBJECT IS THE WORKER WHO DID IT, so the chain walked is theirs: the
+	# question a supervisory copy answers is "what did my crew do", and a task
+	# completed by somebody who reports elsewhere belongs in that person's
+	# supervisor's feed and not in the dispatcher's.
+	shadow = shadow_log.quiet_propagate(
+		event_type=shadow_log.EVENT_TASK_COMPLETED,
+		source_doctype=FARM_TASK_ASSIGNMENT,
+		source_name=assignment["name"],
+		subject_employee=worker,
+		company=str(task.get("company") or ""),
+		occurred_at=str(doc.completed_at or ""),
+		summary=(
+			f"{doc.assigned_to_name or worker} completed {task.get('task_name') or assignment['task']}"
+			+ (f" at {task.get('location')}" if task.get("location") else "")
+			+ f" with {len(evidence)} evidence file(s)"
+			+ (f", producing {task.get('creates_record')} {produced}" if produced else "")
+			+ f". State: {final_state}."
+		),
+		snapshot=shadow_log.snapshot_of(
+			FARM_TASK_ASSIGNMENT,
+			assignment["name"],
+			{
+				"_task": _describe_task(task_row(assignment["task"])),
+				"_final_state": final_state,
+				"_produced_record": produced,
+				"_produced_record_doctype": task.get("creates_record") or None,
+				"_evidence_filed": len(evidence),
+			},
+		),
+	)
+	if shadow:
+		data["shadow_log"] = shadow
+
 	return ToolResult(
 		data=data,
 		summary=(

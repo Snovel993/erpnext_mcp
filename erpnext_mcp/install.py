@@ -152,6 +152,7 @@ def after_install() -> None:
 	_bank_categorization_fields()
 	_bank_pairing_fields()
 	_receipt_intelligence_fields()
+	_translations()
 	frappe.db.commit()
 
 
@@ -189,6 +190,61 @@ def after_migrate() -> None:
 	_wizard_definitions()
 	_trade_documents()
 	_reporting_templates()
+	_translations()
+
+
+def _translations() -> None:
+	"""Seed the shipped English and Spanish strings. v0.85.0.
+
+	THE NON-OVERWRITE RULE HAS TWO HALVES AND BOTH MATTER, which is why this
+	seeder is not shaped like `_wizard_definitions` above. A wizard is written
+	only where none exists, full stop; a translation is written where none
+	exists AND refreshed where one exists that nobody has edited. The difference
+	is that a shipped MISTRANSLATION is a defect this app has to be able to fix
+	on every site — and a seeder that never touched an existing row would make a
+	bad Spanish string permanent everywhere it had ever landed.
+
+	What protects an operator's own wording is `operator_edited`, set by
+	`update_translation` and never cleared. A row carrying it is left alone
+	forever. A farm whose crew kept misreading a shipped phrase reworded it, and
+	putting the shipped wording back every upgrade would make the whole register
+	decorative.
+
+	Runs on install AND after every migrate, so a key ADDED in a later release
+	reaches sites that already have the rest of the catalogue.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import translations
+
+		report = translations.install_translations()
+	except Exception as exc:  # pragma: no cover - the seeder swallows its own
+		print(f"erpnext_mcp: the translations were not seeded — {type(exc).__name__}: {exc}")
+		return
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded {len(report['created'])} translation(s) — task types, wizard "
+			"labels, compliance form labels, shift status messages and the mobile error catalogue "
+			"now exist in English and Spanish as ROWS. list_translations(language='es', "
+			"missing_only=true) is what shows the gaps; update_translation fills one in with no "
+			"code release. A MISSING TRANSLATION SERVES ENGLISH AND SAYS SO — never a blank, "
+			"never a refusal."
+		)
+	if report.get("updated"):
+		print(
+			f"erpnext_mcp: refreshed {len(report['updated'])} shipped translation(s) to this "
+			"release's wording. Rows an operator had edited were not touched."
+		)
+	if report.get("left_alone"):
+		print(
+			f"erpnext_mcp: left {len(report['left_alone'])} operator-edited translation(s) alone. "
+			"That is the point of the operator_edited flag — your wording survives an upgrade."
+		)
+	for failure in report.get("failed") or ():
+		print(f"erpnext_mcp: could not seed translation {failure.get('key')} — {failure.get('reason')}")
+
 
 
 def _reporting_templates() -> None:

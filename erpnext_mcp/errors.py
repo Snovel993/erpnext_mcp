@@ -14,7 +14,32 @@ written to the site's Error Log instead.
 
 
 class ToolError(Exception):
-	"""An expected, client-correctable tool failure."""
+	"""An expected, client-correctable tool failure.
+
+	`key` IS OPTIONAL AND THE MESSAGE IS NOT. v0.85.0 lets a refusal carry a
+	stable translation key — `error.shift.already_open` — beside the English
+	sentence, so the mobile surface can serve a Spanish-speaking picker a refusal
+	they can read. The English stays because it is what a model corrects itself
+	from and what an operator finds in a log; the key is an addition to the
+	message, never a replacement for it.
+
+	A raise with no key is not a defect and never becomes one. Several hundred
+	call sites in this app raise a `ToolError` with one positional argument, and
+	the refusals a WORKER ON A PHONE can actually hit are a small subset of them:
+	an accounting tool refusing an unbalanced Journal Entry is read by a model,
+	not by somebody standing in a block. `api/guard` falls back to
+	`error.unspecified` and passes the English through unchanged, which is
+	exactly what those call sites did before this release.
+	"""
+
+	def __init__(self, message: str, key: str = "", **fill):
+		super().__init__(message)
+		#: A `Farm Translation` key, or "". See `tools/translations.py`.
+		self.translation_key = str(key or "").strip()
+		#: Values for the `{placeholders}` in the translated string. The English
+		#: message above is already rendered; these are for the OTHER language,
+		#: whose sentence puts the same values in a different order.
+		self.translation_fill = dict(fill)
 
 
 class AuthError(Exception):

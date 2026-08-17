@@ -127,6 +127,14 @@ class ComplianceField:
 	#: make the record unsaveable in the Desk, which is why nothing here combines
 	#: the two.
 	depends_on: str = ""
+	#: What a NEW record starts with. v0.85.0's first use is the only one, and it
+	#: is worth stating what a default on a compliance column does and does not
+	#: mean: it fills the Desk form for a record nobody has typed yet, and it
+	#: changes NOTHING about a row that already exists. A site upgrading keeps
+	#: every blank it had — which matters here, because on this particular column
+	#: a blank means "nobody asked" and that is a different fact from "they said
+	#: English". Leave this empty for any column where the two would be confused.
+	default: str = ""
 
 	def as_custom_field(self, doctype: str) -> dict:
 		"""The `Custom Field` row this becomes, minus the fields Frappe fills in."""
@@ -139,6 +147,8 @@ class ComplianceField:
 			"description": self.description or self.why,
 			"module": "ERPNext MCP",
 		}
+		if self.default:
+			row["default"] = self.default
 		if self.options:
 			row["options"] = self.options
 		if self.insert_after:
@@ -330,7 +340,16 @@ _EMPLOYEE_FIELDS = (
 		fieldname="preferred_language",
 		label="Preferred Language",
 		fieldtype="Select",
-		options="\nes\nen",
+		options="\nen\nes",
+		# v0.85.0. A DEFAULT ON THE FORM, NOT A BACKFILL. Every existing blank
+		# stays blank, and the blank still means "nobody asked" — which the
+		# resolver treats differently from a stated "en", because a person who
+		# was never asked is a training record with a hole in it and a person who
+		# said English is not. What this buys is the ordinary case: an operator
+		# typing a new hire on an English-speaking crew should not have to
+		# choose, and a column left empty by inattention is the failure mode this
+		# whole field exists to prevent.
+		default="en",
 		framework=(
 			"EEOC national-origin guidance (29 CFR 1606); OSHA 1910.1200(h) and the Worker "
 			"Protection Standard 40 CFR 170.501, both of which require training and hazard "
@@ -351,9 +370,11 @@ _EMPLOYEE_FIELDS = (
 			"app serves English and says so rather than guessing."
 		),
 		description=(
-			"ISO code — 'es' for Spanish, 'en' for English. Asked at hire. Extensible: any code "
-			"is stored, and a wizard with no translation for it falls back to English and reports "
-			"the gap rather than serving a half-translated screen."
+			"ISO code — 'es' for Spanish, 'en' for English. Asked at hire. Defaults to 'en' on a "
+			"NEW record and never backfills an existing blank, because an empty column means "
+			"'nobody asked' and that is a different fact from somebody saying English. Extensible: "
+			"any code is stored, and a string with no translation for it falls back to English and "
+			"reports the gap rather than serving a half-translated screen."
 		),
 	),
 	ComplianceField(

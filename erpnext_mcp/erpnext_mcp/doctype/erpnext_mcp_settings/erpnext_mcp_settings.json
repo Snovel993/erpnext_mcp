@@ -824,7 +824,16 @@
   "allow_compute_abc_allocation",
   "allow_get_abc_assignment",
   "allow_get_abc_report",
-  "allow_get_phase_waterfall"
+  "allow_get_phase_waterfall",
+  "translation_section",
+  "allow_list_translations",
+  "allow_get_translation",
+  "allow_update_translation",
+  "shadow_log_section",
+  "shadow_log_feed_enabled",
+  "allow_list_shadow_log_entries",
+  "allow_get_shadow_log_entry",
+  "allow_acknowledge_shadow_log"
  ],
  "fields": [
   {
@@ -6272,6 +6281,67 @@
    "fieldname": "allow_get_phase_waterfall",
    "fieldtype": "Check",
    "label": "Get Phase Waterfall"
+  },
+  {
+   "fieldname": "translation_section",
+   "fieldtype": "Section Break",
+   "label": "Multilingual Support (v0.85.0)",
+   "description": "The string register: what a worker reads, in the language they read it in. A missing translation SERVES ENGLISH AND SAYS SO — never a blank, never the raw key, never a refusal. Employee.preferred_language is the authority and Accept-Language is only the fallback, because this app's claim to have communicated a hazard 'in a manner the employee can understand' rests on a column somebody filled in about a person, not on a device setting."
+  },
+  {
+   "default": "1",
+   "description": "READ. What this site says, in which languages, and which keys are missing a translation — which is the question this tool mostly exists to answer.",
+   "fieldname": "allow_list_translations",
+   "fieldtype": "Check",
+   "label": "List Translations"
+  },
+  {
+   "default": "1",
+   "description": "READ. One key resolved into the caller's language, with what it says in every other language and whether this answer fell back to English.",
+   "fieldname": "allow_get_translation",
+   "fieldtype": "Check",
+   "label": "Get Translation"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Write or correct one string in one language. The row becomes operator_edited and no later migrate overwrites it. Placeholders are checked against the English and a mismatch is refused before anything is written.",
+   "fieldname": "allow_update_translation",
+   "fieldtype": "Check",
+   "label": "Update Translation"
+  },
+  {
+   "fieldname": "shadow_log_section",
+   "fieldtype": "Section Break",
+   "label": "Shadow Log RACI Feed (v0.85.0)",
+   "description": "A frozen copy of what happened, addressed up the chain of command. Not a notification: each copy carries the source record's values AT THAT MOMENT, so an acknowledgement cannot silently migrate onto a later correction — and three levels holding three copies is a redundant backup that survives the original being deleted."
+  },
+  {
+   "default": "1",
+   "description": "Whether a bucket sync, a shift close, a raised compliance alert and a completed farm task write supervisory copies AT ALL. NOT a tool switch — the three tools below stay usable for rows already written. Ships ON, because the feed is the feature; an operation with no chain of command (a two-person orchard where everybody is the owner) turns it off and stops generating rows nobody reads. Turning it off NEVER fails the work being filed: propagation could not do that in any case, by construction.",
+   "fieldname": "shadow_log_feed_enabled",
+   "fieldtype": "Check",
+   "label": "Shadow Log Feed Enabled"
+  },
+  {
+   "default": "1",
+   "description": "READ. What went up the chain: one frozen copy per level per event, filtered by recipient, level or whether it has been acknowledged.",
+   "fieldname": "allow_list_shadow_log_entries",
+   "fieldtype": "Check",
+   "label": "List Shadow Log Entries"
+  },
+  {
+   "default": "1",
+   "description": "READ. One copy in full: the frozen snapshot, whether its hash still matches it, and whether the source record still exists.",
+   "fieldname": "allow_get_shadow_log_entry",
+   "fieldtype": "Check",
+   "label": "Get Shadow Log Entry"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Record that the recipient has seen one copy. ONE-WAY — an acknowledgement cannot be withdrawn — and safe to retry. Writes nothing to the source record.",
+   "fieldname": "allow_acknowledge_shadow_log",
+   "fieldtype": "Check",
+   "label": "Acknowledge Shadow Log"
   }
  ],
  "index_web_pages_for_search": 0,

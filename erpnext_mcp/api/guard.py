@@ -207,10 +207,27 @@ def _require_farm_ops_role() -> str:
 	"""
 	user = str(getattr(frappe.session, "user", "") or "")
 	if not user or user in ("Guest", None):
-		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+		raise _not_enrolled()
 	if not (roles_held(user) & FARM_OPS_ROLES):
-		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+		raise _not_enrolled()
 	return user
+
+
+def _not_enrolled() -> frappe.PermissionError:
+	"""The one refusal every enrolment failure gets, in every language.
+
+	ONE MESSAGE AND ONE TRANSLATION KEY, whichever of the three checks failed —
+	Guest, no field role, no Active grant. The message has always been identical
+	on purpose (see `_require_farm_ops_role`: telling an unauthorised caller
+	whether it was the role or the login hands them a free oracle for the one
+	fact worth probing), and v0.85.0 must not undo that by attaching a key that
+	distinguishes them. A localised refusal that leaks what the English one
+	carefully does not would be a security regression wearing an accessibility
+	improvement.
+	"""
+	exc = frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+	exc.translation_key = "error.mobile.no_grant"
+	return exc
 
 
 def roles_held(user: str) -> set:
@@ -267,10 +284,10 @@ def _require_mobile_grant(user: str) -> None:
 	the next call.
 	"""
 	if not doctype_exists(GRANT):
-		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+		raise _not_enrolled()
 	row = frappe.db.get_value(GRANT, {"user": user}, ["name", "state", "last_seen_on"], as_dict=True)
 	if not row or str(row.get("state") or "") != "Active":
-		raise frappe.PermissionError("This endpoint requires an enrolled Farm Ops credential.")
+		raise _not_enrolled()
 	_stamp_last_seen(row)
 
 
@@ -553,6 +570,12 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 				fallback_auth.resolve()
 				user = str(getattr(frappe.session, "user", "") or "")
 
+			# v0.85.0. THE LANGUAGE IS ESTABLISHED ONCE PER REQUEST, before the
+			# gates, because the gates themselves refuse in it: "your login is
+			# not enrolled" is the first thing a new picker sees and it has to be
+			# readable. `_stamp_language` never raises and never gates anything.
+			_stamp_language(user)
+
 			try:
 				_require_enabled()
 				# THE LIMIT COMES BEFORE THE REST OF THE GATES, keyed on whoever
@@ -572,12 +595,15 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 				_require_mobile_grant(user)
 			except frappe.PermissionError as exc:
 				_record(method, kwargs, audit.STATUS_UNAUTHORIZED, "permission_error", user, ip, exc)
+				_stamp_error(exc, "error.permission.denied")
 				raise
 			except RateLimited as exc:
 				_record(method, kwargs, audit.STATUS_BLOCKED, "rate_limited", user, ip, exc)
+				_stamp_error(exc, "error.mobile.rate_limited")
 				raise
 			except MobileDisabled as exc:
 				_record(method, kwargs, audit.STATUS_BLOCKED, "disabled", user, ip, exc)
+				_stamp_error(exc, "error.mobile.disabled")
 				raise
 
 			# `resolve_context_user` reads the identity `mcp.handle` normally
@@ -593,13 +619,27 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 				# An expected, caller-correctable failure from the tool layer.
 				# It becomes a Frappe validation error so the message reaches the
 				# phone in `_server_messages`, which is where the client reads it.
+				#
+				# v0.85.0 ALSO STAMPS A TRANSLATION KEY AND A LOCALISED MESSAGE on
+				# the response, and the ENGLISH SENTENCE IS STILL WHAT IS THROWN.
+				# That ordering is deliberate: the English is what an operator
+				# finds in a log and what a model corrects itself from, and a
+				# release that replaced it with Spanish would make every existing
+				# client's error handling worse to make one client's better.
 				_record(method, kwargs, audit.STATUS_ERROR, "error", user, ip, exc)
+				_stamp_error(exc, getattr(exc, "translation_key", "") or "error.validation.failed")
 				frappe.throw(str(exc), frappe.ValidationError)
 			except frappe.PermissionError as exc:
 				_record(method, kwargs, audit.STATUS_UNAUTHORIZED, "permission_error", user, ip, exc)
+				_stamp_error(exc, "error.permission.denied")
 				raise
 			except Exception as exc:
 				_record(method, kwargs, audit.STATUS_ERROR, "error", user, ip, exc)
+				# NOT "error.validation.failed". An unexpected exception is a bug
+				# in this app or in the site, and telling a worker their answers
+				# need fixing would send them round a loop correcting a form that
+				# was never the problem.
+				_stamp_error(exc, "error.unspecified")
 				raise
 
 			_record(method, kwargs, audit.STATUS_SUCCESS, "success", user, ip, None)
@@ -610,6 +650,111 @@ def endpoint(method: str, limit: int = READ_LIMIT, mutating: bool = False):
 		return wrapper
 
 	return decorate
+
+
+#: Where the request-scoped language is parked between `_stamp_language` and
+#: whatever wants it. `frappe.local` is per-request and torn down with it, which
+#: is what makes this safe on a worker serving forty phones — a module global
+#: would leak one picker's language into the next one's response.
+LANGUAGE_FLAG = "farm_ops_language"
+LANGUAGE_SOURCE_FLAG = "farm_ops_language_source"
+
+
+def caller_language() -> str:
+	"""The language this request is being answered in. `""` before the stamp.
+
+	Read by `api/mobile` to localise a response body. Never raises: a call that
+	somehow reaches this before `_stamp_language` gets "" and falls back to
+	English, which is what every response did before v0.85.0.
+	"""
+	try:
+		return str(getattr(frappe.local, LANGUAGE_FLAG, "") or "")
+	except Exception:  # pragma: no cover - no request context at all
+		return ""
+
+
+def caller_language_source() -> str:
+	"""What decided the language: `explicit`, `employee`, `header` or `default`.
+
+	RETURNED TO THE CLIENT rather than kept, because "why is this worker seeing
+	English" is a real support question and the answer is one of four things.
+	`employee` means the Employee record says so. `header` means it did not and
+	the phone's `Accept-Language` was used. `default` means neither said
+	anything.
+	"""
+	try:
+		return str(getattr(frappe.local, LANGUAGE_SOURCE_FLAG, "") or "")
+	except Exception:  # pragma: no cover
+		return ""
+
+
+def _stamp_language(user: str) -> None:
+	"""Work out what language to answer this request in. NEVER RAISES, NEVER GATES.
+
+	`Employee.preferred_language` FIRST AND `Accept-Language` SECOND, and the
+	order is a compliance position rather than a preference — see
+	`tools/translations.py`, which owns the argument. The short version: this
+	app's claim to have communicated a hazard "in a manner the employee can
+	understand" rests on a column somebody filled in about a person, not on a
+	device setting. A phone set to English by whoever handed it over says nothing
+	about who is holding it now.
+
+	The header is honoured where the column is empty, because a site that has not
+	filled the column in is better served by the phone's guess than by English —
+	and because a worker who set their own phone to Spanish has told us something.
+
+	Nothing here can refuse a request. A language that cannot be worked out is
+	English, which is what every request got before this release.
+	"""
+	try:
+		from ..tools import translations
+
+		header = ""
+		request = getattr(frappe.local, "request", None)
+		if request is not None:
+			try:
+				header = str(request.headers.get("Accept-Language") or "")
+			except Exception:  # pragma: no cover - a request double without headers
+				header = ""
+		language, source = translations.resolve_language(user=user or "", header=header)
+		frappe.local.__dict__[LANGUAGE_FLAG] = language
+		frappe.local.__dict__[LANGUAGE_SOURCE_FLAG] = source
+	except Exception:  # pragma: no cover - the language must never break a call
+		pass
+
+
+def _stamp_error(exc, fallback_key: str) -> None:
+	"""Put a translation key and a localised message on the response. Never raises.
+
+	WHY THE RESPONSE DICT AND NOT THE MESSAGE. Frappe builds an error body from
+	`frappe.local.response`, so keys already on it survive the exception —
+	whereas anything packed into the message text would have to be parsed back
+	out by every client, including the ones that only want to show the sentence.
+	So the English sentence stays exactly what it was, and `error_key`,
+	`error_message` and `error_language` arrive beside it for a client that
+	wants to do better.
+
+	THE KEY IS THE CONTRACT AND THE STRING IS THE COURTESY. A handset is expected
+	to switch on `error_key` and show its own wording; `error_message` is what it
+	shows for a key it does not recognise, which is every key added after its
+	last release. That is why a missing translation serves English here rather
+	than the raw key: the raw key is what a system shows when it has given up.
+	"""
+	try:
+		from ..tools import translations
+
+		key = str(getattr(exc, "translation_key", "") or "").strip() or fallback_key
+		language = caller_language() or translations.DEFAULT_LANGUAGE
+		fill = dict(getattr(exc, "translation_fill", None) or {})
+		localised = translations.translate(key, language, default=str(exc), **fill)
+		response = getattr(frappe.local, "response", None)
+		if response is None:
+			return
+		response["error_key"] = key
+		response["error_language"] = language
+		response["error_message"] = localised
+	except Exception:  # pragma: no cover - an error path may not raise
+		pass
 
 
 def _record(method, arguments, status, outcome, user, ip, exc) -> None:

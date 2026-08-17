@@ -483,6 +483,14 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# HERE RATHER THAN IN `MOBILE` because `MobileAPI.swift` does not name it
 		# yet, which is this set's rule. It moves up when the constant lands.
 		"scan_valve",
+		# v0.85.0. The string bundle a handset pulls once at login rather than
+		# asking for one label at a time. HERE FOR THIS SET'S ORDINARY REASON —
+		# `MobileAPI.swift` does not name it yet — and it is worth saying what
+		# that costs, because it is not nothing: until the constant lands, a
+		# Spanish-reading picker still sees whatever strings are compiled into
+		# the app. The server half is published first so the iOS half is a client
+		# change and not a release of both.
+		"get_translation_bundle",
 	}
 
 	def _whitelisted(self, module):

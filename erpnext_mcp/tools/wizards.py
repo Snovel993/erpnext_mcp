@@ -54,6 +54,7 @@ from .. import compat
 from ..args import as_bool, as_limit, as_str
 from ..errors import ToolError
 from ..result import ToolResult
+from . import translations
 
 WIZARD = "Wizard Definition"
 EMPLOYEE = "Employee"
@@ -112,14 +113,54 @@ def _resolve(row: dict, base: str, language: str, missing: list, where: str) -> 
 	Records the fall-back in `missing` rather than swallowing it — see the
 	module docstring on why a silent English default is the worst of the three
 	options.
+
+	v0.85.0: A `tr:`-PREFIXED VALUE IS A KEY, not a label. The per-wizard columns
+	stay exactly right for a string that belongs to one wizard, and stay the
+	default — anything without the prefix behaves as it did before this release,
+	which is what makes the change safe on a site whose wizards an operator has
+	already edited. What the prefix buys is the string that appears in nine
+	wizards: "Photograph", "Signature", "Block". Nine copies of a label drift,
+	and the ninth is the one nobody fixed. `tr:wizard.field.photo` is one row in
+	`Farm Translation` that all nine read, and a fall-back through it is reported
+	on exactly the same `missing` channel as a fall-back on a column — so one gap
+	looks the same to a reader wherever it came from.
 	"""
 	wanted = row.get(f"{base}_{language}") if language else None
 	if wanted:
-		return str(wanted)
+		return _dereference(str(wanted), language, missing, f"{where}.{base}")
 	english = row.get(f"{base}_{DEFAULT_LANGUAGE}")
+	if english and translations_available() and translations.is_reference(english):
+		# THE ENGLISH COLUMN HOLDS A KEY, so there is nothing to fall back FROM:
+		# the register is asked for the requested language directly, and reports
+		# its own fall-back if it has one. Recording a column-level miss here as
+		# well would double-count one gap.
+		return _dereference(str(english), language, missing, f"{where}.{base}")
 	if language and language != DEFAULT_LANGUAGE and english:
 		missing.append({"where": where, "key": base, "language": language})
 	return str(english or "")
+
+
+def translations_available() -> bool:
+	"""Whether this site has the string register. Never raises.
+
+	Checked on every dereference rather than once at import, because a bench
+	mid-migrate has the wizards and not yet the register — and the right
+	behaviour there is the pre-v0.85.0 one: a `tr:` value is served as the
+	literal it is, which is ugly and visible rather than blank and silent.
+	"""
+	try:
+		return translations.available()
+	except Exception:  # pragma: no cover - a bench with no doctype table yet
+		return False
+
+
+def _dereference(value: str, language: str, missing: list, where: str) -> str:
+	"""Resolve a `tr:` reference through the register; pass a literal through."""
+	if not translations.is_reference(value):
+		return value
+	if not translations_available():
+		return value
+	return translations.dereference(value, language or DEFAULT_LANGUAGE, missing, where)
 
 
 def _options(raw, language: str, missing: list, where: str) -> list:

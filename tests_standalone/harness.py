@@ -1582,6 +1582,15 @@ APP_DOCTYPES = {
 	"Activity Cost Pool Source": "activity_cost_pool_source",
 	"ABC Cost Assignment": "abc_cost_assignment",
 	"ABC Cost Assignment Line": "abc_cost_assignment_line",
+	# v0.85.0. `Farm Translation` is one string in one language, keyed by a
+	# STABLE KEY rather than by the English — which is what separates it from
+	# Frappe's own Translation doctype and why both exist on a site. `Shadow Log
+	# Entry` is a frozen copy of an event addressed up the chain of command; its
+	# `source_doctype` / `source_name` are Data and not Links ON PURPOSE, so a
+	# deleted source cannot cascade into the backup of it. See
+	# `tools/translations.py` and `tools/shadow_log.py`.
+	"Farm Translation": "farm_translation",
+	"Shadow Log Entry": "shadow_log_entry",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

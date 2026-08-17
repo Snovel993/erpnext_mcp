@@ -3,6 +3,94 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.85.0 — 2026-08-16 — the language a worker reads, and the copy their supervisor keeps
+
+Two features, six tools, two doctypes, one mobile route. They ship together
+because they answer versions of one question: **can somebody other than the
+person doing the work understand what happened?** For the picker holding the
+phone that means the screen has to be in a language they read; for the three
+people above them it means a copy has to arrive, and has to still say what it
+said when they acknowledged it.
+
+### Multilingual support — a key, not the English
+
+`Farm Translation` is keyed by a stable dotted key (`shift.status.open`,
+`error.task.already_done`) rather than by the source string. That is the whole
+reason it is not Frappe's own `Translation` doctype, which stays exactly as it
+was and keeps translating the framework's own UI. Keyed by source text, three
+things fail silently: rewording an English sentence orphans its Spanish; "Open"
+the shift status and "Open" the button cannot hold different Spanish; and "which
+strings are missing a translation" has no answer, because there is no register of
+keys to ask about.
+
+**A missing translation serves English and says so.** Never a blank (a screen
+nobody can act on), never the raw key (what a system shows when it has given up),
+never a refusal (a crew locked out of a flow over one sentence). A missing KEY is
+a different failure and is refused by name — the first is a bug or an un-run
+migrate, the second is a translator's to-do, and conflating them files one as the
+other forever.
+
+**`Employee.preferred_language` is the authority and `Accept-Language` is only
+the fallback**, in that order and never the other way round. OSHA 1910.1200(h)
+and the Worker Protection Standard require hazard communication "in a manner the
+employee can understand", and the claim to have done that rests on a column
+somebody filled in about a person — not on a device setting. A phone set to
+English by whoever handed it over says nothing about who is holding it now. Every
+answer says which of the four decided, so "why is this worker seeing English" is
+answerable without reading the server. The column now defaults to `en` on a NEW
+record and never backfills an existing blank, because a blank still means
+"nobody asked".
+
+206 strings seeded across farm task types, wizard labels, compliance form labels,
+shift status messages, the mobile error catalogue and units — every shipped key
+in both languages. The seeder never overwrites a row somebody edited, and DOES
+refresh an unedited one, which is what lets a later release fix a shipped
+mistranslation everywhere it landed.
+
+A wizard label of the form `tr:some.key` now resolves through the register;
+anything without the prefix is a literal and behaves exactly as before. Mobile
+refusals carry `error_key`, `error_message` and `error_language` beside the
+unchanged English sentence — except the enrolment refusal, which keeps ONE key
+for all three of its causes because distinguishing them would hand back the
+oracle the identical English message exists to withhold.
+
+New: `list_translations`, `get_translation` (reads, on) and `update_translation`
+(write, off), plus `/mobile/get_translation_bundle`.
+
+### The shadow log RACI feed — a frozen copy, three levels up
+
+A bucket session synced, a shift closed, a compliance alert raised and a farm
+task completed each write one `Shadow Log Entry` per level of the chain above
+whoever the event was about — level 1 the direct supervisor, 2 theirs, 3 the one
+above that, walked off `Employee.reports_to`.
+
+**It is not a notification.** Each entry carries a frozen JSON snapshot of the
+source record's values at that moment, and the recipient reads the copy. A
+supervisor who acknowledged 412 buckets acknowledged 412; a later recount to 380
+is a second fact rather than a silent rewrite of the first. The controller
+refuses any change to a snapshot after insert and `snapshot_hash` makes frozen
+checkable rather than merely promised.
+
+**It is also a backup.** `source_doctype` and `source_name` are Data and not
+Links on purpose, so a delete cannot cascade into the copy of what was deleted —
+which is the case the redundancy exists for.
+
+The level is a DISTANCE and not a job title: a chain two deep produces two copies
+rather than three with the third addressed to whoever was around. A cycle in
+`reports_to` stops the walk and is reported. An event about the operation rather
+than about a person goes to the top of the house at level 3 only.
+
+**Propagation can never fail the work being filed.** Every call site wraps it and
+reports what could not be written under `shadow_log` on a result that succeeded —
+the same trade `bridge_to_attendance` makes, for the same reason. Idempotence is
+a unique index rather than a pre-check, because a resent batch is the ordinary
+case and a pre-check loses the race between two workers syncing at once.
+Acknowledgement is one-way and safe to retry.
+
+New: `list_shadow_log_entries`, `get_shadow_log_entry` (reads, on) and
+`acknowledge_shadow_log` (write, off), plus `shadow_log_feed_enabled` — a FEATURE
+switch, shipping on, that stops the propagation without touching the reads.
+
 ## 0.84.0 — 2026-08-16 — what the block cost, and what it cost per acre
 
 The activity-based costing engine: ten tools, six doctypes, and one refusal that

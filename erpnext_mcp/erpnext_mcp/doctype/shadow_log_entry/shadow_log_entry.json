@@ -1,0 +1,261 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:shadow_key",
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "One FROZEN copy of something that happened, addressed to one person in the chain of command above whoever it happened to. The recipient sees what was true at that moment, not what the source record says today — which is the whole point: a supervisor who acknowledged a bucket count of 412 acknowledged 412, and a later correction to 380 is a second fact rather than a rewrite of the first. Redundant by design: three levels get three copies, so losing the source record does not lose the account of it.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "shadow_key",
+  "event_type",
+  "shadow_level",
+  "recipient_employee",
+  "recipient_name",
+  "identity_col",
+  "company",
+  "source_doctype",
+  "source_name",
+  "subject_employee",
+  "subject_name",
+  "occurred_at",
+  "summary_section",
+  "summary",
+  "snapshot_section",
+  "data_snapshot",
+  "snapshot_hash",
+  "ack_section",
+  "acknowledged",
+  "acknowledged_at",
+  "ack_col",
+  "acknowledged_by",
+  "acknowledged_note"
+ ],
+ "fields": [
+  {
+   "description": "The deterministic identity of this copy: the event, the source record and the recipient, hashed to fit a docname. It is what makes the feed idempotent — a handset that resent a bucket batch after a timeout must not put a second copy of the same morning in front of the same foreman, and a unique index is the only version of that promise that survives two workers syncing at once.",
+   "fieldname": "shadow_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Shadow Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Which of the four propagating events this is. A CLOSED LIST: an event type nobody can filter on is a row nobody reads.",
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Event Type",
+   "options": "Bucket Session Synced\nShift Closed\nCompliance Alert Raised\nFarm Task Completed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "1",
+   "description": "How far up the chain this copy went. 1 is the direct supervisor — whoever the subject's Employee record reports to — 2 is that person's supervisor, 3 is the next one up, which on a farm this size is the owner. The number is the DISTANCE, not a job title: a level 3 on a crew with a short chain is whoever is actually at the top, and where the chain runs out before three levels there is no entry rather than a copy addressed to nobody.",
+   "fieldname": "shadow_level",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Shadow Level",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Whose copy this is. The person who should see it, and the only person whose acknowledgement counts for this row.",
+   "fieldname": "recipient_employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Recipient",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The recipient's name AS IT WAS when this was raised. Denormalised on purpose — a feed that has to join Employee to be readable is a feed that goes blank when somebody is archived.",
+   "fieldname": "recipient_name",
+   "fieldtype": "Data",
+   "label": "Recipient Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Whose operation this belongs to. Carried so a manager at one entity is not shown another's crew.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "What kind of record this is a copy of — 'Bucket Log Session', 'Farm Shift', 'Compliance Alert', 'Farm Task'. DATA RATHER THAN A LINK TO DocType, because this row has to outlive the doctype being uninstalled: the snapshot is the backup, and a broken link would take the account of what happened with it.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Source DocType",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The source record's docname. DATA AND NOT A DYNAMIC LINK, for the reason above and one more: deleting the source must not cascade into the shadow copy. This row is what is left when the original is gone.",
+   "fieldname": "source_name",
+   "fieldtype": "Data",
+   "label": "Source Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Who the event was ABOUT — the picker whose session synced, the foreman who closed the shift, the worker who completed the task. The chain above this person is the chain this copy travelled.",
+   "fieldname": "subject_employee",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Subject",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "The subject's name as it was at the moment. Denormalised for the same reason the recipient's is.",
+   "fieldname": "subject_name",
+   "fieldtype": "Data",
+   "label": "Subject Name",
+   "read_only": 1
+  },
+  {
+   "description": "When the thing being reported happened — not when this copy was written. They differ by however long a phone was out of signal, and reading the second as the first would put a morning's picking in the afternoon.",
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Occurred At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "summary_section",
+   "fieldtype": "Section Break",
+   "label": "What Happened"
+  },
+  {
+   "description": "One line a person can act on without opening the snapshot. Written in the recipient's own language where this site has the translation; the snapshot beneath it is always the raw values.",
+   "fieldname": "summary",
+   "fieldtype": "Small Text",
+   "label": "Summary",
+   "reqd": 1
+  },
+  {
+   "fieldname": "snapshot_section",
+   "fieldtype": "Section Break",
+   "label": "The Frozen Copy"
+  },
+  {
+   "description": "The source record's values AS THEY WERE, as JSON. NEVER REFRESHED — the controller refuses a change to it after insert. A feed that re-read the source would show a supervisor today's number over yesterday's acknowledgement, which is precisely the audit failure the copy exists to prevent.",
+   "fieldname": "data_snapshot",
+   "fieldtype": "Code",
+   "label": "Data Snapshot",
+   "options": "JSON",
+   "reqd": 1
+  },
+  {
+   "description": "SHA-256 of the snapshot as it was written. It is what makes 'frozen' checkable rather than merely promised: a row whose hash no longer matches its snapshot was altered by something that went round the controller.",
+   "fieldname": "snapshot_hash",
+   "fieldtype": "Data",
+   "label": "Snapshot Hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ack_section",
+   "fieldtype": "Section Break",
+   "label": "Acknowledgement"
+  },
+  {
+   "default": "0",
+   "description": "The recipient has seen it. ONE-WAY: an acknowledgement cannot be withdrawn, because 'I saw this' is a statement about the past and un-seeing it is not a thing that can happen. A supervisor who acknowledged something they now dispute files the dispute against the source record.",
+   "fieldname": "acknowledged",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Acknowledged"
+  },
+  {
+   "description": "When. Set by acknowledge_shadow_log and never by hand — the gap between occurred_at and this is the number an auditor asks for.",
+   "fieldname": "acknowledged_at",
+   "fieldtype": "Datetime",
+   "label": "Acknowledged At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ack_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Which login acknowledged it. Recorded beside the recipient rather than instead of them: an operator acknowledging on somebody's behalf is a real thing that happens and the two facts must stay distinguishable.",
+   "fieldname": "acknowledged_by",
+   "fieldtype": "Link",
+   "label": "Acknowledged By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "description": "Anything the recipient wanted to say when they acknowledged. Optional — an acknowledgement is not a review, and requiring a sentence would turn a two-second act into one nobody does.",
+   "fieldname": "acknowledged_note",
+   "fieldtype": "Small Text",
+   "label": "Acknowledged Note"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "naming_rule": "By fieldname",
+ "name": "Shadow Log Entry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Compliance Officer",
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "event_type,recipient_employee,source_doctype,source_name,shadow_level",
+ "sort_field": "occurred_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "summary",
+ "track_changes": 1
+}

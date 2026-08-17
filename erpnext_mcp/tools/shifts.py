@@ -74,6 +74,7 @@ from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resol
 from ..errors import ToolError
 from ..result import ToolResult
 from . import employee as employee_tool
+from . import shadow_log
 
 DOCTYPE = shifts.DOCTYPE
 
@@ -913,6 +914,38 @@ def end_shift(args: dict) -> ToolResult:
 			"per shift."
 		),
 	}
+	# v0.85.0. THE CLOSE GOES UP THE CHAIN, FROZEN, AND CANNOT UNDO THE CLOSE.
+	# Same contract as the Attendance bridge two blocks above and for the same
+	# reason: the supervisor's signature is the compliance act, and neither a
+	# payroll row nor a supervisory copy gets to fail it. `propagate` never
+	# raises; what it could not do is reported here rather than thrown.
+	#
+	# THE SUBJECT IS THE FOREMAN, not the crew. A shift is the foreman's record —
+	# they signed it — so the chain walked is theirs. A copy per crew member
+	# would put one afternoon in front of a manager fourteen times.
+	shadow = shadow_log.quiet_propagate(
+		event_type=shadow_log.EVENT_SHIFT_CLOSED,
+		source_doctype=DOCTYPE,
+		source_name=row["name"],
+		subject_employee=str(row.get("foreman") or ""),
+		company=str(row.get("company") or ""),
+		occurred_at=str(end),
+		summary=(
+			f"{described.get('foreman_name') or row.get('foreman') or 'A foreman'} closed "
+			f"{row['name']}"
+			+ (f" after {hours} hour(s)" if hours is not None else "")
+			+ f" with {len(described.get('crew') or [])} crew member(s) and "
+			f"{len(described.get('compliance_events') or [])} logged event(s)."
+		),
+		snapshot=shadow_log.snapshot_of(
+			DOCTYPE,
+			row["name"],
+			{"_shift_hours": hours, "_attendance_created": len(bridge.get("created") or [])},
+		),
+	)
+	if shadow:
+		data["shadow_log"] = shadow
+
 	if not described["compliance_events"]:
 		data["timeline_note"] = (
 			"NOTHING WAS LOGGED ON THIS SHIFT'S TIMELINE. That is recorded rather than refused — a "

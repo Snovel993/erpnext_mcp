@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 652 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 658 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 317 read tools are **on** by default and can be switched off individually. A
+All 321 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -14226,3 +14226,287 @@ A **negative** pool is refused — allocating it credits every block in proporti
 to how much of the activity it consumed. A **zero** pool is stored: "this
 activity cost nothing" and "nobody has computed this activity" are different
 statements, and only one is worth acting on.
+
+## Multilingual support and the shadow log (v0.85.0)
+
+Six tools, two doctypes, one whitelisted mobile route. Two features that look
+unrelated and share one property: **both are about somebody other than the
+person doing the work being able to understand what happened.**
+
+### The string register
+
+| Tool | What it does |
+| --- | --- |
+| `list_translations` | What this site says, in which languages — and, with `missing_only`, which keys have no translation |
+| `get_translation` | One key resolved into the caller's language, with every language's version and whether this answer fell back |
+| `update_translation` | Write or correct one string in one language. **Mutating** |
+
+`Farm Translation` is **not** Frappe's own `Translation` doctype and does not
+replace it. Frappe's is keyed by the **source string**, which is right for
+translating the framework's own UI and wrong for an app's, in three ways that all
+fail silently:
+
+* **Rewording the English orphans the Spanish.** Change "Bucket rejected —
+  coverage too low" to "Bucket not counted — not full enough" and nothing errors;
+  Spanish-speaking pickers just start seeing English.
+* **One English word, two Spanish ones.** "Open" as a shift status is *abierto*;
+  "Open" as a button is *abrir*. One source key cannot hold both.
+* **"What is missing?" has no answer.** There is no register of *keys*, only of
+  translations that happen to exist.
+
+So a row is keyed by a stable dotted key — `shift.status.open`,
+`error.task.already_done`, `task_type.harvest` — and the English is a row like
+any other. The prefix is the grouping: `key_prefix='error.'` hands a translator
+one afternoon's work.
+
+**A missing translation serves English and says so.** Never a blank (a screen
+nobody can act on), never the raw key (what a system shows when it has given
+up), never a refusal (a crew locked out of a flow over one sentence). Every read
+path reports what fell back, so the gap is findable from the Desk rather than
+discoverable by somebody standing in front of a screen they cannot read.
+
+### Whose language, and why `Accept-Language` loses
+
+`Employee.preferred_language` is the authority. `Accept-Language` is consulted
+**only where that column is empty**, and the ordering is a compliance position
+rather than a preference: OSHA 1910.1200(h) and the Worker Protection Standard
+(40 CFR 170.501) require hazard communication "in a manner the employee can
+understand", and this app's claim to have done that rests on a column somebody
+filled in about a person — not on a device setting. A phone set to English by
+whoever handed it over says nothing about who is holding it now.
+
+The header is honoured on an empty column because a site that has not filled it
+in yet is better served by the phone's guess than by English. Every response says
+which of the four decided — `explicit`, `employee`, `header`, `default` — so "why
+is this worker seeing English" is answerable without reading the server.
+
+`/mobile/get_translation_bundle` is what a handset pulls once at login instead of
+asking for one label at a time, and mobile refusals now carry `error_key`,
+`error_message` and `error_language` beside the unchanged English sentence. The
+key is the contract; the string is the courtesy for a key the client's release
+predates.
+
+A wizard label of the form `tr:wizard.field.photo` is a **reference** resolved
+through this register. Anything without the `tr:` prefix is a literal and behaves
+exactly as it did before v0.85.0 — the per-wizard `label_en` / `label_es` columns
+stay right for a string that belongs to one wizard. The prefix is for the string
+that appears in nine, where nine copies drift and the ninth is the one nobody
+fixed.
+
+### The shadow log RACI feed
+
+| Tool | What it does |
+| --- | --- |
+| `list_shadow_log_entries` | What went up the chain, by recipient, level, or whether it has been acknowledged |
+| `get_shadow_log_entry` | One copy in full: the frozen snapshot, whether its hash still matches, whether the source still exists |
+| `acknowledge_shadow_log` | Record that the recipient has seen it. **Mutating**, one-way, safe to retry |
+
+Four events propagate: a **bucket session synced**, a **shift closed**, a
+**compliance alert raised**, a **farm task completed**. Each writes one entry per
+level of the chain above whoever the event was about.
+
+```
+Bucket session synced ──▶ level 1  direct supervisor   (Employee.reports_to)
+                     ├──▶ level 2  their supervisor
+                     └──▶ level 3  the one above that
+        each carrying a FROZEN JSON snapshot, not a link
+```
+
+**This is not a notification list.** A notification tells you to go and look at a
+record; a shadow copy carries the record's values *at that moment*, and the
+recipient reads the copy. A supervisor who acknowledged a session of 412 buckets
+acknowledged 412 — if a recount later makes it 380, that is a second fact and not
+a silent rewrite of the first. The controller refuses any change to a snapshot
+after insert, and `snapshot_hash` makes "frozen" checkable rather than merely
+promised.
+
+**It is also a backup.** Three levels hold three copies, and `source_doctype` /
+`source_name` are `Data` rather than Links on purpose: a Dynamic Link would let a
+delete cascade into the backup, which would make the backup worthless in exactly
+the case it exists for. `get_shadow_log_entry` says plainly when the source has
+gone and the snapshot is now the only record of it.
+
+**The level is a distance, not a job title.** A crew whose `reports_to` chain is
+two deep produces two copies, not three with the third addressed to whoever
+happened to be around. A cycle in `reports_to` — two people reporting to each
+other, which is a data-entry error somebody makes — stops the walk and is
+reported rather than recursed. An event about the *operation* rather than about a
+person (a stale water test, an uninspected cabin) has no chain to walk and goes
+to whoever sits at the top of the company, at level 3 only.
+
+**Propagation can never fail the work being filed.** Every call site wraps it;
+what could not be written comes back under `shadow_log` on a result that
+succeeded. That is the same trade `bridge_to_attendance` makes: the compliance
+act is the thing being filed, and the convenience built on top of it does not get
+to veto it.
+
+`shadow_log_feed_enabled` in **ERPNext MCP Settings** switches the propagation
+off for an operation that does not run a chain of command. It is a feature switch
+and not a tool switch — the three reads stay usable for rows already written.
+
+## Agricultural master data (v0.82.0)
+
+Ten tools, five doctypes and three child tables. The three registers everything
+else in this app had been taking on trust from whoever was calling it: **what is
+grown**, **where it is sold**, and **in what units**.
+
+Before this release a spray check asking for a crop's pre-harvest interval, a
+settlement asking what a bin weighed, and a breakeven asking what a market's
+grades pay all got their answer from the caller. The site could not tell a
+considered figure from a plausible one. Now each is a row somebody can read,
+correct, and be held to.
+
+### None of the three is company-scoped
+
+Worth stating plainly, because `company` is accepted-and-reported-as-not-applied
+on several tools in this app and here it is **not accepted at all**:
+
+| Register | Why it belongs to no company |
+| --- | --- |
+| `Crop` | A species. A sweet cherry is a sweet cherry on both sides of a corporate boundary, and the days between bloom and harvest do not consult the deed |
+| `Market` | A place in the world. Two growers shipping into the Pacific Northwest fresh cherry market are shipping into **one** market — per-company copies would give the site two answers to what a No. 1 is |
+| `Agricultural UOM Context` / `Conversion` | A bin holds what it holds regardless of whose name is on it |
+
+Per-company narrowing already exists on the layer where it belongs: a
+**settlement** names both the market and the company.
+
+### `Field.crop` stays free text
+
+Nothing here turns it into a Link, and that is deliberate twice over. It has been
+free text since it shipped on the stated grounds that "a block of table grapes is
+not a schema change"; a Link beside it would give a site two answers to what
+grows on a block with no rule for which wins. And a Link would make migrate
+**order** load-bearing for every other feature that records a crop as a string.
+The upgrade, if somebody wants it, is a patch that seeds `Crop` rows from the
+distinct strings already on the site and only then changes the column — a release
+of its own, not a field option.
+
+### The crop tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window and no varieties |
+| `get_crop` | One crop in full: varieties with rootstock and pollination group, water demand by growth stage, the markets that buy it, the conversions recorded for it |
+| `create_crop` | Register one, with both child tables. **Mutating** |
+| `update_crop` | Change one. Cannot re-key it. **Mutating** |
+
+**A blank PHI is not a PHI of zero.** Zero means genuinely no interval; blank
+means nobody has recorded one. They are reported apart at every level, because a
+gate that conflates them clears fruit a label would hold. And every tool that
+reports a PHI carries the caveat that the **binding** interval is the one printed
+on the label of the material actually applied — on one crop that ranges from zero
+days to thirty, and `default_phi_days` is only the floor for when nothing more
+specific is known.
+
+**Half a harvest window is refused; a wrapped one is not.** A start with no end
+is a season nothing closes. But November to February is a real harvest, so the
+obvious `start <= end` check is deliberately absent — that would be a rule about
+integers wearing the costume of a rule about farming. `harvest_months` is
+computed and wraps correctly, because a caller doing that subtraction itself gets
+it wrong about half the time.
+
+**A contradiction is refused; a judgement is reported.** `maturity_years` on a
+variety of an *Annual* crop is refused — an annual has no non-bearing years to
+capitalise, and both facts cannot be true. Every recorded variety sitting in one
+pollination incompatibility group is only **reported**: they will not set fruit
+for each other and the block finds out four years later, but the pollinizer may
+be in a neighbouring block or simply unrecorded here.
+
+### The market tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_markets` | The register, grades counted, plus the active markets with no grades and the ones with no USDA shipping point |
+| `get_market` | One market, its grade ladder sorted by what each grade pays, and the premium spread across it |
+| `create_market` | Register one with its grade standards. **Mutating** |
+| `update_market` | Change or retire one. Cannot re-key it. **Mutating** |
+
+**`active_without_grade_standards` is the list to read first.** A market with no
+grades has no packout assumption behind it, so any breakeven quoting it is
+quoting a number somebody typed rather than a standard the market enforces.
+
+**`premium_spread_pct` is why a packout forecast is worth making.** It is the
+distance between the best and worst grade a market pays. Where the spread is
+narrow, an error in the projected split costs little; where it is wide, the split
+is the largest single assumption in a breakeven.
+
+**Sizes are millimetres, not row sizes.** Cherries trade by row and apples by
+count per box, and both are *inverse* scales where the bigger fruit carries the
+smaller number — a column holding those would sort backwards in every report.
+Convert once; the sales desk keeps speaking rows.
+
+**A negative premium is normal.** Juice against fresh, orchard run against fancy.
+Bounded below at -100%, past which it is a sign error. A defect tolerance outside
+0–100 is refused outright: stored, it would make every tolerance comparison pass.
+
+**`shipping_point` is a join key, not a description.** USDA Market News publishes
+daily terminal and shipping-point prices keyed on that exact string and on
+nothing else.
+
+### Units, and why ERPNext's own conversion table is not enough
+
+| Tool | What it does |
+| --- | --- |
+| `list_ag_uom_contexts` | Which units are valid for which work, and the default for each |
+| `get_uom_conversions` | How many of one unit are in another, for a given crop, and where the number came from |
+
+ERPNext's `UOM Conversion Factor` holds **one global factor per unit pair**. A
+bin of cherries is about 800 lb and a bin of apples about 900, so entering both
+overwrites one with the other and entering either makes the site quietly wrong
+about the other crop. Hence a register where **the crop is part of the key**.
+
+```
+                    resolution order
+crop-specific row  ─┐
+generic row        ─┼─►  factor, plus WHICH of these produced it
+inverted row       ─┤
+one-hop chain      ─┘
+```
+
+`get_uom_conversions` **resolves rather than looks up**. It will invert a row
+recorded the other way round — "one bin is 800 lb" and "one lb is a 800th of a
+bin" are the same fact, and requiring both to be entered would require an
+operator to keep two rows in step by hand. It will chain through **one**
+intermediate unit (bins → pounds → tons) and no more: past that it is multiplying
+three nominal figures together and the compounding error exceeds the answer's
+worth. A chain reports the **weaker** of its two bases, because an exact hop
+composed with a nominal one is nominal.
+
+**`basis` is not bookkeeping.** `Exact` is a definition — 128 fluid ounces to a
+gallon, 43,560 square feet to an acre — and cannot carry a crop, because a
+quantity that varies by fruit is not a definition. `Nominal` is the trade's rule
+of thumb: right enough to plan with, not right enough to settle a dispute with.
+`Operation Average` is the farm's own weighed figure, it must cite a source, and
+it wins every lookup. A shrink dispute turns on whether the weight was defined,
+assumed, or weighed.
+
+**Three different refusals, because they need three different actions.** No row
+at all; no *active* row (a superseded factor is kept switched off so last
+season's settlements stay explicable, and is not consulted); or rows for other
+crops and none for this one — which is correct rather than missing. Guessing
+there is how a settlement goes wrong by a factor nobody traces.
+
+**Harvest and Scale Ticket are two contexts, not one list.** A bin is a
+*container* and a pound is a *weight*. A field crew hands in bins and the shed
+reports pounds — two measurements of one delivery, and a single list accepting
+either is a list that lets them be summed.
+
+### What is seeded, and what that is worth
+
+Install and every migrate lay down a starting book: three crops (Sweet Cherry,
+Apple, Pear) with their varieties, rootstocks, pollination groups and water
+demand by growth stage; three markets with grade ladders; four unit contexts; and
+the conversions between them. It only ever creates what is not there, checked by
+docname, so an operator's own figure is never overwritten and a deleted record is
+never resurrected.
+
+**The numbers are a starting book, not your farm's.** Every conversion but the
+three definitions is `Nominal`, the yields are expectations, and the grade
+premiums are illustrative *shapes* rather than this season's prices. An operation
+that leaves them untouched and quotes them at a lender has misused them —
+`list_markets` reports which markets still carry no reviewed grades precisely so
+the ones nobody looked at stay visible.
+
+On a Frappe bench with no ERPNext there is no `UOM` master, so the units and the
+conversions that link to them are skipped **by name** while the crops and markets,
+which link to neither, are seeded anyway.

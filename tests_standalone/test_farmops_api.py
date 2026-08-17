@@ -402,6 +402,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_accident_reports",
 		"/mobile/get_wizard_definition",
 		"/mobile/list_wizard_definitions",
+		# v0.85.0. The one route on this table whose ANSWER depends on who is
+		# asking rather than on what they asked for: the language comes from
+		# `Employee.preferred_language`, with the request's own `Accept-Language`
+		# as the fallback where that column is empty — never the other way round.
+		"/mobile/get_translation_bundle",
 		# v0.80.0. Four trade-documentation reads and one write. The write is
 		# `/mobile/confirm_shipment_movement` and NOT `/mobile/update_shipment_status`,
 		# which is the whole point: the tool behind it can release a shipment to

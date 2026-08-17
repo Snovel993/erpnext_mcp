@@ -829,9 +829,9 @@ class ToolRegistration(unittest.TestCase):
 		# activity-based costing: the activity register, the pools, the
 		# allocation engine and the reads over a stored run. See `test_abc.py`
 		# for what the engine refuses to estimate.
-		self.assertEqual(len(self.registry.TOOLS), 652)
-		self.assertEqual(len(self.registry.READ_TOOLS), 317)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 335)
+		self.assertEqual(len(self.registry.TOOLS), 658)
+		self.assertEqual(len(self.registry.READ_TOOLS), 321)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 337)
 
 
 if __name__ == "__main__":

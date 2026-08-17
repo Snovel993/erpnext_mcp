@@ -266,12 +266,27 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# Document Requirement.company`, which is a Link to Company and IS scoped
 		# by Frappe, so one entity really can be made to ask for a document
 		# another does not — without two spellings of the certificate itself.
+		#
+		# THE v0.85.0 ADDITION IS `Farm Translation`, and it is the same argument
+		# about a WORD. The Spanish for "bucket" belongs to no company; two
+		# entities on one site read the same language, and a per-company string
+		# register would mean maintaining two translations of one sentence and
+		# discovering the divergence when a worker moved between crews. The
+		# docname reason applies too: the docname IS `key::language`, so a
+		# per-company row would need either duplicates the unique constraint
+		# refuses or a prefixed key every caller would have to spell.
+		#
+		# `Shadow Log Entry` is deliberately NOT on this list. A supervisory copy
+		# names a company and IS scoped by Frappe, because it carries a person's
+		# work in a snapshot — a manager at one entity has no business reading
+		# another's crew, which is precisely the distinction this list draws.
 		self.assertEqual(
 			sorted(unscoped),
 			[
 				"Asset State Log",
 				"Compliance Regime",
 				"Compliance Rule",
+				"Farm Translation",
 				"Federal Tax Table",
 				"I-9 Audit Log",
 				"I-9 Document Type",

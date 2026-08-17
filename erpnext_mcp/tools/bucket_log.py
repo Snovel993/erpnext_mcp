@@ -63,6 +63,7 @@ from ..errors import ToolError
 from ..result import ToolResult
 from . import employee as employee_tool
 from . import kpi as kpi_tools
+from . import shadow_log
 
 ENTRY_DOCTYPE = "Bucket Log Entry"
 SESSION_DOCTYPE = "Bucket Log Session"
@@ -298,6 +299,68 @@ def _sync_session(session_uuid: str) -> None:
 	doc.total_rejected = totals["total_rejected"]
 	doc.flags.ignore_permissions = True
 	doc.save(ignore_permissions=True)
+
+
+def _shadow_sessions(session_uuids: list) -> list:
+	"""One frozen supervisory copy per synced session, per level. Never raises.
+
+	THE SNAPSHOT IS THE SESSION AS IT NOW STANDS, entries included, and it is
+	frozen the moment it is written: a supervisor who acknowledges 412 buckets
+	acknowledged 412, and a later recount is a different fact rather than a
+	quiet rewrite of that one. See `tools/shadow_log.py`.
+
+	IDEMPOTENT BY KEY AND NOT BY CHECK. A handset that timed out and resent a
+	batch is the ordinary case here — it is the case the whole duplicate-handling
+	above exists for — so a resend must not put a second copy of one morning in
+	front of the same foreman. `shadow_log.shadow_key` derives from the session
+	and the recipient, never from a timestamp, and the unique index does the rest.
+
+	Returns a list of per-session reports, or `[]` where nothing was raised. The
+	caller puts it in the result under `shadow_log` only when it is non-empty: a
+	key that is always present and usually empty is noise on the surface with the
+	least room for it.
+	"""
+	out: list = []
+	for session_uuid in session_uuids or ():
+		try:
+			row = frappe.db.get_value(
+				SESSION_DOCTYPE,
+				{"session_uuid": session_uuid},
+				["name", "employee", "company", "ended_at", "started_at", "total_accepted", "total_rejected"],
+				as_dict=True,
+			)
+			if not row:
+				continue
+			accepted = frappe.utils.cint(row.get("total_accepted"))
+			rejected = frappe.utils.cint(row.get("total_rejected"))
+			who = str(row.get("employee") or "")
+			who_name = ""
+			if who:
+				who_name = str(frappe.db.get_value("Employee", who, "employee_name") or "") or who
+			report = shadow_log.propagate(
+				event_type=shadow_log.EVENT_BUCKET_SESSION,
+				source_doctype=SESSION_DOCTYPE,
+				source_name=str(row.get("name")),
+				subject_employee=who,
+				company=str(row.get("company") or ""),
+				occurred_at=str(row.get("ended_at") or row.get("started_at") or ""),
+				summary=(
+					f"{who_name or 'An unattributed badge'} synced a picking session: "
+					f"{accepted} accepted, {rejected} rejected."
+				),
+				extra={"_entry_count": accepted + rejected},
+			)
+			if report.get("raised") or report.get("skipped") or report.get("existing") or report.get("notes"):
+				report["session_uuid"] = session_uuid
+				out.append(report)
+		except Exception as exc:  # pragma: no cover - propagate already swallows its own
+			out.append(
+				{
+					"session_uuid": session_uuid,
+					"skipped": [f"the shadow copy could not be raised: {type(exc).__name__}: {exc}"],
+				}
+			)
+	return out
 
 
 #: Class names a unique-index collision arrives as. MATCHED BY NAME, not by
@@ -539,25 +602,37 @@ def sync_bucket_entries(args: dict) -> ToolResult:
 	for session_uuid in touched_sessions:
 		_sync_session(session_uuid)
 
+	# v0.85.0. THE SHADOW COPIES GO UP THE CHAIN AND CANNOT FAIL THIS SYNC.
+	# Everything below is caught inside `shadow_log.propagate`, which never
+	# raises, for the same reason `shifts.bridge_to_attendance` is written that
+	# way: the captures are the picker's piece-rate record and no supervisory
+	# convenience gets to veto them. It runs after the sessions are recomputed so
+	# each snapshot freezes the totals as they actually stand.
+	shadow = _shadow_sessions(sorted(touched_sessions))
+
 	summary = f"{len(created)} entry(ies) created"
 	if duplicates:
 		summary += f", {len(duplicates)} duplicate(s) skipped"
 	if invalid:
 		summary += f", {len(invalid)} invalid entry(ies) skipped"
 
+	data = {
+		"actor": actor,
+		"badge_policy": policy,
+		"shift": shift or None,
+		"created_count": len(created),
+		"duplicate_count": len(duplicates),
+		"invalid_count": len(invalid),
+		"created": created,
+		"duplicates": duplicates,
+		"invalid": invalid,
+		"sessions_updated": sorted(touched_sessions),
+	}
+	if shadow:
+		data["shadow_log"] = shadow
+
 	return ToolResult(
-		data={
-			"actor": actor,
-			"badge_policy": policy,
-			"shift": shift or None,
-			"created_count": len(created),
-			"duplicate_count": len(duplicates),
-			"invalid_count": len(invalid),
-			"created": created,
-			"duplicates": duplicates,
-			"invalid": invalid,
-			"sessions_updated": sorted(touched_sessions),
-		},
+		data=data,
 		summary=summary,
 		docstatus_delta=(
 			f"{len(created)} Bucket Log Entry record(s) created"
