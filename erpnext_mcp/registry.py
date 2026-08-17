@@ -133,6 +133,7 @@ from .tools import (
 	stock_inventory,
 	tasktemplates,
 	tax,
+	tax_remittance,
 	taxforms,
 	trade,
 	training,
@@ -20070,6 +20071,199 @@ TOOLS = {
 		available=_needs_doctype("Tax Form"),
 		requires="the Tax Form doctype (run bench migrate after installing v0.34.0)",
 		title="Get tax form",
+	),
+	"get_tax_remittance_summary": _tool(
+		tax_remittance.get_tax_remittance_summary,
+		"Everything owed to every tax authority for a period, broken down by pay "
+		"period: the federal EFTPS deposit, Oregon's programmes and Washington's. "
+		"Read-only.\n\n"
+		"THE FEDERAL FIGURE IS ONE DEPOSIT'S WORTH — federal income tax withheld "
+		"plus BOTH halves of Social Security and Medicare, which is what an EFTPS "
+		"payment covers. FUTA is reported beside it, not inside it, because it is "
+		"deposited separately and on its own quarterly rule.\n\n"
+		"Oregon is withholding, the Statewide Transit Tax, Paid Leave, the "
+		"Workers' Benefit Fund and unemployment; Washington is Paid Family & "
+		"Medical Leave, WA Cares, L&I and unemployment. Each names its agency.\n\n"
+		"NOTHING HERE IS NET OF A PAYMENT. This app cannot see EFTPS, Revenue "
+		"Online or the Washington portals, so every figure is the liability in "
+		"full. Only Calculated and Submitted payroll counts — a Draft has not "
+		"been paid. Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
+			"year": _field(_STRING, "Alias for fiscal_year."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Omit for the whole calendar year."),
+		},
+		required=("fiscal_year",),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="Tax remittance summary",
+	),
+	"get_941_prefill": _tool(
+		tax_remittance.get_941_prefill,
+		"Form 941's lines 1 to 15 for one quarter, computed from current payroll "
+		"and RECORDED NOWHERE. Read-only.\n\n"
+		"READ warnings[0] FIRST: FARMWORKERS GO ON FORM 943, NOT FORM 941. Form "
+		"943 is the annual return for agricultural employees; 941 is quarterly "
+		"for everybody else, and an employer with both farm and office staff "
+		"files both. Nothing on a payroll slip marks a worker as agricultural, so "
+		"this totals every slip in the quarter and cannot make that split.\n\n"
+		"Also returns Part 2's monthly liabilities, which must total line 12 TO "
+		"THE CENT or the return is rejected — `reconciles` says whether they do, "
+		"and the quarter-level residual is shown where one was applied.\n\n"
+		"THIS IS A PREFILL AND NOT A RECORD. It recomputes on every call, so it "
+		"will drift from a Tax Form generated earlier — which is the reason that "
+		"one is stored. Use generate_tax_form to keep a copy of what was actually "
+		"reported. Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
+			"year": _field(_STRING, "Alias for fiscal_year."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Required — a 941 is quarterly."),
+			"deposits": _field(_NUMBER, "Line 13 — total federal deposits made for the quarter."),
+			"ytd_wages_by_employee": _field(
+				_OBJECT,
+				'Prior-quarter wages per employee, e.g. {"HR-EMP-00001": 42000}. Lets the '
+				"Social Security wage base be applied correctly from Q2 onward.",
+			),
+			"company_address": _field(_STRING, "The employer address to print. Not stored on Company."),
+			"sick_pay_adjustment": _field(_NUMBER, "Line 8."),
+			"tips_and_group_term_life_adjustment": _field(_NUMBER, "Line 9."),
+			"small_business_payroll_tax_credit": _field(_NUMBER, "Line 11."),
+		},
+		required=("fiscal_year", "quarter"),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="Form 941 prefill",
+	),
+	"get_state_tax_remittance": _tool(
+		tax_remittance.get_state_tax_remittance,
+		"Oregon's quarterly filing and Washington's, side by side. Read-only.\n\n"
+		"OREGON IS TWO FORMS AND AN OQ IS NOT A FILING WITHOUT THE SECOND. The OQ "
+		"carries the employer's totals across withholding, the Statewide Transit "
+		"Tax, Paid Leave and unemployment. FORM 132 carries the per-employee "
+		"detail Oregon assesses benefit eligibility from — wages, UI subject "
+		"wages after the cap, excess wages, and WHOLE HOURS ROUNDED DOWN, which "
+		"is Oregon's instruction rather than a display choice. The state "
+		"reconciles the two against each other and this says when they disagree."
+		"\n\nWASHINGTON'S ESD REPORT carries hours per employee, which is a hard "
+		"requirement there and not an approximation, plus UI, Paid Family & "
+		"Medical Leave and WA Cares.\n\n"
+		"Both are due the last day of the month after the quarter — the same date "
+		"as the federal 941. Requires System Manager, HR Manager, HR User or "
+		"Farm Manager.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
+			"year": _field(_STRING, "Alias for fiscal_year."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Required — both reports are quarterly."),
+			"state": _field(_STRING, "OR or WA. Omit for both."),
+			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
+			"or_ui_wage_base": _field(_NUMBER, "Oregon's UI taxable wage base for the year."),
+			"wa_ui_wage_base": _field(_NUMBER, "Washington's UI taxable wage base for the year."),
+			"ytd_wages_by_employee": _field(
+				_OBJECT,
+				"Prior-quarter wages per employee. Without it the UI wage base is consumed "
+				"from this quarter alone, which overstates subject wages from Q2 onward.",
+			),
+			"state_ids": _field(_OBJECT, 'Employer state account numbers, e.g. {"OR": "1234567-8"}.'),
+			"company_address": _field(_STRING, "The employer address to print."),
+		},
+		required=("fiscal_year", "quarter"),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="State tax remittance",
+	),
+	"get_tax_deposit_schedule": _tool(
+		tax_remittance.get_tax_deposit_schedule,
+		"Every federal deposit deadline in a period, under this employer's "
+		"schedule, plus the state filing dates. Read-only.\n\n"
+		"MONTHLY OR SEMIWEEKLY IS DECIDED BY THE LOOKBACK PERIOD AND NOTHING "
+		"ELSE — the four quarters ending 30 June of the PRIOR year. Above $50,000 "
+		"of tax reported in that window the employer deposits semiweekly for the "
+		"whole of the following year; at or below it, monthly. This year's "
+		"payroll does not enter into it. A total computed from this site's own "
+		"payroll is a FLOOR — a quarter this app never ran reads as zero — so "
+		"pass `lookback_total` off the filed 941s, or `schedule` directly.\n\n"
+		"Semiweekly: a Wednesday, Thursday or Friday payday is due the following "
+		"Wednesday, and a Saturday to Tuesday payday the following Friday, with "
+		"an extra banking day for a federal holiday in the window. Monthly: the "
+		"15th of the following month. A deposit reaching $100,000 is due the NEXT "
+		"BUSINESS DAY whatever the schedule, and is flagged.\n\n"
+		"THE PAYDAY IS NOT A RECORDED FIELD. A run that reached the ledger has a "
+		"GL posting date and that is used; everything else falls back to the pay "
+		"period END plus `payday_offset_days`. The deposit clock runs from the "
+		"date wages were PAID, so a fallback date is EARLY by the farm's payment "
+		"lag — safe to be wrong in that direction, but not the real deadline. "
+		"Every row says which basis it used. Requires System Manager, HR "
+		"Manager, HR User or Farm Manager.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
+			"year": _field(_STRING, "Alias for fiscal_year."),
+			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Omit for the whole calendar year."),
+			"lookback_total": _field(
+				_NUMBER,
+				"Total employment tax reported on the four returns in the lookback period. "
+				"The only figure that can be right — it comes off the filed 941s.",
+			),
+			"schedule": _field(
+				_STRING,
+				"Monthly or Semiweekly, supplied directly. Overrides the lookback test.",
+			),
+			"payday_offset_days": _field(
+				_INTEGER,
+				"Days between a pay period closing and the money actually moving, 0 to 60. "
+				"Used only where a run has no GL posting date.",
+			),
+		},
+		required=("fiscal_year",),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="Tax deposit schedule",
+	),
+	"get_futa_summary": _tool(
+		tax_remittance.get_futa_summary,
+		"Form 940 for a calendar year — federal unemployment tax. Read-only.\n\n"
+		"FUTA IS EMPLOYER-ONLY AND IS NEVER WITHHELD FROM ANYBODY'S PAY. 6.0% of "
+		"the first $7,000 each employee earns in the year, less a credit of up to "
+		"5.4% for state unemployment tax paid on time — a net 0.6% in a state not "
+		"under credit reduction, which in 2025 neither Oregon nor Washington is."
+		"\n\nREAD `agricultural_coverage` FIRST. FUTA does not apply to farm "
+		"labour AT ALL unless the employer paid $20,000 in cash wages in some "
+		"calendar quarter, or employed 10 or more farmworkers in each of 20 or "
+		"more weeks. Either test is enough and meeting one makes the whole year "
+		"liable from the first dollar; meeting NEITHER means no tax and no Form "
+		"940 — not a reduced amount. Both tests are reported, never enforced: the "
+		"cash-wage figure is exact and the weeks figure is derived from pay "
+		"periods, and farm wages paid outside this app count toward both and are "
+		"invisible here.\n\n"
+		"THE $7,000 CAP IS CONSUMED PER EMPLOYEE IN DATE ORDER, so the Part 5 "
+		"quarterly liabilities are what the cap had left in each quarter and not "
+		"the annual tax split four ways. Under $500 accumulated at a quarter end "
+		"nothing is deposited and the liability carries forward. Requires System "
+		"Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
+			"year": _field(_STRING, "Alias for fiscal_year."),
+			"deposits": _field(_NUMBER, "Line 13 — FUTA already deposited for the year."),
+			"exempt_payments": _field(_NUMBER, "Line 4 — payments exempt from FUTA."),
+			"credit_reduction": _field(_NUMBER, "Line 11, for a credit-reduction state."),
+			"futa_rate": _field(_NUMBER, "The gross FUTA rate as a percent. Defaults to the FICA Configuration, then 6.0."),
+			"futa_wage_base": _field(_NUMBER, "The per-employee annual base. Defaults to 7000."),
+			"futa_state_credit_max": _field(_NUMBER, "The largest state credit as a percent. Defaults to 5.4."),
+			"ytd_wages_by_employee": _field(
+				_OBJECT,
+				"Wages already paid this year before the first slip in hand, per employee. "
+				"Only needed for a part-year view.",
+			),
+			"company_address": _field(_STRING, "The employer address to print."),
+		},
+		required=("fiscal_year",),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="FUTA summary",
 	),
 	"generate_tax_form": _tool(
 		taxforms.generate_tax_form,

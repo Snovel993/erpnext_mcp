@@ -624,6 +624,31 @@ ROUTES = (
 	# checkbox on the phone of whoever printed it.
 	Route("/mobile", mobile_api.get_payroll_register),
 	Route("/mobile", mobile_api.render_pay_stub),
+	# v0.92.0. The five tax remittance reads, on the same footing as the register
+	# above and gated the same way: every one carries `require_hr_role` in its own
+	# body and every one is company-scoped through `guard.require_company`. They
+	# are aggregates of what the whole crew was paid, which is what makes the HR
+	# gate the right one and `DISPATCH_ROLES` the wrong one.
+	#
+	# NONE OF THEM WRITES ANYTHING, including the two named after returns.
+	# `get_941_prefill` and `get_futa_summary` compute a form and record nothing;
+	# generating a Tax Form that survives a later payroll correction is
+	# `generate_tax_form`, which is a mutating tool on the MCP surface and is
+	# deliberately NOT on this table. A phone can read what is owed; committing a
+	# figure as the thing an agency was told is a desk act.
+	#
+	# THE CORRECTION ARGUMENTS ARE ON THE SCHEDULE ROUTE AND NOWHERE ELSE.
+	# `lookback_total`, `schedule` and `payday_offset_days` are on the deposit
+	# schedule's signature because without them it assumes a monthly depositor
+	# paying on the day a period closes, and both assumptions produce dates that
+	# are early. The 941's adjustment lines are NOT on its signature, so this
+	# table's argument filter keeps them off the handset — a sick-pay adjustment
+	# is settled with an accountant against the books, not typed into a phone.
+	Route("/mobile", mobile_api.get_tax_remittance_summary),
+	Route("/mobile", mobile_api.get_941_prefill),
+	Route("/mobile", mobile_api.get_state_tax_remittance),
+	Route("/mobile", mobile_api.get_tax_deposit_schedule),
+	Route("/mobile", mobile_api.get_futa_summary),
 	# The three compliance reports, and the only AGGREGATE reads on this table.
 	# Everything above answers a question about one document or about the
 	# caller's own work; these answer one about a whole crew, a whole calendar

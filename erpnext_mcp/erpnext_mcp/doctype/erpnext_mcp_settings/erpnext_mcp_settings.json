@@ -437,6 +437,12 @@
   "allow_mark_tax_form_filed",
   "allow_render_tax_form_pdf",
   "allow_bulk_render_tax_form_pdfs",
+  "tax_remittance_section",
+  "allow_get_tax_remittance_summary",
+  "allow_get_941_prefill",
+  "allow_get_state_tax_remittance",
+  "allow_get_tax_deposit_schedule",
+  "allow_get_futa_summary",
   "expense_receipt_section",
   "allow_list_expense_receipts",
   "allow_get_expense_receipt",
@@ -3745,6 +3751,46 @@
    "fieldname": "allow_bulk_render_tax_form_pdfs",
    "fieldtype": "Check",
    "label": "Bulk Render Tax Form PDFs"
+  },
+  {
+   "fieldname": "tax_remittance_section",
+   "fieldtype": "Section Break",
+   "label": "Tax Remittance"
+  },
+  {
+   "default": "1",
+   "description": "READ. Everything owed to every tax authority for a period — federal EFTPS, Oregon and Washington — broken down by pay period.",
+   "fieldname": "allow_get_tax_remittance_summary",
+   "fieldtype": "Check",
+   "label": "Tax Remittance Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Form 941's lines 1 to 15 for a quarter, plus Part 2's monthly liabilities. Computed from current payroll and recorded nowhere.",
+   "fieldname": "allow_get_941_prefill",
+   "fieldtype": "Check",
+   "label": "Form 941 Prefill"
+  },
+  {
+   "default": "1",
+   "description": "READ. Oregon's OQ and Form 132, and Washington's ESD quarterly report, with the per-employee detail each state requires.",
+   "fieldname": "allow_get_state_tax_remittance",
+   "fieldtype": "Check",
+   "label": "State Tax Remittance"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every federal deposit deadline in a period under this employer's monthly or semiweekly schedule, plus the state filing dates.",
+   "fieldname": "allow_get_tax_deposit_schedule",
+   "fieldtype": "Check",
+   "label": "Tax Deposit Schedule"
+  },
+  {
+   "default": "1",
+   "description": "READ. Form 940 for a calendar year, with the $7,000 wage base consumed per employee in date order and both agricultural coverage tests.",
+   "fieldname": "allow_get_futa_summary",
+   "fieldtype": "Check",
+   "label": "FUTA Summary"
   },
   {
    "fieldname": "expense_receipt_section",

@@ -3,6 +3,131 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.92.0 — 2026-08-17 — a return says what was owed; nothing said when it had to be there
+
+`tools/taxforms.py` has generated returns since v0.34.0 — a 941, an OQ, a
+WA-ESD — and says in its own docstring that computing a deposit schedule is a
+thing it does not do. It was right, and that was the gap: a return is filed once
+a quarter and says what was owed, while deposits are made every payday, and a
+late one costs **2% to 15% of the deposit** under IRC §6656 on money the employer
+withheld from somebody else's wages and is holding in trust. The farm had every
+figure and no calendar.
+
+**Five read-only tools, default ON, all HR-gated**, with mobile routes:
+`get_tax_remittance_summary`, `get_941_prefill`, `get_state_tax_remittance`,
+`get_tax_deposit_schedule`, `get_futa_summary`.
+
+**New pure engine `erpnext_mcp/tax_remittance_calc.py`**, on the same contract as
+`payroll_calc.py` and `form_generators.py` beside it: the federal deposit
+calendar, the observed federal holidays, Form 940, and Oregon's Form 132.
+
+Nothing is stored. These recompute on every call, which is the opposite of what
+`generate_tax_form` does and deliberately so — a Tax Form is a record of what an
+employer told an agency on a date, and a deposit schedule showing last week's
+payroll would be worse than useless.
+
+### Farmworkers are reported on Form 943, and this app only had 941
+
+Form 943 is the **annual** return for agricultural employees; 941 is quarterly for
+everybody else. They are not alternatives, the choice is per worker, and an
+employer with both farm and office staff files both. On a tree-fruit operation the
+agricultural case is the normal one — so `get_941_prefill` still computes the 941
+that was asked for, and says so in **`warnings[0]`** rather than in a footnote. It
+cannot make the split itself: nothing on a payroll slip marks a worker as
+agricultural labour, so it totals every slip in the quarter and states that plainly.
+Producing the 943 itself is follow-on work; the inputs are the ones already loaded.
+
+### FUTA may not apply to farm labour at all, and assuming it does invents a filing
+
+Federal unemployment tax reaches agricultural wages only if the employer paid
+**$20,000** in cash wages in some calendar quarter, or employed **10 or more**
+farmworkers in each of **20 or more** weeks. Either is enough, and meeting one
+makes the whole year liable from the first dollar. Meeting neither means no tax and
+no Form 940 — not a reduced amount.
+
+Both tests are computed and **reported, never enforced**. Enforcing would mean
+silently zeroing a tax, and the weeks test is necessarily derived from pay periods
+rather than measured in days — so the zero would be an estimate too, in the one
+direction nobody audits, because a liability that never reaches a report is not
+questioned. The result labels which figure is exact (cash wages, off the slips) and
+which is derived, and says that farm wages paid outside this app count toward both
+tests and are invisible here.
+
+### The $7,000 cap is consumed in date order, per employee
+
+An employee earning $3,000 a quarter reaches the FUTA wage base in Q3. Part 5's
+quarterly liabilities are **18 / 18 / 6 / 0** on a $42 annual tax — not $10.50 four
+times. Annualising and dividing produces a Part 5 matching no real quarter. Under
+**$500** accumulated at a quarter end nothing is deposited and the liability carries
+forward, so a small employer can reach Q4 having deposited nothing all year.
+
+### An OQ is not a filing without its Form 132
+
+`form_generators.py` had the OQ and not the employee detail schedule filed with it.
+Form 132 carries the per-employee wages, UI subject wages after the cap, excess
+wages and **whole hours rounded down** — Oregon's instruction, not a display choice
+— and Oregon assesses benefit eligibility from it and reconciles it against the OQ.
+The UI wage base is consumed **from 1 January** rather than from the start of the
+quarter, which is the bug that overstates Q3 for a crew that worked the spring.
+
+### Part 2 has to total line 12 to the cent
+
+Bucketing slips by month gives the as-withheld figures, and those do not reach line
+12 on their own: fractions of cents, the sick-pay and group-term-life adjustments
+and the small-business credit belong to the quarter and to no month in it. Both are
+reported, and the residual lands on **the last month that actually held pay** rather
+than on the last month of the quarter — a March liability in a quarter whose payroll
+stopped in February is a figure an agency can ask about and the employer cannot
+explain.
+
+### The payday is not a field anywhere, and every deadline depends on it
+
+Federal deposit rules key on the date wages were **paid** (26 CFR 31.6302-1(c)).
+Farm Payroll Entry has `pay_period_start` and `pay_period_end` and no pay date; the
+slip child table has no date at all. So, in order of preference: a run that reached
+the ledger has a real `posting_date` on its GL postings and that is used;
+everything else falls back to the period end plus a caller-supplied
+`payday_offset_days`. A fallback date is **early** by the farm's payment lag — the
+safe direction, since an operator following it deposits too soon rather than too
+late — and every row carries a `payday_basis` sentence naming which of the three it
+was, because a deadline whose provenance is hidden is one somebody treats as
+authoritative.
+
+### The lookback total this app can compute is a floor
+
+Monthly or semiweekly is decided by the four quarters ending 30 June of the *prior*
+year and by nothing about the current one. A total computed from this site's own
+payroll sees only payroll this app ran: a quarter it did not run reads as zero
+rather than as unknown, which can put a genuine semiweekly depositor on a monthly
+schedule — the direction that causes late deposits. The result reports how many of
+the four quarters had data, warns below four, and takes `lookback_total` off the
+filed 941s or `schedule` directly.
+
+### The holiday table, and the one that falls outside its own year
+
+Deposit deadlines shift off weekends and legal holidays, so all eleven federal
+holidays are computed as observed. Including the case that a per-year table misses:
+when 1 January falls on a Saturday the holiday is observed on **31 December of the
+year before**, and a table built as `federal_holidays(day.year)` treats that
+31 December as a banking day and silently shortens a late-December deadline.
+
+The three-banking-day rule is implemented too: a semiweekly depositor gets an extra
+banking day when a holiday falls among the three weekdays after the semiweekly
+period closes — so a Tuesday payday in Thanksgiving week settles on the Monday, not
+the Friday.
+
+### Also
+
+`taxforms._load_slips` grew an `extra_fields` keyword so the remittance tools can
+read the employer-side slip columns the form generators do not want. The default is
+unchanged, so every existing caller sees exactly what it saw before — a deposit is
+both halves of FICA together, while a W-2 is only ever the employee's, and the
+employer half is read off the slip rather than doubled because Additional Medicare
+is an employee-only surcharge with no employer match.
+
+100 tests over the date rules, the wage-base walk, Form 132, Part 2 and the five
+tools end to end.
+
 ## 0.91.0 — 2026-08-17 — the feed nobody could reach, the shelf nobody could count, and a sweep for their cause
 
 Three tools that have existed since v0.85.0 and answered **404 to every phone on

@@ -129,6 +129,7 @@ from ..tools import payroll_deductions as payroll_deduction_tools
 from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
 from ..tools import stock_inventory as stock_tools
+from ..tools import tax_remittance as remittance_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
@@ -10552,3 +10553,245 @@ def get_my_i9(user: str) -> dict:
 		for row in (data.get("reverifications") or [])
 	]
 	return {"employee": person, "on_file": True, "i9": form}
+
+
+# ── 145. get_tax_remittance_summary ──────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_tax_remittance_summary", limit=guard.READ_LIMIT)
+def get_tax_remittance_summary(user: str, company=None, fiscal_year=None, quarter=None) -> dict:
+	"""What the farm owes every tax authority for a period, on a phone.
+
+	THE HR ROLE IS REQUIRED AND IT IS THE WHOLE GATE, exactly as on
+	`get_payroll_register` and for the same reason. This is not one worker's
+	figures — it is the whole crew's wages rolled into what the farm remits, and
+	there is no version of it that is a picker's to see. `HR_ROLES` is Farm
+	Manager, HR Manager, HR User and System Manager, deliberately NOT
+	`DISPATCH_ROLES`: a foreman has no business reading the payroll totals of
+	every crew on the site.
+
+	THE COMPANY SCOPE IS THE CALLER'S OWN. `guard.require_company` refuses an
+	entity this account cannot reach, which matters here for the reason it
+	matters on the register — the holding company's tax position is not readable
+	by naming it in a request body.
+
+	WHY A PHONE WANTS THIS AT ALL. The person who signs the cheques is not at a
+	Desk in the middle of a harvest, and the question "what is going out this
+	month" is asked from a truck. The five remittance reads are on this surface
+	for that reason and no other; none of them writes anything.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	data = remittance_tools.get_tax_remittance_summary(
+		_remittance_args(entity, fiscal_year, quarter)
+	).data
+	return {
+		"company": data.get("company"),
+		"tax_year": data.get("tax_year"),
+		"quarter": data.get("quarter"),
+		"period_start": data.get("period_start"),
+		"period_end": data.get("period_end"),
+		"federal": data.get("federal") or {},
+		"oregon": data.get("oregon") or {},
+		"washington": data.get("washington") or {},
+		"by_period": data.get("by_period") or [],
+		"payroll_entry_count": data.get("payroll_entry_count"),
+		"employee_count": data.get("employee_count"),
+		"gross_pay": data.get("gross_pay"),
+		"grand_total_remittance": data.get("grand_total_remittance"),
+		"warnings": data.get("warnings") or [],
+	}
+
+
+# ── 146. get_941_prefill ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_941_prefill", limit=guard.READ_LIMIT)
+def get_941_prefill(user: str, company=None, fiscal_year=None, quarter=None, deposits=None) -> dict:
+	"""Form 941's lines for a quarter, read from a handset.
+
+	`warnings` IS RETURNED WHOLE AND IN ORDER, which matters more here than on
+	any other read on this surface: its first entry says that FARMWORKERS BELONG
+	ON FORM 943 AND NOT ON THIS FORM. On a tree-fruit operation that is the
+	normal case rather than the exception, and a handset that dropped the
+	warnings to save bytes would hand somebody a quarterly return for a crew
+	whose actual return is annual.
+
+	THE ADJUSTMENT ARGUMENTS ARE NOT FORWARDED. `sick_pay_adjustment`, the
+	group-term-life adjustment and the small-business credit are decisions made
+	with an accountant against the books, not numbers typed into a phone in a
+	orchard — the MCP surface keeps them. `deposits` IS forwarded, because what
+	has been paid to EFTPS is a fact the person holding the phone may well be the
+	one who knows.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	inner = _remittance_args(entity, fiscal_year, quarter)
+	if deposits not in (None, ""):
+		inner["deposits"] = deposits
+
+	data = remittance_tools.get_941_prefill(inner).data
+	return {
+		"company": data.get("company"),
+		"tax_year": data.get("tax_year"),
+		"quarter": data.get("quarter"),
+		"period_start": data.get("period_start"),
+		"period_end": data.get("period_end"),
+		"form_941": data.get("form_941") or {},
+		"part2_monthly_liability": data.get("part2_monthly_liability") or {},
+		"existing_tax_form": data.get("existing_tax_form"),
+		"warnings": data.get("warnings") or [],
+	}
+
+
+# ── 147. get_state_tax_remittance ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_state_tax_remittance", limit=guard.READ_LIMIT)
+def get_state_tax_remittance(user: str, company=None, fiscal_year=None, quarter=None, state=None) -> dict:
+	"""Oregon's OQ and Form 132, and Washington's ESD report, on a phone.
+
+	`state` IS FORWARDED because a farm that operates on one side of the river
+	only should not have to read past the other state's empty report — and one
+	that operates on both needs them together, which is the default.
+
+	THE PER-EMPLOYEE DETAIL COMES THROUGH IN FULL. Form 132 and the Washington
+	report both name every worker with their wages and hours, and a handset
+	summary that dropped the rows would leave the operator unable to check the
+	one thing the states reconcile against. That is also why the HR gate is not
+	negotiable on this route: these two payloads ARE the crew's wage detail.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	inner = _remittance_args(entity, fiscal_year, quarter)
+	if state not in (None, ""):
+		inner["state"] = str(state).strip()
+
+	data = remittance_tools.get_state_tax_remittance(inner).data
+	return {
+		"company": data.get("company"),
+		"tax_year": data.get("tax_year"),
+		"quarter": data.get("quarter"),
+		"period_start": data.get("period_start"),
+		"period_end": data.get("period_end"),
+		"states": data.get("states") or [],
+		"reports": data.get("reports") or {},
+		"due_date": data.get("due_date"),
+		"combined_total_due": data.get("combined_total_due"),
+		"warnings": data.get("warnings") or [],
+	}
+
+
+# ── 148. get_tax_deposit_schedule ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_tax_deposit_schedule", limit=guard.READ_LIMIT)
+def get_tax_deposit_schedule(
+	user: str,
+	company=None,
+	fiscal_year=None,
+	quarter=None,
+	lookback_total=None,
+	schedule=None,
+	payday_offset_days=None,
+) -> dict:
+	"""Every deposit deadline in a period, with the rule that produced it.
+
+	ALL THREE CORRECTION ARGUMENTS ARE FORWARDED, which is unusual for this
+	surface and deliberate. Without them the tool assumes the new-employer
+	monthly default and treats each pay period's END as its payday, and both
+	assumptions produce dates that are EARLY — safe to be wrong in that
+	direction, but not the real deadlines. The person holding the phone is
+	usually the one who knows what the farm's lag actually is and what the filed
+	941s reported, so this route lets them say rather than making them open a
+	Desk to correct a date they are looking at.
+
+	`payday_basis` ON EVERY ROW is passed through untouched. A deadline whose
+	provenance is hidden is a deadline somebody will treat as authoritative.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	inner = _remittance_args(entity, fiscal_year, quarter)
+	for key, value in (
+		("lookback_total", lookback_total),
+		("schedule", schedule),
+		("payday_offset_days", payday_offset_days),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = remittance_tools.get_tax_deposit_schedule(inner).data
+	return {
+		"company": data.get("company"),
+		"tax_year": data.get("tax_year"),
+		"quarter": data.get("quarter"),
+		"period_start": data.get("period_start"),
+		"period_end": data.get("period_end"),
+		"deposit_schedule": data.get("deposit_schedule"),
+		"schedule_basis": data.get("schedule_basis"),
+		"schedule_assumed": data.get("schedule_assumed"),
+		"payday_offset_days": data.get("payday_offset_days"),
+		"federal_deposits": data.get("federal_deposits") or [],
+		"federal_deposit_total": data.get("federal_deposit_total"),
+		"monthly_rollup": data.get("monthly_rollup") or [],
+		"state_deadlines": data.get("state_deadlines") or [],
+		"futa_liability_in_period": data.get("futa_liability_in_period"),
+		"warnings": data.get("warnings") or [],
+	}
+
+
+# ── 149. get_futa_summary ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_futa_summary", limit=guard.READ_LIMIT)
+def get_futa_summary(user: str, company=None, fiscal_year=None, deposits=None) -> dict:
+	"""Form 940 for a year, with the two tests that decide it applies at all.
+
+	NO QUARTER ARGUMENT, because Form 940 is annual and the tool refuses one.
+	Its quarterly liabilities are computed from the whole year — the $7,000 wage
+	base is consumed across it and a quarter cannot see the ones before it — so
+	a per-quarter view of this form would be a different and wrong number.
+
+	`agricultural_coverage` IS THE PART TO READ and it comes through whole. FUTA
+	does not apply to farm labour unless one of two thresholds is met, and an
+	employer under both files no Form 940 at all. Reported, never enforced: the
+	tool computes the two figures and a person makes the determination, because
+	farm wages paid outside this app count toward both tests and are invisible
+	to it.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	inner = _remittance_args(entity, fiscal_year, None)
+	if deposits not in (None, ""):
+		inner["deposits"] = deposits
+
+	data = remittance_tools.get_futa_summary(inner).data
+	return {
+		"company": data.get("company"),
+		"tax_year": data.get("tax_year"),
+		"period_start": data.get("period_start"),
+		"period_end": data.get("period_end"),
+		"form_940": data.get("form_940") or {},
+		"futa_recorded_on_slips": data.get("futa_recorded_on_slips"),
+		"warnings": data.get("warnings") or [],
+	}
+
+
+def _remittance_args(company: str, fiscal_year, quarter) -> dict:
+	"""The three arguments every remittance read shares, cleaned the same way.
+
+	One helper rather than five copies because the year is the argument each of
+	these refuses without, and five spellings of "strip it and pass it on" is how
+	one of them ends up accepting something the other four do not.
+	"""
+	inner: dict = {"company": company}
+	if fiscal_year not in (None, ""):
+		inner["fiscal_year"] = str(fiscal_year).strip()
+	if quarter not in (None, ""):
+		inner["quarter"] = str(quarter).strip()
+	return inner

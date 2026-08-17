@@ -666,6 +666,21 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_employee_deductions",
 		"create_payroll_deduction",
 		"update_payroll_deduction",
+		# v0.92.0. The five tax remittance reads: what is owed to the IRS, Oregon
+		# and Washington, when each deposit is due, and the two annual returns.
+		# Every one carries `personnel.require_hr_role` in its own body, on the
+		# same footing as `get_payroll_register` — these are the whole crew's
+		# wages rolled into what the farm remits, and no version of that is a
+		# picker's to read.
+		#
+		# HERE RATHER THAN IN `MOBILE` because `MobileAPI.swift` names none of
+		# them yet, which is this set's whole rule. The server side is published
+		# so the iOS half is a client change rather than a release of both.
+		"get_tax_remittance_summary",
+		"get_941_prefill",
+		"get_state_tax_remittance",
+		"get_tax_deposit_schedule",
+		"get_futa_summary",
 	}
 
 	def _whitelisted(self, module):

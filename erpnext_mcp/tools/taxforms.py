@@ -659,11 +659,19 @@ def _load_slips(
 	period_end: str,
 	employee: str | None = None,
 	state: str | None = None,
+	extra_fields: tuple = (),
 ) -> list[dict]:
 	"""Every paid payroll slip in a period, with its entry's dates stamped on.
 
 	Only `Calculated` and `Submitted` entries — a Draft payroll has not been paid
 	and a Cancelled one was not.
+
+	`extra_fields` NAMES SLIP COLUMNS THE FORM GENERATORS DO NOT WANT. v0.92.0
+	added it for the remittance tools, which need the EMPLOYER halves — `futa`,
+	`state_unemployment`, `social_security_employer` — because a deposit is the
+	employer's share and the employee's together, while a W-2 is only ever the
+	employee's. Every one is read as a float and defaults to zero, so a slip
+	written before the column existed reports nothing rather than raising.
 	"""
 	entries = frappe.db.get_all(
 		PAYROLL_ENTRY,
@@ -708,11 +716,29 @@ def _load_slips(
 				"social_security": float(get("social_security") or 0),
 				"medicare": float(get("medicare") or 0),
 				"additional_medicare": float(get("additional_medicare") or 0),
+				# v0.92.0. The EMPLOYER half, which no form generator reads and
+				# every remittance does. A return reports what was withheld from
+				# somebody; a deposit is that plus what the employer owes beside
+				# it, and `tools/tax_remittance.py` cannot answer "what do I pay"
+				# without these five. They are loaded here rather than by a second
+				# loader of its own so that a figure on a 941 and the deposit that
+				# settles it can never come from two different readings of the
+				# same slip.
+				"social_security_employer": float(get("social_security_employer") or 0),
+				"medicare_employer": float(get("medicare_employer") or 0),
+				"futa": float(get("futa") or 0),
+				"state_unemployment": float(get("state_unemployment") or 0),
+				"state_employer_other": float(get("state_employer_other") or 0),
 				"state_taxes_detail": detail if isinstance(detail, dict) else {},
 				"period_start": str(entry.get("pay_period_start") or ""),
 				"period_end": entry_end,
 				"payroll_entry": entry["name"],
 			}
+			for extra in extra_fields:
+				try:
+					slip[extra] = float(get(extra) or 0)
+				except (TypeError, ValueError):
+					slip[extra] = 0.0
 			if state and not _slip_has_state(slip, state):
 				continue
 			slips.append(slip)

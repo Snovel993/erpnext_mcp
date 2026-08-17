@@ -469,6 +469,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# it.
 		"/mobile/get_payroll_register",
 		"/mobile/render_pay_stub",
+		"/mobile/get_tax_remittance_summary",
+		"/mobile/get_941_prefill",
+		"/mobile/get_state_tax_remittance",
+		"/mobile/get_tax_deposit_schedule",
+		"/mobile/get_futa_summary",
 		# The three compliance reports — the only aggregate reads on the table.
 		# `get_osha_300a_summary` is the one whose ABSENT arguments matter:
 		# `total_hours_worked` and `average_employees` are on the tool and not on

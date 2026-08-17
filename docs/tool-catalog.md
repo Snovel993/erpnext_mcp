@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 718 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 723 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 357 read tools are **on** by default and can be switched off individually. A
+All 362 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -15848,3 +15848,199 @@ period after service, and the gap between an envelope opened in a yard and
 somebody reaching a Desk is a gap with a liability in it. `employee` and `company`
 are absent from `update_payroll_deduction`'s mobile signature entirely, so the
 argument filter makes that refusal unreachable rather than merely enforced.
+
+## v0.92.0 — what is owed, and when it has to be there
+
+`taxforms.py` generates RETURNS — a 941, an OQ, a WA-ESD — and records each as a
+Tax Form kept verbatim, so that correcting payroll later cannot rewrite the W-2
+already in an envelope. It says in its own docstring that computing a deposit
+schedule is a thing it does not do. These five are that thing.
+
+A return is filed once a quarter and says what was owed. Deposits are made every
+payday, and a late one costs 2% to 15% of the deposit under IRC §6656 — on money
+the employer withheld from somebody else's wages and is holding in trust. All
+five are **read-only, default ON**, gated on `HR_ROLES` (System Manager, HR
+Manager, HR User, Farm Manager), and store nothing: they recompute on every call,
+because the question is what is owed *now*.
+
+### Farmworkers are on Form 943, not Form 941
+
+Form 943 is the annual return for agricultural employees; 941 is quarterly for
+everybody else. They are not alternatives, the choice is made **per worker**, and
+an employer with both farm and office staff files both. Nothing on a payroll slip
+in this app marks a worker as agricultural labour, so `get_941_prefill` cannot
+make the split — it totals every slip in the quarter and says so in
+`warnings[0]`, first rather than last, because on a tree-fruit operation the
+agricultural case is the normal one.
+
+### FUTA may not apply to farm labour at all
+
+Federal unemployment tax reaches agricultural wages only if the employer paid
+**$20,000** in cash wages in some calendar quarter, or employed **10 or more**
+farmworkers in each of **20 or more** weeks. Either is enough, and meeting one
+makes the whole year liable from the first dollar. Meeting neither means no tax
+and no Form 940 — not a reduced amount. Both tests are computed and **reported,
+never enforced**: the cash-wage figure is exact, the weeks figure is derived from
+pay periods, and farm wages paid outside this app count toward both and are
+invisible here. Enforcing would mean silently zeroing a tax on an estimate, and a
+liability that never reaches a report is one nobody audits.
+
+### The $7,000 cap is consumed in date order
+
+An employee earning $3,000 a quarter reaches the FUTA wage base in Q3. The Part 5
+quarterly liabilities are **18 / 18 / 6 / 0** on a $42 annual tax — not $10.50
+four times. Annualising and dividing produces a Part 5 that matches no real
+quarter.
+
+### The payday is not a recorded field
+
+Every federal deposit rule keys on the date wages were **paid** (26 CFR
+31.6302-1(c)). A Farm Payroll Entry has `pay_period_start` and `pay_period_end`
+and no pay date; the slip child table has no date at all. So, in order: a run that
+reached the ledger has a real `posting_date` on its GL postings and that is used;
+everything else falls back to the period end plus `payday_offset_days`. A
+fallback date is **early** by the farm's payment lag — the safe direction, since
+an operator following it deposits too soon rather than too late — and every row
+carries a `payday_basis` sentence saying which of the three it was.
+
+### The lookback figure computed here is a floor
+
+Monthly or semiweekly is decided by the four quarters ending 30 June of the
+*prior* year, and by nothing about the current one. A total computed from this
+site's own payroll can only see payroll this app ran: a quarter it did not run
+reads as zero rather than as unknown, which can put a genuine semiweekly
+depositor on a monthly schedule — the expensive direction. The result reports how
+many of the four quarters had data and warns below four; pass `lookback_total`
+off the filed 941s, or `schedule` directly.
+
+### `get_tax_remittance_summary`
+
+**READ (default ON).** Everything owed to every authority for a period, broken
+down by pay period. The federal figure is one EFTPS deposit's worth — income tax
+withheld plus **both halves** of Social Security and Medicare. FUTA sits beside
+it, not inside it, because it is deposited separately on its own quarterly rule.
+
+The employer halves are read off the slip rather than doubled from the employee's:
+Additional Medicare is a 0.9% employee-only surcharge with no employer match, so
+doubling overstates the deposit for anybody over the threshold. Slips predating
+those columns are mirrored per row, and `warnings` says how many.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `fiscal_year` | yes | Calendar year as `YYYY` (`year` is an alias) |
+| `company` | | Required on a multi-company site |
+| `quarter` | | `Q1`–`Q4`; omit for the whole calendar year |
+
+### `get_941_prefill`
+
+**READ (default ON).** Lines 1 to 15 for one quarter, plus Part 2's monthly
+liabilities — which must total line 12 **to the cent** or the return is rejected.
+`reconciles` says whether they do, and the quarter-level residual (line 7's
+fractions of cents, the adjustments, the credit) is applied to the last month that
+actually held pay rather than to the last month of the quarter.
+
+Recomputed on every call, so it will drift from a Tax Form generated earlier —
+which is exactly why that one is stored. Read `warnings[0]`.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `fiscal_year` | yes | Calendar year as `YYYY` |
+| `quarter` | yes | `Q1`–`Q4` |
+| `company` | | Required on a multi-company site |
+| `deposits` | | Line 13 — federal deposits made for the quarter |
+| `ytd_wages_by_employee` | | Prior-quarter wages, for the Social Security base from Q2 on |
+| `sick_pay_adjustment` / `tips_and_group_term_life_adjustment` / `small_business_payroll_tax_credit` | | Lines 8, 9 and 11 |
+
+### `get_state_tax_remittance`
+
+**READ (default ON).** Oregon's two forms and Washington's one.
+
+**An OQ is not a filing without its Form 132.** The OQ carries the employer's
+totals across withholding, the Statewide Transit Tax, Paid Leave and
+unemployment; Form 132 carries the per-employee detail Oregon assesses benefit
+eligibility from — wages, UI subject wages after the cap, excess wages, and
+**whole hours rounded down**, which is Oregon's instruction rather than a display
+choice. Oregon reconciles the two against each other, and this reports when they
+disagree. The UI wage base is consumed **from 1 January**, not from the start of
+the quarter: applying it to the quarter alone overstates Q3 for a crew that
+worked the spring.
+
+Washington's ESD report carries hours per employee — a hard requirement there,
+not an approximation — plus UI, Paid Family & Medical Leave and WA Cares.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `fiscal_year` | yes | Calendar year as `YYYY` |
+| `quarter` | yes | `Q1`–`Q4` |
+| `company` | | Required on a multi-company site |
+| `state` | | `OR` or `WA`; omit for both |
+| `ui_rate` | | The state's assigned rate, as a percent |
+| `or_ui_wage_base` / `wa_ui_wage_base` | | That state's UI taxable wage base for the year |
+| `ytd_wages_by_employee` | | Prior-quarter wages, so the UI cap is consumed from January |
+| `state_ids` | | `{"OR": "1234567-8"}`, overriding the State Tax Configuration |
+
+### `get_tax_deposit_schedule`
+
+**READ (default ON).** Every federal deposit deadline in the period, with the
+rule that produced it, plus the state filing dates.
+
+Semiweekly: a Wednesday/Thursday/Friday payday is due the following Wednesday, a
+Saturday-to-Tuesday payday the following Friday. A federal holiday among the three
+weekdays after the period closes buys **one more banking day** — the
+three-banking-day rule, and the one most implementations skip. Monthly: the 15th
+of the following month. A deposit reaching **$100,000** is due the next business
+day whatever the schedule, and is flagged.
+
+Holidays are computed as observed, including the case where 1 January falls on a
+Saturday and the holiday lands on 31 December of the year before.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `fiscal_year` | yes | Calendar year as `YYYY` |
+| `company` | | Required on a multi-company site |
+| `quarter` | | `Q1`–`Q4`; omit for the whole year |
+| `lookback_total` | | Tax reported on the four returns in the lookback period |
+| `schedule` | | `Monthly` or `Semiweekly`, overriding the lookback test |
+| `payday_offset_days` | | 0–60; days between a period closing and the money moving |
+
+### `get_futa_summary`
+
+**READ (default ON).** Form 940 for a calendar year: lines 3 to 17, the Part 5
+quarterly liabilities, the deposit plan and both agricultural coverage tests.
+
+6.0% of the first $7,000 each employee earns, less a credit of up to 5.4% for
+state unemployment tax paid on time — a net 0.6% in a state not under credit
+reduction, which in 2025 neither Oregon nor Washington is. Under **$500**
+accumulated at a quarter end nothing is deposited and the liability carries
+forward, so a small employer can reach Q4 having deposited nothing and owe the lot
+with the return.
+
+What payroll recorded on the slips is compared against what the wage-base walk
+produces, and a disagreement is reported rather than reconciled away — the walk is
+the one that matches the form, because a single pay period computing its own FUTA
+cannot see the year around it.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `fiscal_year` | yes | Calendar year as `YYYY` |
+| `company` | | Required on a multi-company site |
+| `deposits` | | Line 13 — FUTA already deposited |
+| `exempt_payments` | | Line 4 |
+| `credit_reduction` | | Line 11, for a credit-reduction state |
+| `futa_rate` / `futa_wage_base` / `futa_state_credit_max` | | Override the FICA Configuration |
+
+**A quarter is refused rather than ignored.** Form 940 is annual, and its
+quarterly liabilities are computed from the whole year because the wage base is
+consumed across it — a quarter cannot see the ones before it.
+
+### On the mobile surface
+
+All five are published on the FarmOps `/mobile` table, each carrying
+`require_hr_role` in its own body and company-scoped through
+`guard.require_company` — the same footing as `get_payroll_register`, and
+deliberately not `DISPATCH_ROLES`, which would put the farm's tax position in
+front of every foreman on the site. None writes anything: committing a figure as
+the thing an agency was told is `generate_tax_form`, which stays off this surface.
+The three correction arguments are on the deposit schedule's signature only; the
+941's adjustment lines are not, so the route's argument filter keeps them off the
+handset.
