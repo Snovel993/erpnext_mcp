@@ -22888,7 +22888,7 @@ TOOLS = {
 			"the Agricultural UOM Conversion DocType, which ships with erpnext_mcp — run `bench migrate`"
 		),
 	),
-	# ── v0.86.0: the spray program ──────────────────────────────────────────
+	# ── v0.88.0: the spray program ──────────────────────────────────────────
 	"create_spray_nozzle_config": _tool(
 		spray.create_spray_nozzle_config,
 		"MUTATING (default OFF). Register one nozzle set as it is actually "
@@ -23214,7 +23214,7 @@ TOOLS = {
 		available=_needs_doctype("Spray Application"),
 		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	# ── v0.86.0: crop protection, observation to IPM ────────────────────────
+	# ── v0.88.0: crop protection, observation to IPM ────────────────────────
 	"set_pest_action_threshold": _tool(
 		cropprotect.set_pest_action_threshold,
 		"MUTATING (default OFF). Write or revise the number that turns a count "
@@ -23537,7 +23537,7 @@ TOOLS = {
 		available=_needs_doctype("IPM Recommendation"),
 		requires="the IPM Recommendation DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	# ── v0.86.0: the value block lifecycle ──────────────────────────────────
+	# ── v0.88.0: the value block lifecycle ──────────────────────────────────
 	"create_planting_season": _tool(
 		blocklifecycle.create_planting_season,
 		"MUTATING (default OFF). Open a planting: the junction between a block "

@@ -14934,7 +14934,7 @@ market, not about anybody's operation; the records that carry the operation are
 the analyses that read it, and every one of those links to Company and is scoped
 by Frappe exactly as before.
 
-## The spray program, crop protection and the block's own life (v0.86.0)
+## The spray program, crop protection and the block's own life (v0.88.0)
 
 Three features that are one chain read end to end: a scout finds something, the
 threshold engine decides whether it is worth answering, the answer that gets

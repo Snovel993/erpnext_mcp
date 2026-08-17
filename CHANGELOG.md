@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.90.0 — 2026-08-16 — one number past the wave
+
+No feature, no tool, no doctype. Eight parallel branches landed on `main` in one
+afternoon and each had picked its own next number before it knew what the others
+had picked. This release exists to give the tree a single version that is past
+all of them, and to record what the pre-deploy pass actually checked.
+
+### The version numbers
+
+**0.86.0 and 0.89.0 were never released.** The wave-3 branch — the spray program,
+crop protection and the value block lifecycle — was numbered `v0.86.0` while it
+was being written and landed as **0.88.0**, which is the number in `CHANGELOG.md`
+and in `RELEASES/v0.88.0.md`. Eight comments in `registry.py`, `harness.py` and
+`docs/tool-catalog.md` still carried the branch's working number; they now say
+`v0.88.0`, so no file in the tree names a version that never shipped.
+
+0.86.0 and 0.89.0 are skipped numbers, not missing entries. Nothing was released
+under them and nothing is missing from the changelog, which holds 128 entries in
+strict descending order from 0.90.0 down to 0.1.0.
+
+### What was verified
+
+Nothing below changed behaviour — this is the record of a pre-deploy pass that
+found the tree already sound.
+
+- **Registry integrity.** An AST walk of every dict literal in `registry.py`
+  (24,213 lines) finds **zero duplicate keys**. The duplicates fixed in the
+  session before this one are gone and none returned. A duplicate key here is
+  invisible to every test, which is why it is checked structurally rather than by
+  running anything.
+- **Imports.** `registry.py` imports and all **107** modules under
+  `erpnext_mcp/tools/` import cleanly, with no missing module and no circular
+  dependency. Every module named in the `from .tools import (...)` block exists.
+- **DocType JSON.** All **174** shipped doctypes have a JSON at the expected
+  path, parse, declare `"module": "ERPNext MCP"`, carry an `__init__.py`, and
+  have a folder name matching their `name`. Of the 112 doctypes referenced in
+  code, 56 are app-owned and 56 are ERPNext or Frappe core — except `Spray Log`,
+  which belongs to `farm_app` and is reached only behind `doctype_exists`.
+- **Hooks.** `after_install` and `after_migrate` are registered, and all **22**
+  dotted paths in `hooks.py` — including every `scheduler_events` entry across
+  `cron`, `hourly`, `daily` and `weekly` — resolve to a real attribute.
+- **Tool switches.** **693** tools, **695** `allow_*` fields (the two extra gate
+  audit *packet* types, not tools). Every tool has a switch. All **344** read
+  tools default ON; **348 of 349** mutating tools default OFF, the sole exception
+  being `install_compliance_fields`, which writes columns rather than data and is
+  argued in the README.
+- **Merge artifacts.** No conflict markers anywhere in the tree.
+- **Tests.** 9,806 tests, all passing, 126 skipped.
+
 ## 0.88.0 — 2026-08-16 — the block has a life, and a fiscal year cannot see it
 
 Wave 3: the spray program, the crop protection pipeline, and the value block

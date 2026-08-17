@@ -1615,7 +1615,7 @@ APP_DOCTYPES = {
 	"Agricultural UOM Context": "agricultural_uom_context",
 	"Agricultural UOM Context Entry": "agricultural_uom_context_entry",
 	"Agricultural UOM Conversion": "agricultural_uom_conversion",
-	# v0.86.0, Wave 3 — the spray program. The recipe (a tank mix is several
+	# v0.88.0, Wave 3 — the spray program. The recipe (a tank mix is several
 	# products each at its OWN rate per acre, optionally split across two nozzle
 	# sets flipped mid-pass), the nozzle master those sets point at, and the
 	# EVENT — what went out, where, when, in what wind. Registered here rather
@@ -1626,7 +1626,7 @@ APP_DOCTYPES = {
 	"Spray Tank Mix Product": "spray_tank_mix_product",
 	"Spray Application": "spray_application",
 	"Spray Application Block": "spray_application_block",
-	# v0.86.0, Wave 3 — crop protection. An observation raises a block's pressure
+	# v0.88.0, Wave 3 — crop protection. An observation raises a block's pressure
 	# for the season and, where it crosses that pest's action threshold,
 	# generates a recommendation whose options are ordered least-chemical-first.
 	# See `tools/cropprotect.py` for the resolution order and for the beneficial
@@ -1637,7 +1637,7 @@ APP_DOCTYPES = {
 	"Pest Pressure": "pest_pressure",
 	"IPM Recommendation": "ipm_recommendation",
 	"IPM Recommendation Action": "ipm_recommendation_action",
-	# v0.86.0, Wave 3 — the value block lifecycle. A junction between a block and
+	# v0.88.0, Wave 3 — the value block lifecycle. A junction between a block and
 	# what grows on it for one year, so a perennial that costs money for four
 	# years before it returns any can be read over its LIFE rather than through a
 	# fiscal year. See `tools/blocklifecycle.py` on why no general ledger can
@@ -4312,7 +4312,7 @@ CHILD_TABLE_SOURCES = {
 	"Crop Water Requirement": (("Crop", "water_requirements"),),
 	"Market Grade Standard": (("Market", "grade_standards"),),
 	"Agricultural UOM Context Entry": (("Agricultural UOM Context", "uoms"),),
-	# v0.86.0. `spray.list_spray_applications` filters by BLOCK, and the block
+	# v0.88.0. `spray.list_spray_applications` filters by BLOCK, and the block
 	# lives on the child table rather than on the header — one pass covers
 	# several blocks and there is no single block column to filter on. So it
 	# finds the matching child rows and keeps their parents, which is the same
