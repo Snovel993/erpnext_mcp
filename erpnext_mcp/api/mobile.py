@@ -99,7 +99,9 @@ import json
 import frappe
 
 from .. import bucket_bridge, compat, datetimes, timezones
+from .. import pay_stub_pdf
 from .. import shifts as shift_records
+from .. import training as training_register
 from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
@@ -9181,6 +9183,8 @@ def render_pay_stub(
 		"replaced": data.get("replaced"),
 		"note": data.get("note"),
 	}
+
+
 # ── The three compliance reports ─────────────────────────────────────────────
 #
 # ALL THREE ARE AGGREGATES, WHICH IS WHY THEY ARE HERE AT ALL. Every other read
@@ -9995,3 +9999,556 @@ def list_training_sessions(
 		inner["employee"] = _employee_argument(employee, allowed)
 
 	return training_session_tools.list_training_sessions(inner).data
+
+
+# ── Employee self-service: the records a worker may read about themselves ────
+#
+# FIVE METHODS THAT TAKE NO `employee` ARGUMENT, and that absence is the whole
+# design rather than an omission — the same argument the direct deposit block
+# above makes, applied to the four records a worker most often needs and has
+# never been able to reach from a handset.
+#
+# Every other read on this surface that names a person takes an Employee docname
+# from the body and checks it with `_employee_argument`, which proves the record
+# belongs to an entity the CALLER CAN REACH. That is the right test for
+# onboarding, where a foreman is working on somebody else's record on purpose. It
+# is the wrong test here: company scope is SHARED by everybody enrolled at that
+# company, so an `employee` argument checked that way would let any picker with a
+# phone read a colleague's withholding elections, their immigration status and
+# what they were paid. So these resolve the subject with `_employee(user)` — the
+# caller's OWN Employee record, from their login — and there is no argument that
+# can widen it.
+#
+# NONE OF THE FIVE CARRIES THE HR GATE, which is the point of the set rather than
+# a relaxation of the surface. The HR-gated routes over the same registers
+# already exist — `get_payroll_register`, `render_pay_stub`,
+# `get_training_compliance_report`, `list_payroll_deductions`, `get_i9_form` —
+# and every one of them answers a question about a CREW or about somebody else. A
+# worker asking what they were paid, what they elected on their W-4, what they
+# have been trained in and whether their I-9 needs re-examining is asking about
+# themselves; a gate that made them ask a foreman for it would put a colleague
+# between a worker and their own pay statement, which is the thing the statute
+# behind that statement exists to prevent.
+#
+# WHAT COMES BACK IS PROJECTED, NEVER FORWARDED WHOLE. The tools behind these
+# were written for a Desk and return the record in full — `get_i9_form` reports
+# every document number on the form and the URL of the scanned page, `get_w4`
+# reports the IP the form was signed from. A projection is what keeps this
+# surface's answer to "what did I elect" from growing a new field the day
+# somebody adds a column to a doctype, which is how a read like this leaks.
+#
+# THE NUMBERING JUMPS FROM 131 TO 140 ON PURPOSE, leaving room rather than
+# claiming it: several sessions append to this file at once, and a gap costs a
+# reader nothing where two blocks sharing a number would cost them the assumption
+# that the number identifies a method.
+
+#: Most training records `list_my_trainings` hands back. ONE WORKER'S OWN
+#: register: a decade of WPS renewals, food-safety refreshers and equipment cards
+#: sits comfortably inside this, and a handset that needed more would be asking
+#: for a personnel file rather than for a card list.
+MY_TRAINING_LIMIT = 100
+
+#: Most payroll runs `list_my_pay_stubs` will OPEN looking for the caller's own
+#: slip. A run has to be opened to see who is on it — the slips are a child table
+#: and there is no index from a person to the runs they are on — so this bounds
+#: the work one call does rather than the answer it gives. Sixty is a little over
+#: two years of biweekly runs; a worker asking about a period further back than
+#: that passes `year`, which moves the window rather than widening it.
+MY_STUB_SCAN_CAP = 60
+
+#: What `get_my_w4` reports off the caller's own active W-4. THE ELECTIONS AND
+#: NOTHING ELSE. `signed_ip` is deliberately absent — it is evidence about a
+#: signature rather than an election, and it is the sort of column that becomes
+#: interesting to somebody who is not the subject. So are `employer_signer_name`
+#: and `employer_signed_at`, which are facts about the employer's processing, and
+#: `generated_pdf`, which is a private File URL: `generate_w4_pdf` is the route
+#: that draws the federal form and it is already published.
+MY_W4_FIELDS = (
+	"name",
+	"tax_year",
+	"status",
+	"effective_date",
+	"filing_status",
+	"multiple_jobs",
+	"additional_income_from_other_jobs",
+	"dependents_under_17_count",
+	"dependents_under_17_amount",
+	"other_dependents_count",
+	"other_dependents_amount",
+	"total_dependents_credit",
+	"other_income",
+	"deductions",
+	"extra_withholding_per_period",
+	"signed_at",
+)
+
+#: What one stub row reports in `list_my_pay_stubs`. THE EMPLOYER'S OWN
+#: CONTRIBUTIONS ARE NOT ON THIS LIST and their absence is the same decision
+#: `render_pay_stub` makes about `show_employer_contributions`: whether a farm
+#: shows its FICA, FUTA and unemployment on a worker's statement is one operator
+#: policy for the whole operation, not something that varies by which door the
+#: figures were read through.
+MY_STUB_FIELDS = (
+	"pay_type",
+	"total_hours",
+	"regular_hours",
+	"overtime_hours",
+	"piece_units",
+	"piece_rate",
+	"gross_pay",
+	"earned_gross",
+	"minimum_wage_makeup",
+	"federal_withholding",
+	"state_withholding",
+	"social_security",
+	"medicare",
+	"total_deductions",
+	"net_pay",
+)
+
+#: What one training record reports in `list_my_trainings`. What was taught, when,
+#: and when it lapses. `supervisor_reviewed_by`, `supervisor_signed` and the rest
+#: of the §112.161(b) review columns are ABSENT: whether the employer completed
+#: its own review of a record is a compliance gap in the training matrix — which
+#: is `get_training_compliance_report`, and HR-gated — rather than an answer to
+#: "what am I current on".
+MY_TRAINING_FIELDS = (
+	"name",
+	"company",
+	"training_type",
+	"training_source",
+	"provider",
+	"completed_date",
+	"expires_date",
+	"one_time",
+	"status_now",
+	"days_until_expiry",
+	"regimes",
+	"certificate_attached",
+	"trainee_signed",
+)
+
+#: What `get_my_i9` reports off the caller's own I-9. STATUS AND DATES, which is
+#: what a worker needs, and NONE OF THE DOCUMENT EVIDENCE, which is what an
+#: audit needs and what a stolen handset must not carry: every document NUMBER
+#: and issuing authority is absent, as are `generated_pdf`, `signed_pdf` and
+#: `document_path` — the scanned pages of a passport or a permanent resident
+#: card. The titles and expiry dates ARE here, because "your List A document
+#: expires in March" is unreadable without saying which document.
+#:
+#: `ssn_last_four`, `date_of_birth` and the home address are absent for a
+#: different reason: they are facts the caller already knows, so returning them
+#: buys a phone nothing and costs it something if it is lost. The two signing IPs
+#: go for `signed_ip`'s reason on the W-4 above.
+MY_I9_FIELDS = (
+	"name",
+	"status",
+	"hire_date",
+	"citizenship_status",
+	"alien_work_authorization_expiry",
+	"section_1_signed_at",
+	"section_2_signed_at",
+	"verification_date",
+	"receipt_pending",
+	"receipt_expires_on",
+	"list_a_doc_title",
+	"list_a_doc_expiry",
+	"list_b_doc_title",
+	"list_b_doc_expiry",
+	"list_c_doc_title",
+	"list_c_doc_expiry",
+	"retention_until",
+	"destruction_eligible_date",
+)
+
+#: What one Section 3 entry reports on the caller's own form: that a
+#: reverification happened, why, and how long the document behind it runs. The
+#: document number, the verifier's name and the signing IP are absent for the
+#: reasons `MY_I9_FIELDS` gives.
+MY_I9_REVERIFICATION_FIELDS = (
+	"reverification_date",
+	"reason",
+	"document_title",
+	"document_expiry",
+)
+
+#: Said when a worker has no active W-4. NOT AN ERROR — see `get_my_w4`.
+_NO_W4_NOTE = (
+	"There is no active W-4 on file for you, so withholding is being calculated at the default "
+	"the payroll run applies to an employee who has not filed one. submit_w4 is what files it."
+)
+
+#: Said when a worker has no I-9 at all. NOT AN ERROR — see `get_my_i9`.
+_NO_I9_NOTE = (
+	"There is no I-9 on file for you on this site. Form I-9 is completed with the employer at "
+	"hire; ask an operator, who reaches it with create_i9_form."
+)
+
+
+def _attached_stub_urls(wanted: dict) -> dict:
+	"""`{payroll entry: file_url}` for the stubs already drawn, in ONE query.
+
+	`wanted` is `{payroll entry: expected file name}`. A stub is attached to the
+	Farm Payroll Entry rather than written to a field — a run carries one per
+	person and the doctype has one document — so finding a worker's own means
+	matching the file NAME as well as the run, and `pay_stub_pdf.file_name_for`
+	is asked what that name is rather than this restating the format.
+
+	THE PAIR IS RE-CHECKED AFTER THE FETCH, because the two `in` filters are a
+	PRODUCT rather than a set of pairs — every combination of the runs asked
+	about and the names asked about comes back. The name filter is what keeps a
+	colleague's stub out; the re-check is what keeps the CALLER'S OWN name off
+	the wrong run, which would report one period's statement as another's.
+	"""
+	if not wanted:
+		return {}
+	rows = frappe.db.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": payroll_tools.PAYROLL_ENTRY,
+			"attached_to_name": ("in", sorted(wanted)),
+			"file_name": ("in", sorted(set(wanted.values()))),
+		},
+		fields=["attached_to_name", "file_name", "file_url"],
+		limit_page_length=0,
+	) or []
+	found: dict = {}
+	for row in rows:
+		entry = str(row.get("attached_to_name") or "")
+		if wanted.get(entry) == str(row.get("file_name") or "") and row.get("file_url"):
+			found[entry] = row.get("file_url")
+	return found
+
+
+def _my_slip(entry: dict, person: str) -> dict:
+	"""The one slip on a run that is this caller's, or `{}`.
+
+	The run is read through `get_payroll_entry`, which is a PUBLIC tool returning
+	every slip on it, and the filtering happens here. That is deliberate: the
+	alternative is reaching into the payroll module's private child-row accessor,
+	and a slip's shape would then be restated in two files that have to agree
+	about what a payroll figure is called.
+	"""
+	for slip in entry.get("slips") or []:
+		if str(slip.get("employee") or "") == person:
+			return dict(slip)
+	return {}
+
+
+# ── 140. get_my_w4 ───────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_my_w4", limit=guard.READ_LIMIT)
+def get_my_w4(user: str) -> dict:
+	"""What this worker elected on their own W-4. Nobody else's, ever.
+
+	NO ARGUMENTS AT ALL, which is what makes it safe on a surface where company
+	scope is shared — see the block above.
+
+	`on_file` IS FALSE RATHER THAN A REFUSAL when there is no active form. The
+	tool answers a missing W-4 with a `ToolError`, which `guard.endpoint` turns
+	into a validation error carrying `error.validation.failed` — and a phone
+	cannot tell that apart from "the server is broken", which are two states with
+	completely different buttons on them. "You have not filed one, here is how"
+	is the answer this screen exists to give, and it is not an error.
+
+	THE ACTIVE FORM IS THE ONE THIS ANSWERS ABOUT. A superseded W-4 is still
+	evidence of what was elected last year and is still on the register; what a
+	worker means by "my W-4" is the one payroll is withholding against today.
+	"""
+	guard.require_scope(user)
+	person = _employee(user)
+
+	if not frappe.db.get_value(
+		w4.W4_FORM,
+		{"employee": person, "status": "Active"},
+		"name",
+		order_by="tax_year desc, effective_date desc",
+	):
+		return {"employee": person, "on_file": False, "w4": None, "note": _NO_W4_NOTE}
+
+	data = w4.get_w4({"employee": person}).data
+	return {
+		"employee": person,
+		"on_file": True,
+		"w4": {key: data.get(key) for key in MY_W4_FIELDS},
+	}
+
+
+# ── 141. list_my_pay_stubs ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_my_pay_stubs", limit=guard.READ_LIMIT)
+def list_my_pay_stubs(user: str, year=None) -> dict:
+	"""Every payroll run this worker was on, with their own figures off each.
+
+	NOT `get_payroll_register`, WHICH IS THE SAME REGISTER READ THE OTHER WAY.
+	That one is company-scoped, HR-gated and reports everybody; this one is one
+	person and reports only them, so the two cannot be turned into each other by
+	changing an argument — there is no argument to change.
+
+	`company` IS NOT DECLARED EITHER. The runs are filtered to every entity this
+	account may reach, which for a picker is the one they work for; naming an
+	entity could only ever narrow that, and a worker who has been paid by two
+	entities of the same operation wants both statements in one list.
+
+	DRAFT RUNS ARE NOT ON IT. `payroll.REGISTER_STATUSES` is Calculated and
+	Submitted, read rather than restated. A draft is a figure somebody is still
+	working on, and a worker who saw one and then saw it change would be right to
+	think they had been shorted.
+
+	`stub_attached` SAYS WHETHER THE PDF EXISTS YET, and `get_my_pay_stub_pdf` is
+	what draws it if it does not. Reporting the URL where there is one means a
+	handset showing a list of periods does not have to ask about each of them.
+
+	THE SCAN IS CAPPED AND SAYS SO. Slips are a child table with no index from a
+	person to the runs they are on, so this opens runs newest-first until
+	`MY_STUB_SCAN_CAP`; `truncated` is true when there were more runs to open,
+	which is a fact about the search rather than about the worker's history.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee(user)
+
+	filters: dict = {
+		"company": ("in", allowed),
+		"status": ("in", list(payroll_tools.REGISTER_STATUSES)),
+	}
+	wanted_year = str(year or "").strip()
+	if wanted_year:
+		if len(wanted_year) != 4 or not wanted_year.isdigit():
+			frappe.throw(
+				f"year must be a four-digit calendar year, got {wanted_year!r}. Nothing was read.",
+				frappe.ValidationError,
+			)
+		filters["pay_period_end"] = ("between", [f"{wanted_year}-01-01", f"{wanted_year}-12-31"])
+
+	runs = frappe.db.get_all(
+		payroll_tools.PAYROLL_ENTRY,
+		filters=filters,
+		fields=["name"],
+		order_by="pay_period_end desc",
+		limit_page_length=MY_STUB_SCAN_CAP + 1,
+	) or []
+	truncated = len(runs) > MY_STUB_SCAN_CAP
+	runs = runs[:MY_STUB_SCAN_CAP]
+
+	stubs = []
+	for row in runs:
+		entry = payroll_tools.get_payroll_entry({"name": row["name"]}).data
+		slip = _my_slip(entry, person)
+		if not slip:
+			continue
+		stubs.append(
+			{
+				"payroll_entry": entry.get("name"),
+				"company": entry.get("company"),
+				"employee": person,
+				"employee_name": slip.get("employee_name"),
+				"pay_period_start": entry.get("pay_period_start"),
+				"pay_period_end": entry.get("pay_period_end"),
+				"pay_frequency": entry.get("pay_frequency"),
+				"status": entry.get("status"),
+				**{key: slip.get(key) for key in MY_STUB_FIELDS},
+			}
+		)
+
+	attached = _attached_stub_urls(
+		{
+			stub["payroll_entry"]: pay_stub_pdf.file_name_for(stub)
+			for stub in stubs
+			if stub.get("payroll_entry")
+		}
+	)
+	for stub in stubs:
+		url = attached.get(stub.get("payroll_entry"))
+		stub["stub_attached"] = bool(url)
+		stub["file_url"] = url
+
+	return {
+		"employee": person,
+		"year": wanted_year or None,
+		"count": len(stubs),
+		"pay_stubs": stubs,
+		"runs_scanned": len(runs),
+		"scan_cap": MY_STUB_SCAN_CAP,
+		"truncated": truncated,
+		"statuses_counted": list(payroll_tools.REGISTER_STATUSES),
+	}
+
+
+# ── 142. get_my_pay_stub_pdf ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("get_my_pay_stub_pdf", mutating=True, limit=guard.WRITE_LIMIT)
+def get_my_pay_stub_pdf(user: str, payroll_entry=None) -> dict:
+	"""The itemised statement for one of this worker's own runs, drawn if need be.
+
+	THE STATEMENT ORS 652.610 AND RCW 49.46.020 REQUIRE, reaching the person it
+	is about without going through the office. `render_pay_stub` has drawn this
+	page since v0.91.0 and is HR-gated, correctly — it takes an `employee` and
+	can draw anybody's. This one takes no employee and can only ever draw the
+	caller's own.
+
+	IT RETURNS AN ALREADY-ATTACHED STUB RATHER THAN REDRAWING IT, and that is not
+	an optimisation. `render_pay_stub` REFUSES a second render unless `overwrite`
+	is passed, because the file already there is most likely the statement this
+	worker was handed — so a self-service route that called it blindly would fail
+	on every period that had already been through the office, which is most of
+	them. `overwrite` IS NOT IN THIS SIGNATURE, so `routes.bind` cannot deliver
+	it: replacing a statement somebody was handed is a correction, and a
+	correction is made by whoever is answerable for the payroll.
+
+	IT IS DECLARED MUTATING, and it is the one method in this self-service set
+	that is. A period whose stub has never been drawn is drawn here, which
+	attaches a File to the run — a write, on the caller's behalf, of a document
+	the law says they are owed. The flag describes what the call can do to the
+	site, not who it is for, and `WRITE_LIMIT` follows it: ten a minute is a
+	worker fetching statements, not a phone rendering PDFs in a loop.
+
+	A RUN THIS WORKER IS NOT ON READS AS NOT FOUND, in the same words as a run
+	that does not exist. `require_scoped_doc` has already made a run belonging to
+	another entity unreadable; this closes the remaining half, where a docname
+	from a colleague's payslip photograph names a real run at the caller's own
+	company. Watching which refusal comes back tells nothing either way.
+
+	NO YEAR-TO-DATE BLOCK COMES BACK IN THE JSON. It is on the page, which is
+	where a statement's YTD belongs and where it is labelled as the CALENDAR year
+	it is; an envelope that carried it only on the periods that happened to be
+	rendered this minute would be a field a client could not rely on.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee(user)
+	run = guard.require_scoped_doc(
+		payroll_tools.PAYROLL_ENTRY, payroll_entry, "payroll_entry", allowed,
+	)
+
+	entry = payroll_tools.get_payroll_entry({"name": run}).data
+	slip = _my_slip(entry, person)
+	if not slip:
+		frappe.throw(f"payroll_entry {run} was not found.", frappe.DoesNotExistError)
+	if str(entry.get("status") or "") not in payroll_tools.REGISTER_STATUSES:
+		frappe.throw(
+			f"Payroll run {run} is {entry.get('status')} rather than "
+			f"{' or '.join(payroll_tools.REGISTER_STATUSES)}, so no statement is drawn from it yet. "
+			"The figures on a run that has not been calculated are still being worked on. "
+			"Nothing was changed.",
+			frappe.ValidationError,
+		)
+
+	shape_of_answer = {
+		"payroll_entry": run,
+		"employee": person,
+		"employee_name": slip.get("employee_name"),
+		"pay_period_start": entry.get("pay_period_start"),
+		"pay_period_end": entry.get("pay_period_end"),
+		"status": entry.get("status"),
+		"gross_pay": slip.get("gross_pay"),
+		"total_deductions": slip.get("total_deductions"),
+		"net_pay": slip.get("net_pay"),
+	}
+
+	file_name = pay_stub_pdf.file_name_for(shape_of_answer)
+	existing = _attached_stub_urls({run: file_name}).get(run)
+	if existing:
+		return {**shape_of_answer, "file_url": existing, "file_name": file_name, "rendered": False}
+
+	data = payroll_tools.render_pay_stub({"payroll_entry": run, "employee": person}).data
+	return {
+		**shape_of_answer,
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"rendered": True,
+		"note": data.get("note"),
+	}
+
+
+# ── 143. list_my_trainings ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_my_trainings", limit=guard.READ_LIMIT)
+def list_my_trainings(user: str) -> dict:
+	"""What this worker has been trained in, when, and what has lapsed.
+
+	NOT `list_trainings` AND NOT THE TRAINING MATRIX. Both of those are the
+	register — they say by name who has had what and who has had nothing, which
+	is a personnel document and is why they carry the HR gate. This is one
+	person's own card list, which is the thing a picker standing in front of a
+	field inspector is asked for.
+
+	`status_now` AND `days_until_expiry` ARE COMPUTED AGAINST TODAY rather than
+	read off the stored column, which `training.describe` owns and this does not
+	restate: a record saved in March carries March's answer, and a WPS card that
+	lapsed last week would still read Active.
+
+	`guard.scoped` RUNS ON THE WAY OUT even though the filter is the caller's own
+	Employee docname. It is the belt to that brace and costs one pass: a record
+	written against an entity this account cannot reach is a data problem worth
+	seeing in the register rather than on a phone.
+	"""
+	allowed = guard.require_scope(user)
+	person = _employee(user)
+	today = frappe.utils.today()
+
+	found = training_register.rows({"employee": person}, limit=MY_TRAINING_LIMIT + 1)
+	truncated = len(found) > MY_TRAINING_LIMIT
+	described = [training_register.describe(row, today) for row in found[:MY_TRAINING_LIMIT]]
+	described = guard.scoped(described, allowed)
+
+	records = [{key: row.get(key) for key in MY_TRAINING_FIELDS} for row in described]
+	expired = [row["name"] for row in records if row["status_now"] == training_register.STATUS_EXPIRED]
+	expiring = [row["name"] for row in records if row["status_now"] == training_register.STATUS_EXPIRING]
+
+	return {
+		"employee": person,
+		"count": len(records),
+		"trainings": records,
+		"expired": expired,
+		"expiring": expiring,
+		"expiring_window_days": training_register.EXPIRING_WINDOW_DAYS,
+		"limit": MY_TRAINING_LIMIT,
+		"truncated": truncated,
+	}
+
+
+# ── 144. get_my_i9 ───────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_my_i9", limit=guard.READ_LIMIT)
+def get_my_i9(user: str) -> dict:
+	"""Where this worker's own I-9 stands: status, dates, and what is owed.
+
+	NOT `get_i9_form`, WHICH IS ALREADY ON THIS SURFACE AND ALREADY LETS A WORKER
+	READ THEIR OWN. Two things separate them and both matter. That one takes an
+	`employee` docname and drops the HR gate only when the docname resolves to
+	the caller — so a worker has to name themselves to read themselves, and the
+	argument that makes the exception possible is the same argument that carries
+	the risk. This one has no argument. And that one returns the record IN FULL:
+	every document number, the issuing authorities, and the URLs of the scanned
+	passport pages. This returns `MY_I9_FIELDS`, which is the status, the dates
+	and the titles — the answer to "am I in order and is anything about to
+	expire", which is the question a worker actually has.
+
+	`on_file` IS FALSE RATHER THAN A REFUSAL for `get_my_w4`'s reason: a worker
+	whose I-9 was never started needs to be told that in words, not handed a
+	validation error a handset will show as a failure.
+
+	`reverification_needed` IS DERIVED FROM THE STATUS rather than being a second
+	stored flag. `flag_i9_reverification` raises it and `reverify_i9` lowers it,
+	both by moving `status`, so reading anything else here would be reading a
+	column that can disagree with the one the workflow moves.
+
+	READING IS LOGGED, INCLUDING THIS READ. `i9.get_i9_form` writes a `Viewed`
+	row to the I-9 Audit Log on every call, and a worker looking at their own
+	form belongs in that log exactly as much as anybody else does — the log's
+	question is who looked, not whether they were entitled to.
+	"""
+	guard.require_scope(user)
+	person = _employee(user)
+
+	if not frappe.db.get_value(i9.I9_FORM, {"employee": person}, "name"):
+		return {"employee": person, "on_file": False, "i9": None, "note": _NO_I9_NOTE}
+
+	data = i9.get_i9_form({"employee": person}).data
+	form = {key: data.get(key) for key in MY_I9_FIELDS}
+	form["reverification_needed"] = str(data.get("status") or "") == "Reverification Needed"
+	form["reverification_count"] = data.get("reverification_count")
+	form["reverifications"] = [
+		{key: row.get(key) for key in MY_I9_REVERIFICATION_FIELDS}
+		for row in (data.get("reverifications") or [])
+	]
+	return {"employee": person, "on_file": True, "i9": form}

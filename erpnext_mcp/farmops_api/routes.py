@@ -687,6 +687,32 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_my_bank_accounts),
 	Route("/mobile", mobile_api.add_my_bank_account),
 	Route("/mobile", mobile_api.update_my_bank_account),
+	# Employee self-service. THE SAME ARGUMENT THE THREE ABOVE MAKE, applied to
+	# the four records a worker most often needs: their withholding elections,
+	# what they were paid, what they have been trained in, and where their I-9
+	# stands. NONE OF THE FIVE DECLARES AN `employee` ARGUMENT, so this table's
+	# filter has nothing to drop and there is no key a body could carry that
+	# would point one of them at a colleague — the subject is `_employee(user)`,
+	# resolved from the login the seven gates already established.
+	#
+	# THEY ARE THE ONLY ROUTES HERE THAT REACH WAGES WITHOUT AN HR ROLE, and the
+	# distinction that makes that right is one person versus a crew.
+	# `get_payroll_register` is what everybody was paid and `render_pay_stub`
+	# draws anybody's statement; both take HR_ROLES and both stay where they are.
+	# These answer only about the caller, which is why a picker may call them and
+	# why neither of the HR pair could be relaxed to do the same job.
+	#
+	# `get_my_pay_stub_pdf` IS THE ONE MUTATING ROUTE IN THE SET, and it is
+	# mutating for one reason: a period whose stub has never been drawn is drawn
+	# on demand, which attaches a File to the run. `overwrite` IS NOT ON ITS
+	# SIGNATURE, so this table's filter is what makes a redraw unreachable rather
+	# than merely refused — replacing a statement a worker was already handed is
+	# a correction, and a correction is made by whoever answers for the payroll.
+	Route("/mobile", mobile_api.get_my_w4),
+	Route("/mobile", mobile_api.list_my_pay_stubs),
+	Route("/mobile", mobile_api.get_my_pay_stub_pdf),
+	Route("/mobile", mobile_api.list_my_trainings),
+	Route("/mobile", mobile_api.get_my_i9),
 	# The payroll deduction register. THE THIRD SET OF ROUTES ON THIS TABLE THAT
 	# REACHES WAGES, and like the register and the stub above they gate on
 	# `HR_ROLES` in their own bodies rather than on the field roles this surface

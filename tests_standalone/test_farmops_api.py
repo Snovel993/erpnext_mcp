@@ -499,6 +499,20 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_my_bank_accounts",
 		"/mobile/add_my_bank_account",
 		"/mobile/update_my_bank_account",
+		# Employee self-service: the W-4, the pay stubs and the one that draws
+		# them, the training card list and the I-9. NONE OF THE FIVE DECLARES AN
+		# `employee` ARGUMENT, so `bind` has nothing to drop and no body can
+		# repoint one at a colleague — the same property the three above have and
+		# for the same reason.
+		#
+		# `get_my_pay_stub_pdf` is the one whose ABSENT argument matters:
+		# `overwrite` is on the tool and not on the wrapper, so `bind` drops it
+		# and a handset cannot replace a statement somebody was already handed.
+		"/mobile/get_my_w4",
+		"/mobile/list_my_pay_stubs",
+		"/mobile/get_my_pay_stub_pdf",
+		"/mobile/list_my_trainings",
+		"/mobile/get_my_i9",
 		# The payroll deduction register: three reads and two writes, all
 		# gated on HR_ROLES in their own bodies. `update_payroll_deduction`
 		# is the one whose ABSENT arguments matter — `employee` and `company`

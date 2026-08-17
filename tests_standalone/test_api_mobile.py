@@ -625,6 +625,27 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_my_bank_accounts",
 		"add_my_bank_account",
 		"update_my_bank_account",
+		# Employee self-service: the four records a worker may read about
+		# themselves. HERE FOR THIS SET'S ORDINARY REASON — `MobileAPI.swift`
+		# names none of the five yet, there being no self-service tab in the app
+		# — and the server half is published first so the iOS half is a client
+		# change rather than a release of both.
+		#
+		# THEY JOIN THE DIRECT DEPOSIT THREE ABOVE AS THE ONLY METHODS ON THIS
+		# SURFACE THAT TAKE NO SUBJECT FROM THE BODY, which is the property
+		# `TheSelfServiceReadsAreAddressed` holds: an `employee` argument checked
+		# against company scope would be checked against a scope every enrolled
+		# worker at that company shares, so the subject comes from the login.
+		#
+		# THEY ARE ALSO THE ONLY ROUTES REACHING WAGES WITHOUT AN HR ROLE. The
+		# distinction is one person versus a crew, and it is asserted rather than
+		# asserted about: `ThePayrollRoutesAreHROnly` still holds for the two
+		# HR-gated payroll routes, which are unchanged.
+		"get_my_w4",
+		"list_my_pay_stubs",
+		"get_my_pay_stub_pdf",
+		"list_my_trainings",
+		"get_my_i9",
 		# The payroll deduction register: three reads and two writes.
 		# `MobileAPI.swift` names none of the five — there is no deductions
 		# screen in the app — so the server half is published first and the iOS
