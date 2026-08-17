@@ -374,7 +374,12 @@ class AliasLookupOnSubmit(ReceiptIntelligenceTestCase):
 		"""Replaying a decision that points at nothing is not replaying a
 		decision."""
 		self.teach()
-		frappe.delete_doc("Supplier", ACE)
+		# `force=True` from v0.83.0, when the harness learned Frappe's own
+		# `check_if_doc_is_linked` and started refusing a delete something links
+		# to. The alias IS the link, so an unforced delete here is refused on a
+		# real bench too. What this test is about is the state AFTER the supplier
+		# is gone — however it went — and forcing is how that state is reached.
+		frappe.delete_doc("Supplier", ACE, force=True)
 		self.assertIsNone(receipts.find_alias(SIATAPING))
 
 	def test_the_resolution_is_stored_on_the_receipt(self):

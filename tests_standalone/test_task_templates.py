@@ -613,7 +613,12 @@ class TheSnapshot(TemplateTestCase):
 		"""The link is provenance, never a lookup."""
 		self.a_template()
 		task = self.a_task_from()["name"]
-		frappe.delete_doc("Farm Task Template", "Detector Test")
+		# `force=True` from v0.83.0, when the harness learned Frappe's own
+		# `check_if_doc_is_linked`. The provenance link this test is named after is
+		# exactly what an unforced delete trips over, on a real bench as much as
+		# here — a Farm Task naming its template keeps the template alive unless
+		# somebody forces it. The claim being made is about the task afterwards.
+		frappe.delete_doc("Farm Task Template", "Detector Test", force=True)
 		after = self.tool_data("get_farm_task", {"task": task})
 		self.assertEqual(after["evidence_required"], {"findings_text": True, "photos": True})
 		self.assertEqual(len(after["checklist"]), 3)

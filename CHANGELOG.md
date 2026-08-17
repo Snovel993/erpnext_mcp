@@ -3,6 +3,66 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.83.0 — 2026-08-16 — the button that was always missing
+
+Three Desk surfaces and one delete that stops being refused. **No new MCP tools**
+and no new settings switch: this release connects machinery that already worked to
+a person who could not reach it.
+
+### Asset QR tags have a door a person can walk through
+
+`generate_asset_qr` has drawn the symbols since v0.17.0 and the only way to get
+one onto paper was to ask a model for base64 and paste it somewhere. Now the Asset
+Register form has a **QR Tag** button and its list an **Generate QR Sheet** action,
+both Client Script rows, calling two whitelisted methods.
+
+The sheet is measured from Avery's own template (5160 and 5163) and positions
+labels absolutely — on stock with no vertical gutter, a flow layout's rounding
+error is a label straddling a perforation by row ten. An unknown template name
+falls back and says so on the page rather than throwing at somebody holding a
+roll of labels. Every tag prints its docname as text as well as in the symbol,
+because a QR on a pump housing fails by becoming undecodable while still firmly
+attached.
+
+Gated on `has_permission("Asset Register", "read", doc=<name>)` — the specific
+record, so a User Permission scopes the button. The `allow_<tool>` switches are
+deliberately not consulted: they are the AI's leash, and an operator who distrusts
+the model should not thereby lose the button on their own form. `read` and not
+`write`, because printing a label writes nothing and stamps no `last_scan_at`.
+
+### Onboard Worker says what order onboarding goes in
+
+A workspace at `/app/onboard-worker`: hire, badge, enrol the phone — then the
+paperwork that follows in the first fortnight. Every button it points at already
+existed; the sequence is what shipped. Not a wizard, because real onboarding does
+not complete in one sitting. A page somebody has arranged is never rebuilt.
+
+### Deleting an archived mobile card stops being refused
+
+`Mobile Access Grant.qr_document` made the archived copy undeletable — Frappe
+refuses to delete anything a Link field points at. `GovernanceDocument.on_trash`
+now nulls that one link, so the delete proceeds and the grant survives intact.
+
+Deliberately one field. Three other links describe themselves as archive copies
+and are **not** released: the test is not whether the label says "archive" but
+whether this app can redraw what was deleted. A mobile card is regenerated from
+data the grant still holds; a lease's archive entry holds a signed instrument that
+exists nowhere else.
+
+### The test harness learned to refuse a linked delete
+
+`frappe.delete_doc` in the double popped the row and checked nothing. It now runs
+`on_trash`, then `check_if_doc_is_linked`, honouring `force=True` and
+`ignore_links` as Frappe does. Same class of gap as v0.12.0's missing link
+validation, and it made this release's fix untestable. Two existing tests were
+modelling deletes a real bench refuses and now say `force=True` explicitly.
+
+### Already there, and left alone
+
+`rotate_token` on `generate_mobile_login_qr` has defaulted to **true** since
+v0.17.1 — a new login QR already invalidates the previous token. Gating it behind
+a settings switch would only add a way to turn the protection off site-wide.
+
 ## 0.81.0 — 2026-08-16 — the control that can be switched off
 
 IPO readiness, phases four to six: the governance domain. Seven doctypes,

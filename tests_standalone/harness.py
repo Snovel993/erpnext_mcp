@@ -131,6 +131,28 @@ class LinkValidationError(ValidationError):
 	"""
 
 
+class LinkExistsError(ValidationError):
+	"""What Frappe raises when a delete is refused because something links to it.
+
+	MODELLED IN v0.83.0, AND THE GAP IT CLOSES IS THE SAME SHAPE AS
+	`LinkValidationError`'s. Real `frappe.model.delete_doc` runs
+	`check_if_doc_is_linked` and refuses to delete any document a Link field
+	points at; this double used to pop the row out of the table and say nothing.
+	So the suite could certify "the archived card was deleted" against a
+	framework that would have refused, and — worse for the release this arrived
+	in — the FIX for that refusal was untestable, because there was no refusal to
+	fix.
+
+	`force=True` skips the check, as it does in Frappe, and `on_trash` runs first,
+	as it does in Frappe. Both matter: the app's own uninstall paths pass
+	`force=True` deliberately, and `Governance Document.on_trash` releases its
+	archive links in the window between the two.
+
+	THIS IS A FIDELITY INCREASE AND IT CAN ONLY MAKE TESTS STRICTER. A test that
+	starts failing here was passing on a delete a real bench would have refused.
+	"""
+
+
 class MandatoryError(ValidationError):
 	"""What Frappe raises for an empty `reqd` field, and what the app has to dodge.
 
@@ -4427,6 +4449,77 @@ def _controller(doctype: str):
 	return getattr(module, class_name, Document)
 
 
+#: Reverse link index: target doctype → tuple of `(linking doctype, fieldname)`.
+#: Built once on first use because it is a scan of every field of every doctype in
+#: `META` and nothing about it changes between tests.
+_LINK_INDEX: dict[str, tuple] | None = None
+
+
+def _link_index() -> dict:
+	"""Every Link field on the site, indexed by what it points AT.
+
+	`Document._validate_links` asks the forward question — "does the thing this
+	field names exist" — and walks one document's own fields. This is the reverse,
+	which is the question a delete asks, and it has to be answered across every
+	doctype at once.
+
+	FIELDS MARKED `ignore_links` ARE LEFT OUT, as Frappe leaves them out of
+	`check_if_doc_is_linked`. That flag is precisely how a schema says "this link
+	is a convenience and must not keep the target alive", and honouring it here is
+	what keeps the double from being stricter than the framework.
+	"""
+	global _LINK_INDEX
+	if _LINK_INDEX is not None:
+		return _LINK_INDEX
+	index: dict[str, list] = {}
+	for doctype, meta in META.items():
+		for field in meta.fields:
+			if field.get("fieldtype") != "Link":
+				continue
+			if field.get("ignore_links"):
+				continue
+			target = str(field.get("options") or "")
+			fieldname = str(field.get("fieldname") or "")
+			if not target or not fieldname:
+				continue
+			index.setdefault(target, []).append((doctype, fieldname))
+	_LINK_INDEX = {key: tuple(value) for key, value in index.items()}
+	return _LINK_INDEX
+
+
+def _refuse_if_linked(doctype: str, name: str) -> None:
+	"""Raise `LinkExistsError` if anything still links to this document.
+
+	`frappe.model.delete_doc.check_if_doc_is_linked`, to the fidelity this double
+	can reach. The message is shaped like Frappe's — the linking doctype and the
+	linking docname — because the app prints it and a test that asserts on it
+	should be asserting on something recognisable.
+
+	TWO DELIBERATE NARROWINGS, both stated rather than hidden:
+
+	  * A DOCUMENT LINKING TO ITSELF DOES NOT BLOCK ITS OWN DELETE. Frappe does not
+	    refuse that either, and `Governance Document.supersedes` on a chain being
+	    torn down is the case that would otherwise deadlock.
+	  * CHILD-TABLE LINKS ARE NOT WALKED. This double stores child rows inside
+	    their parent rather than in tables of their own, so there is nothing to
+	    scan; Frappe does check them. The gap is real and it makes this double
+	    PERMISSIVE rather than strict — a delete refused on a real bench by a
+	    child-row link would still pass here. Left rather than faked because a
+	    half-built scan over `CHILD_TABLES` would look like coverage and not be it.
+	"""
+	target = str(name)
+	for linking_doctype, fieldname in _link_index().get(doctype, ()):
+		for row in STORE.rows(linking_doctype):
+			if str(row.get(fieldname) or "") != target:
+				continue
+			if linking_doctype == doctype and str(row.get("name") or "") == target:
+				continue
+			raise LinkExistsError(
+				f"Cannot delete or cancel because {doctype} {name} is linked with "
+				f"{linking_doctype} {row.get('name')}"
+			)
+
+
 def _build_frappe() -> types.ModuleType:
 	module = types.ModuleType("frappe")
 
@@ -4436,6 +4529,7 @@ def _build_frappe() -> types.ModuleType:
 	module.PermissionError = PermissionError_
 	module.MandatoryError = MandatoryError
 	module.LinkValidationError = LinkValidationError
+	module.LinkExistsError = LinkExistsError
 	module.db = FakeDB()
 	module.local = FrappeDict(
 		site="test.localhost",
@@ -4605,9 +4699,33 @@ def _build_frappe() -> types.ModuleType:
 		AttributeError here would push the app into not doing it.
 		"""
 
-	def delete_doc(doctype, name, force=False, ignore_permissions=False, **kwargs):
+	def delete_doc(doctype, name, force=False, ignore_permissions=False, ignore_on_trash=False, **kwargs):
+		"""Delete a row, running `on_trash` and refusing a linked document as Frappe does.
+
+		THE ORDER IS THE WHOLE POINT AND IT IS FRAPPE'S. `delete_doc` runs
+		`on_trash` first and `check_if_doc_is_linked` second, which is what lets a
+		controller release the links it is entitled to release and still be
+		refused for the ones it is not. `Governance Document.on_trash` depends on
+		exactly that window; a double that checked links first would refuse a
+		delete the real framework allows, and one that never checked at all —
+		which is what this was until v0.83.0 — allows every delete the real
+		framework refuses.
+
+		`force=True` skips the check, as in Frappe. The app's uninstall paths pass
+		it deliberately.
+		"""
+		if STORE.get_raw(doctype, name) is not None and not ignore_on_trash:
+			try:
+				doc = get_doc(doctype, name)
+			except DoesNotExistError:  # pragma: no cover - checked immediately above
+				doc = None
+			if doc is not None:
+				doc._run("on_trash")
+		if not force:
+			_refuse_if_linked(doctype, name)
 		STORE.snapshot(doctype, name)
 		STORE.tables.get(doctype, {}).pop(name, None)
+
 
 	def rename_doc(doctype, old, new, force=False, merge=False, **kwargs):
 		"""Move a docname and repoint the links this app can observe.

@@ -102,6 +102,8 @@ the settings form, and there is no code path that makes it for them.
 import frappe
 
 from . import (
+	asset_tag_form_action,
+	asset_tag_list_action,
 	badge_form_action,
 	badge_list_action,
 	badge_print_format,
@@ -109,6 +111,7 @@ from . import (
 	dashboard,
 	i9_documents,
 	i9_print_format,
+	onboard_worker,
 	roles,
 	settings,
 	training,
@@ -142,6 +145,9 @@ def after_install() -> None:
 	_badge_print_format()
 	_badge_list_action()
 	_badge_form_action()
+	_asset_tag_list_action()
+	_asset_tag_form_action()
+	_onboard_worker()
 	_settlement_invoice_link()
 	_bank_categorization_fields()
 	_bank_pairing_fields()
@@ -173,6 +179,9 @@ def after_migrate() -> None:
 	_badge_print_format()
 	_badge_list_action()
 	_badge_form_action()
+	_asset_tag_list_action()
+	_asset_tag_form_action()
+	_onboard_worker()
 	_settlement_invoice_link()
 	_bank_categorization_fields()
 	_bank_pairing_fields()
@@ -716,6 +725,97 @@ def _badge_list_action() -> None:
 		)
 	elif report.get("reason") not in ("already present", ""):
 		print(f"erpnext_mcp: the Employee badge-sheet button was not seeded — {report['reason']}")
+
+
+def _asset_tag_list_action() -> None:
+	"""Put "Generate QR Sheet" in the Asset Register list's Actions menu. v0.83.0.
+
+	A RECORD RATHER THAN A HOOK EVEN THOUGH THE HOOK WAS AVAILABLE. Asset Register
+	is this app's own doctype, so `doctype_list_js` would not have broken any
+	promise `hooks.py` makes — `asset_tag_form_action.py` gives the three reasons
+	the pair went to Client Scripts anyway, and the operator-visible, switchable-off
+	property is the one that decided it.
+	"""
+	report = asset_tag_list_action.seed_asset_tag_list_action()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Client Script — the Asset Register "
+			f"list's Actions menu can now print a sheet of QR tags for the selected assets. It "
+			f"is a row in the Desk: untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("updated"):
+		print(
+			f"erpnext_mcp: {report['reason']} — the {report['name']!r} Client Script was this "
+			f"app's own unedited copy, so it has been brought up to date."
+		)
+	elif report.get("reason", "").startswith("left alone"):
+		print(
+			f"erpnext_mcp: the {report['name']!r} Client Script has been edited on this site, so "
+			f"it was left exactly as it is — {report['reason']}. Delete the row and run "
+			f"`bench migrate` to take this app's current copy, or paste the change in by hand."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the asset QR-sheet action was not seeded — {report['reason']}")
+
+
+def _asset_tag_form_action() -> None:
+	"""Put "QR Tag" on the Asset Register form. v0.83.0.
+
+	The other half of the same feature. `generate_asset_qr` has drawn the symbol
+	since v0.17.0 and there has never been a way to get it onto paper from the
+	Desk; this is the button, and `api/asset_tags.py` is what it calls.
+	"""
+	report = asset_tag_form_action.seed_asset_tag_form_action()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: seeded the {report['name']!r} Client Script — an Asset Register form "
+			f"now has a Tags › QR Tag button that shows the tag and prints it. It is a row in the "
+			f"Desk: untick `enabled` or delete it and this app will not put it back."
+		)
+	elif report.get("updated"):
+		print(
+			f"erpnext_mcp: {report['reason']} — the {report['name']!r} Client Script was this "
+			f"app's own unedited copy, so it has been brought up to date."
+		)
+	elif report.get("reason", "").startswith("left alone"):
+		print(
+			f"erpnext_mcp: the {report['name']!r} Client Script has been edited on this site, so "
+			f"it was left exactly as it is — {report['reason']}. Delete the row and run "
+			f"`bench migrate` to take this app's current copy, or paste the change in by hand."
+		)
+	elif report.get("reason") not in ("already present", ""):
+		print(f"erpnext_mcp: the asset QR-tag button was not seeded — {report['reason']}")
+
+
+def _onboard_worker() -> None:
+	"""Build or repair the Onboard Worker workspace. v0.83.0.
+
+	`_report_failures` is not used here because this builder has three outcomes
+	worth different sentences and one of them is "somebody has arranged this page,
+	so nothing was done" — which is a success, not a failure, and would print as
+	silence through the generic reporter.
+	"""
+	report = onboard_worker.install_onboard_worker()
+	if report.get("created"):
+		print(
+			f"erpnext_mcp: built the {onboard_worker.WORKSPACE_NAME!r} workspace — "
+			f"{report['shortcuts']} shortcut(s) in the order onboarding actually goes: hire, "
+			f"badge, enrol the phone. It is at /app/onboard-worker."
+		)
+	elif report.get("filled"):
+		print(
+			f"erpnext_mcp: filled in the {onboard_worker.WORKSPACE_NAME!r} workspace, which was "
+			f"on this site with nothing on it."
+		)
+	elif report.get("existed"):
+		print(
+			f"erpnext_mcp: the {onboard_worker.WORKSPACE_NAME!r} workspace has been arranged on "
+			f"this site, so it was left exactly as it is."
+		)
+	elif report.get("note"):
+		print(f"erpnext_mcp: the Onboard Worker workspace was not built — {report['note']}")
+	for failure in report.get("failed") or []:
+		print(f"erpnext_mcp: could not build {failure['name']} — {failure['reason']}")
 
 
 def _command_center() -> None:
@@ -1289,6 +1389,9 @@ def before_uninstall() -> None:
 	"""
 	_remove_badge_list_action()
 	_remove_badge_form_action()
+	_remove_asset_tag_list_action()
+	_remove_asset_tag_form_action()
+	_remove_onboard_worker()
 
 	losses = []
 	for doctype, what in _PRECIOUS_DOCTYPES:
@@ -1375,6 +1478,59 @@ def _remove_badge_form_action() -> None:
 			"\nerpnext_mcp: could not remove this app's Client Script from the Employee form — "
 			f"{report['reason']}.\nDelete it by hand in the Desk under Client Script, or its "
 			'"ID Card" button will stay on the form calling a method that has gone.\n'
+		)
+
+
+def _remove_asset_tag_list_action() -> None:
+	"""Take this app's "Generate QR Sheet" action off the Asset Register list. v0.83.0.
+
+	Asset Register goes with the app, so unlike the two badge rows this one is not
+	left pointing at a form the operator keeps. The row is removed anyway: a Client
+	Script naming a doctype that no longer exists is a row somebody has to work out
+	the provenance of later, and leaving litter is not cheaper than sweeping it.
+	"""
+	report = asset_tag_list_action.remove_asset_tag_list_action()
+	if report.get("removed"):
+		print(f"erpnext_mcp: removed the {report['name']!r} Client Script from the Asset Register list.")
+	elif report.get("reason") not in ("not present", ""):
+		print(
+			"\nerpnext_mcp: could not remove this app's Client Script from the Asset Register list "
+			f"— {report['reason']}.\nDelete it by hand in the Desk under Client Script.\n"
+		)
+
+
+def _remove_asset_tag_form_action() -> None:
+	"""Take this app's QR Tag button off the Asset Register form. v0.83.0."""
+	report = asset_tag_form_action.remove_asset_tag_form_action()
+	if report.get("removed"):
+		print(f"erpnext_mcp: removed the {report['name']!r} Client Script from the Asset Register form.")
+	elif report.get("reason") not in ("not present", ""):
+		print(
+			"\nerpnext_mcp: could not remove this app's Client Script from the Asset Register form "
+			f"— {report['reason']}.\nDelete it by hand in the Desk under Client Script.\n"
+		)
+
+
+def _remove_onboard_worker() -> None:
+	"""Take the Onboard Worker landing page off before the app goes. v0.83.0.
+
+	The page links to Employee, which SURVIVES the uninstall — so this is closer to
+	the badge buttons than to the Client Script above: left behind, it is a
+	workspace in the operator's Desk, in a module that has gone, pointing at a mix
+	of doctypes that still exist and doctypes that do not.
+
+	A page somebody has moved to another module is theirs and stays — see
+	`onboard_worker.remove_onboard_worker`.
+	"""
+	report = onboard_worker.remove_onboard_worker()
+	if report.get("removed"):
+		print(f"erpnext_mcp: removed the {report['name']!r} workspace.")
+	elif report.get("reason", "").startswith("left alone"):
+		print(f"erpnext_mcp: the {report['name']!r} workspace was {report['reason']}.")
+	elif report.get("reason") not in ("not present", ""):
+		print(
+			f"\nerpnext_mcp: could not remove the {report['name']!r} workspace — "
+			f"{report['reason']}.\nDelete it by hand in the Desk under Workspace.\n"
 		)
 
 
