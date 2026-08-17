@@ -1361,6 +1361,38 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		RejectionModel.decode(row, "reject_task")
 		self.assertEqual(row["task"], self.task)
 
+	def test_08a_pause_and_resume_task_via_mobile(self):
+		"""THE v0.90.0 REGRESSION TEST. Both wrappers shipped calling the module
+		helper `_assignment(task, task_assignment, allowed)` with a FOURTH
+		positional argument — `_assignment(task, task_assignment, [], "task")` —
+		which is a `TypeError` on the call itself, before any state logic. Every
+		pause and every resume answered HTTP 500 on the live sidecar (found
+		2026-08-17 running the iOS end-to-end test against Umbrel), and nothing
+		here caught it because `test_api_mobile` only asserts these two names are
+		*registered* — it never *invokes* them. The dispatch tool underneath was
+		always fine; `test_task_interruption` exercises that and stayed green.
+		This calls the wrappers the way a phone does.
+		"""
+		claimed = mobile_api.claim_task(task=self.task)
+		mobile_api.start_task(task=self.task)
+
+		# Pause the way the app does: task named, assignment alongside it, a reason.
+		paused = self.wire(
+			"pause_task_via_mobile",
+			task=self.task,
+			task_assignment=claimed["assignment"],
+			reason="Called to the valve at Home-7",
+		)
+		self.assertEqual(paused["state"], "Paused")
+		self.assertEqual(paused["reason"], "Called to the valve at Home-7")
+		self.assertEqual(self.wire("get_task", task=self.task)["state"], "Paused")
+
+		# And task-only, no assignment — the other branch of the same helper, so
+		# the fix is proven on both paths rather than just the one the app favours.
+		resumed = self.wire("resume_task_via_mobile", task=self.task)
+		self.assertEqual(resumed["state"], "In-Progress")
+		self.assertEqual(self.wire("get_task", task=self.task)["state"], "In-Progress")
+
 	def test_09_list_compliance_alerts(self):
 		# The sweep is an operator's call, not a worker's — the phone only ever
 		# reads the calendar it produces.

@@ -7105,15 +7105,15 @@ def pause_task_via_mobile(user: str, task=None, task_assignment=None, reason=Non
 	the Employee this login resolves to — an account that could pause somebody
 	else's job could stop a stranger's clock from across the farm.
 	"""
-	guard.require_scope(user)
+	allowed = guard.require_scope(user)
 	employee = _employee(user)
 
 	inner = {"worker_id": employee}
-	assignment = _assignment(task, task_assignment, [], "task")
+	assignment = _assignment(task, task_assignment, allowed)
 	if assignment:
 		inner["assignment"] = assignment
 	else:
-		inner["task"] = guard.require_docname(FARM_TASK, task, "task")
+		inner["task"] = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
 	if reason:
 		inner["reason"] = str(reason).strip()
 
@@ -7125,15 +7125,15 @@ def pause_task_via_mobile(user: str, task=None, task_assignment=None, reason=Non
 @guard.endpoint("resume_task_via_mobile", mutating=True, limit=guard.WRITE_LIMIT)
 def resume_task_via_mobile(user: str, task=None, task_assignment=None) -> dict:
 	"""Pick a paused job back up. Whatever else was running is stood down."""
-	guard.require_scope(user)
+	allowed = guard.require_scope(user)
 	employee = _employee(user)
 
 	inner = {"worker_id": employee}
-	assignment = _assignment(task, task_assignment, [], "task")
+	assignment = _assignment(task, task_assignment, allowed)
 	if assignment:
 		inner["assignment"] = assignment
 	else:
-		inner["task"] = guard.require_docname(FARM_TASK, task, "task")
+		inner["task"] = guard.require_scoped_doc(FARM_TASK, task, "task", allowed)
 
 	return dispatch.resume_farm_task(inner).data
 
