@@ -57,6 +57,7 @@ from erpnext_mcp import audit, compat, roles, settings
 from erpnext_mcp.api import files as files_api
 from erpnext_mcp.api import guard, shape
 from erpnext_mcp.api import mobile as mobile_api
+from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.tools import mobile as mobile_tools
 from erpnext_mcp.tools import shifts as shift_tools
 
@@ -491,6 +492,17 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# the app. The server half is published first so the iOS half is a client
 		# change and not a release of both.
 		"get_translation_bundle",
+		# v0.91.0. The shadow log feed: two reads and the acknowledgement. HERE
+		# RATHER THAN IN `MOBILE` for this set's ordinary reason — `MobileAPI.swift`
+		# names none of the three yet — and the server half is published first so
+		# the iOS half is a client change rather than a release of both.
+		#
+		# THE RECIPIENT IS NEVER A BODY ARGUMENT on any of the three, which is
+		# what makes them the caller's own feed rather than a register. The
+		# signature assertions in `TheShadowFeedIsAddressed` are what hold that.
+		"list_shadow_log_entries",
+		"get_shadow_log_entry",
+		"acknowledge_shadow_log",
 	}
 
 	def _whitelisted(self, module):
@@ -2892,3 +2904,252 @@ class TheShiftTimelineReachesThePhone(MobileAPITestCase):
 			with self.subTest(method=method):
 				with self.assertRaises(Exception):
 					getattr(mobile_api, method)(shift=other, **arguments)
+
+
+class TheShadowFeedIsAddressed(MobileAPITestCase):
+	"""v0.91.0. The three shadow log routes, and the one property that gates them.
+
+	THESE THREE WERE MCP TOOLS WITH NO ROUTE, which is the failure shape v0.58.1
+	spent a release on: the server could do it and the phone could not ask. The
+	tools have existed since v0.85.0.
+
+	THE FEED IS ADDRESSED, NOT PUBLISHED. Every row names a `recipient_employee`
+	— it is one supervisor's copy of what happened below them, and the tool's
+	`employee` filter takes that recipient as an argument. None of the three
+	wrappers declares it, so the recipient is always the authenticated caller.
+
+	AND THE DOCNAME IS COMPOSABLE, which is why scope alone is not the gate on
+	the detail pair. `shadow_key` is built from the event, the source and the
+	recipient's own Employee ID, so a worker who knows a colleague's number can
+	WRITE a docname rather than discover one. Both entries in this fixture sit in
+	MAIN, so `guard.require_scoped_doc` passes on both and the addressee check is
+	the only thing standing between Ana and Luis's feed.
+
+	EVERY TEST HERE INVOKES THE WRAPPER. That is the lesson of bd66550: the
+	pause pair were listed in this file's registry set, asserted to be published,
+	and never once called — so a four-argument call to a three-argument helper
+	shipped and answered 500 to every phone on the farm.
+	"""
+
+	SUBORDINATE = "EMP-CARL"
+	COLLEAGUE = "EMP-LUIS"
+
+	def setUp(self):
+		super().setUp()
+		from erpnext_mcp.tools import shadow_log
+
+		self.shadow_log = shadow_log
+		# Carl reports to Ana (the caller), and to Luis in the same entity.
+		# Luis's copies are the ones Ana must not be able to read.
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": self.COLLEAGUE,
+					"employee_name": "Luis Ortega",
+					"company": MAIN,
+					"status": "Active",
+				},
+				{
+					"name": self.SUBORDINATE,
+					"employee_name": "Carl Mendez",
+					"company": MAIN,
+					"status": "Active",
+					"reports_to": WORKER_EMPLOYEE,
+				},
+			],
+		)
+
+	def raise_for(self, subject=None, source_name="BLS-0001", **overrides):
+		payload = {
+			"event_type": self.shadow_log.EVENT_BUCKET_SESSION,
+			"source_doctype": "Bucket Log Session",
+			"source_name": source_name,
+			"subject_employee": subject or self.SUBORDINATE,
+			"company": MAIN,
+			"occurred_at": "2026-08-16 14:00:00",
+			"summary": "Carl Mendez synced a picking session: 412 accepted.",
+			"snapshot": {"total_accepted": 412, "employee": self.SUBORDINATE},
+		}
+		payload.update(overrides)
+		return self.shadow_log.propagate(**payload)
+
+	def a_copy_for_ana(self):
+		"""One level-1 copy addressed to the caller, and its docname."""
+		self.raise_for()
+		return self.shadow_log.shadow_key(
+			self.shadow_log.EVENT_BUCKET_SESSION, "Bucket Log Session", "BLS-0001", WORKER_EMPLOYEE
+		)
+
+	def a_copy_for_the_colleague(self):
+		"""One level-1 copy addressed to Luis, in the caller's OWN entity.
+
+		Same company on purpose: `guard.require_scoped_doc` passes on this row,
+		so anything that refuses it is refusing on the addressee and not on scope.
+		"""
+		frappe.db.set_value("Employee", self.SUBORDINATE, "reports_to", self.COLLEAGUE)
+		self.raise_for(source_name="BLS-0002")
+		frappe.db.set_value("Employee", self.SUBORDINATE, "reports_to", WORKER_EMPLOYEE)
+		return self.shadow_log.shadow_key(
+			self.shadow_log.EVENT_BUCKET_SESSION, "Bucket Log Session", "BLS-0002", self.COLLEAGUE
+		)
+
+	# ── the feed reads ──────────────────────────────────────────────────────
+	def test_a_supervisor_reads_their_own_feed(self):
+		self.a_copy_for_ana()
+		self.be()
+		answer = mobile_api.list_shadow_log_entries()
+		self.assertEqual(answer["count"], 1)
+		self.assertEqual(answer["entries"][0]["recipient_employee"], WORKER_EMPLOYEE)
+		self.assertEqual(answer["entries"][0]["subject_employee"], self.SUBORDINATE)
+		self.assertEqual(answer["unacknowledged_count"], 1)
+
+	def test_a_colleagues_copies_are_not_in_it(self):
+		"""The recipient is the session's, so another supervisor's feed is not
+		reachable by asking — there is nowhere to put the request."""
+		self.a_copy_for_ana()
+		self.a_copy_for_the_colleague()
+		self.be()
+		answer = mobile_api.list_shadow_log_entries()
+		self.assertEqual(answer["count"], 1)
+		self.assertEqual(
+			{row["recipient_employee"] for row in answer["entries"]}, {WORKER_EMPLOYEE}
+		)
+
+	def test_the_recipient_is_not_a_body_argument_on_any_of_the_three(self):
+		"""`routes.bind` keeps body keys that match the signature. A key that is
+		not on it cannot be delivered, which is what makes this the caller's own
+		feed rather than a register anybody may read."""
+		for method in ("list_shadow_log_entries", "get_shadow_log_entry", "acknowledge_shadow_log"):
+			with self.subTest(method=method):
+				accepted = farmops_routes.accepted_arguments(getattr(mobile_api, method))
+				self.assertNotIn("employee", accepted)
+				self.assertNotIn("recipient_employee", accepted)
+
+	def test_an_empty_feed_is_a_real_answer_and_not_an_error(self):
+		"""A handset that drew this as a fault would send foremen looking for
+		one that is not there."""
+		self.be()
+		answer = mobile_api.list_shadow_log_entries()
+		self.assertEqual(answer["count"], 0)
+		self.assertIn("EMPTY FEED IS A REAL ANSWER", answer["empty_note"])
+
+	def test_the_unread_filter_is_the_call_the_badge_makes(self):
+		name = self.a_copy_for_ana()
+		self.be()
+		self.assertEqual(mobile_api.list_shadow_log_entries(acknowledged=False)["count"], 1)
+		mobile_api.acknowledge_shadow_log(name=name)
+		self.assertEqual(mobile_api.list_shadow_log_entries(acknowledged=False)["count"], 0)
+		self.assertEqual(mobile_api.list_shadow_log_entries(acknowledged=True)["count"], 1)
+
+	def test_a_bad_event_type_is_refused_by_name(self):
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.list_shadow_log_entries(event_type="Something Else")
+		self.assertIn("is not an event this feed carries", str(caught.exception))
+
+	# ── the detail read ─────────────────────────────────────────────────────
+	def test_one_copy_comes_back_with_its_frozen_snapshot(self):
+		name = self.a_copy_for_ana()
+		self.be()
+		answer = mobile_api.get_shadow_log_entry(name=name)
+		self.assertEqual(answer["recipient_employee"], WORKER_EMPLOYEE)
+		self.assertEqual(answer["snapshot"]["total_accepted"], 412)
+		self.assertTrue(answer["snapshot_intact"])
+
+	def test_a_colleagues_copy_reads_as_not_found_though_it_is_in_scope(self):
+		"""THE ASSERTION THIS WRAPPER EXISTS FOR. Both rows are in MAIN, so
+		`guard.require_scoped_doc` passes on both; the addressee check is the
+		only thing left. And the refusal is a MISS rather than a permission
+		error, because a composed docname that drew a different error from a
+		nonexistent one would have learned the row is there."""
+		name = self.a_copy_for_the_colleague()
+		self.assertEqual(
+			frappe.db.get_value("Shadow Log Entry", name, "company"), MAIN, "fixture must be in scope"
+		)
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError) as caught:
+			mobile_api.get_shadow_log_entry(name=name)
+		self.assertIn("was not found", str(caught.exception))
+
+	def test_a_composed_docname_that_never_existed_reads_the_same_way(self):
+		"""The two refusals are worded identically, so probing learns nothing."""
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError) as caught:
+			mobile_api.get_shadow_log_entry(
+				name=self.shadow_log.shadow_key(
+					self.shadow_log.EVENT_SHIFT_CLOSED, "Farm Shift", "SHIFT-NOPE", self.COLLEAGUE
+				)
+			)
+		self.assertIn("was not found", str(caught.exception))
+
+	# ── the acknowledgement ─────────────────────────────────────────────────
+	def test_the_recipient_can_say_they_saw_it(self):
+		name = self.a_copy_for_ana()
+		self.be()
+		answer = mobile_api.acknowledge_shadow_log(name=name, note="Spoke to Carl.")
+		self.assertTrue(answer["acknowledged"])
+		self.assertEqual(answer["acknowledged_by"], WORKER)
+		self.assertEqual(answer["acknowledged_note"], "Spoke to Carl.")
+		self.assertFalse(answer["x_idempotent"])
+
+	def test_a_second_call_changes_nothing_and_says_so(self):
+		"""A phone that lost its response in a dead spot must not have to choose
+		between retrying and being correct."""
+		name = self.a_copy_for_ana()
+		self.be()
+		mobile_api.acknowledge_shadow_log(name=name)
+		again = mobile_api.acknowledge_shadow_log(name=name)
+		self.assertTrue(again["acknowledged"])
+		self.assertTrue(again["x_idempotent"])
+
+	def test_nobody_acknowledges_a_copy_addressed_to_somebody_else(self):
+		"""'I saw this' is a statement about oneself. An account that could make
+		it on another person's behalf could clear a supervisor's unread feed from
+		across the farm and leave the record asserting they had read it."""
+		name = self.a_copy_for_the_colleague()
+		self.be()
+		with self.assertRaises(frappe.DoesNotExistError):
+			mobile_api.acknowledge_shadow_log(name=name)
+		self.assertFalse(
+			compat.checked(frappe.db.get_value("Shadow Log Entry", name, "acknowledged")),
+			"the colleague's copy must still read as unacknowledged",
+		)
+
+	def test_the_write_is_declared_mutating_and_the_reads_are_not(self):
+		"""The route table reads this off the endpoint rather than restating it,
+		so the two cannot come to disagree about whether a call writes."""
+		self.assertTrue(mobile_api.acknowledge_shadow_log.farm_ops_mutating)
+		self.assertFalse(mobile_api.list_shadow_log_entries.farm_ops_mutating)
+		self.assertFalse(mobile_api.get_shadow_log_entry.farm_ops_mutating)
+		by_path = {route.path: route for route in farmops_routes.ROUTES}
+		self.assertTrue(by_path["/mobile/acknowledge_shadow_log"].mutating)
+		self.assertFalse(by_path["/mobile/list_shadow_log_entries"].mutating)
+
+	def test_all_three_routes_exist_which_is_the_whole_point_of_the_release(self):
+		"""They answered 404 on this transport for six releases."""
+		for path in (
+			"/mobile/list_shadow_log_entries",
+			"/mobile/get_shadow_log_entry",
+			"/mobile/acknowledge_shadow_log",
+		):
+			with self.subTest(path=path):
+				self.assertIn(path, farmops_routes.BY_PATH)
+
+	def test_the_routes_do_not_consult_the_per_tool_switch(self):
+		"""LIVE, like every other method here. The `allow_` switches govern the
+		AI surface; what bounds this one is the grant an operator issues."""
+		name = self.a_copy_for_ana()
+		self.configure(enabled=1, **ON, allow_list_shadow_log_entries=0, allow_acknowledge_shadow_log=0)
+		self.be()
+		self.assertEqual(mobile_api.list_shadow_log_entries()["count"], 1)
+		self.assertTrue(mobile_api.acknowledge_shadow_log(name=name)["acknowledged"])
+
+	def test_a_login_with_no_employee_record_is_told_how_to_fix_it(self):
+		"""The feed is addressed to an Employee, so a login that resolves to none
+		has no feed rather than an empty one."""
+		frappe.db.set_value("Employee", WORKER_EMPLOYEE, "user_id", "")
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.list_shadow_log_entries()
+		self.assertIn("has no Employee record", str(caught.exception))

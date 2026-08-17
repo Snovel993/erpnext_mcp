@@ -3,6 +3,81 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.91.0 — 2026-08-17 — the feed nobody could reach, and a sweep for its cause
+
+Three tools that have existed since v0.85.0 and answered **404 to every phone on
+the farm** get their routes. Plus the audit that asks whether the pause/resume
+bug fixed in the session before this one had siblings anywhere else in the tree.
+
+### The shadow log reaches a handset
+
+`list_shadow_log_entries`, `get_shadow_log_entry` and `acknowledge_shadow_log`
+work over MCP and have never been reachable from the mobile sidecar. Same failure
+shape as the six methods v0.58.1 spent a release on: the server can do it, the
+phone cannot ask.
+
+**The feed is addressed, not published, and that is the whole design of these
+three wrappers.** Every `Shadow Log Entry` names a `recipient_employee` — it is
+one supervisor's frozen copy of what happened below them. The tool's `employee`
+filter takes that recipient as an argument, and **none of the three wrappers
+declares it**, so `routes.bind` cannot deliver it and the recipient is always the
+authenticated caller. An account that could name somebody else would be reading a
+colleague's entire view of their crew.
+
+**The docname is composable, which is why scope alone does not gate the detail
+pair.** `shadow_key` is built from the event, the source and the recipient's own
+Employee ID — `Shift Closed::Farm Shift::SHIFT-2026-00042::HR-EMP-0003` — so a
+worker who knows a colleague's employee number can *write* a docname rather than
+discover one. `guard.require_scoped_doc` proves the row is inside the caller's
+entities and stops there; a new `_shadow_entry` helper proves it is addressed to
+them, and answers a miss **in the same words as a row that does not exist**, so a
+composed docname learns nothing from which error comes back.
+
+`acknowledge_shadow_log` is the write, declared `mutating=True` at
+`guard.WRITE_LIMIT`. "I saw this" is a statement somebody makes about themselves;
+an account that could make it on another person's behalf could clear a
+supervisor's unread feed from across the farm and leave the record asserting they
+had read every row. There is no fourth route — propagation is not a tool, it
+happens inside a bucket sync, a shift close, an alert and a completion — so
+nothing here can write a copy, only read one and say it was read.
+
+### The audit sweep
+
+The bug fixed in `bd66550` was `_assignment(task, assignment, [], "task")` against
+a three-parameter function: a `TypeError` raised at the call itself, before any
+state logic, invisible to every test because **no test invoked that wrapper**.
+This release asks whether it had siblings.
+
+- **Argument-count mismatches.** Every resolvable call site in `api/`,
+  `farmops_api/` and `tools/` — **12,987** of them on the shipped tree, 12,966
+  before this release's own wrappers — was bound against its
+  target's real signature with `inspect.Signature.bind`, which is what Python
+  does at call time. **Zero mismatches.** The checker was first validated against
+  the pre-`bd66550` source, where it flags both wrappers and not their three
+  correct siblings; an audit that finds nothing is worth nothing until it is shown
+  to catch the bug it was written for.
+- **The five `_assignment` call sites** — `claim_task`, `start_task`,
+  `complete_task_via_mobile`, and the pause/resume pair — all pass three
+  arguments. The fix is on `main`.
+- **Registry integrity.** All **693** tools resolve to a callable handler taking
+  the single `args` dict, and the dict literal holds 693 distinct keys with no
+  duplicate.
+- **Routes.** **127 routes, 127 guarded methods, zero stranded, zero dangling**
+  (124 before the three added here).
+  Every route reaches a real guarded function and every guarded function has a
+  route, in both directions; no route disagrees with its endpoint about whether
+  it writes.
+- **v0.90.0 features.** Irrigation valve scan (`scan_valve`) routed and working;
+  task pause/resume routed and fixed; the shadow log was the gap, and is what this
+  release closes.
+
+### Tests
+
+**9,823 tests, all passing, 126 skipped** — 16 new, and every one of them
+*invokes* a wrapper rather than asserting it is published. That is the lesson of
+`bd66550`: the pause pair were listed in the surface-is-closed registry, asserted
+to exist, and never once called.
+
 ## 0.90.0 — 2026-08-16 — one number past the wave
 
 No feature, no tool, no doctype. Eight parallel branches landed on `main` in one

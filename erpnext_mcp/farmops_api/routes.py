@@ -533,6 +533,28 @@ ROUTES = (
 	Route("/mobile", mobile_api.get_shipment_readiness),
 	Route("/mobile", mobile_api.list_trade_documents),
 	Route("/mobile", mobile_api.confirm_shipment_movement),
+	# v0.91.0. The shadow log feed, which has been an MCP tool since v0.85.0 and
+	# has 404'd on this transport ever since — the same failure shape as the six
+	# methods v0.58.1 unmounted: the server can do it, the phone cannot ask.
+	#
+	# ALL THREE ARE ADDRESSED TO THE CALLER AND ARE NOT A REGISTER. The tool's
+	# own `employee` argument names the RECIPIENT of a copy, and none of the
+	# three wrappers declares it — so this table's argument filter is what stops
+	# an account reading a colleague's whole view of their crew, exactly as it
+	# stops `worker_id` reaching the pause pair above.
+	#
+	# `acknowledge_shadow_log` IS THE WRITE, and the one place where scope is not
+	# the whole gate: `shadow_key` is COMPOSED from the recipient's own Employee
+	# ID, so a docname can be written down rather than discovered. The wrapper
+	# re-checks the addressee and answers a miss in the same words as a row that
+	# does not exist.
+	#
+	# THERE IS NO FOURTH ROUTE. Propagation is not a tool — it happens inside a
+	# bucket sync, a shift close, an alert and a completion — so there is nothing
+	# here that could write a copy, only read one and say it was read.
+	Route("/mobile", mobile_api.list_shadow_log_entries),
+	Route("/mobile", mobile_api.get_shadow_log_entry),
+	Route("/mobile", mobile_api.acknowledge_shadow_log),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

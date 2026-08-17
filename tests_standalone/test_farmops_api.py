@@ -420,6 +420,13 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/get_shipment_readiness",
 		"/mobile/list_trade_documents",
 		"/mobile/confirm_shipment_movement",
+		# v0.91.0. The RACI feed, reachable from a handset at last. All three are
+		# ADDRESSED reads and writes rather than register ones: the tool's
+		# `employee` argument names the recipient of a copy and none of the three
+		# wrappers declares it, so `bind` cannot deliver a colleague's feed.
+		"/mobile/list_shadow_log_entries",
+		"/mobile/get_shadow_log_entry",
+		"/mobile/acknowledge_shadow_log",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

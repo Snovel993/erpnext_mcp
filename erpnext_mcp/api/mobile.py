@@ -121,6 +121,7 @@ from ..tools import training as training_tools
 from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
+from ..tools import shadow_log as shadow_log_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
@@ -145,6 +146,7 @@ DOCUMENT_VALIDATION = "Document Validation"
 DISCIPLINE_RECORD = "Discipline Record"
 ACCIDENT_REPORT = "Accident Report"
 FARM_TASK_TEMPLATE = template_tools.TEMPLATE
+SHADOW_LOG_ENTRY = shadow_log_tools.DOCTYPE
 
 #: The Farm Task Assignment state a completion lands in. Imported from the
 #: doctype's own controller rather than spelled here, so a vocabulary change
@@ -8202,3 +8204,181 @@ def _native_keys(language: str, category: str = "", prefix: str = "") -> list:
 		]
 	except Exception:  # pragma: no cover - a site mid-migrate
 		return []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.91.0 — the shadow log on a handset
+#
+# THE FEED IS ADDRESSED, AND THE ADDRESS IS THE WHOLE GATE. Every row in
+# `Shadow Log Entry` names a `recipient_employee`: it is one person's copy of
+# something that happened below them, not a register anybody may read. So all
+# three wrappers resolve the recipient from the AUTHENTICATED SESSION and none
+# of them declares `employee` — the tool's own filter takes a recipient docname
+# and would happily hand over a colleague's feed, which is a supervisor's view
+# of their own crew and nobody else's business.
+#
+# THE DOCNAME IS GUESSABLE, WHICH IS WHY THE DETAIL PAIR RE-CHECKS. `shadow_key`
+# is built from the event, the source and the recipient —
+# `Shift Closed::Farm Shift::SHIFT-2026-00042::HR-EMP-0003` — so a caller who
+# knows a colleague's Employee ID can compose a docname rather than discover it.
+# `guard.require_scoped_doc` proves the row is inside the caller's entities and
+# stops there; `_shadow_entry` is what proves it is addressed to THEM.
+#
+# A ROW THAT IS NOT YOURS READS AS NOT FOUND, in the same words as one that does
+# not exist. That is this file's standing rule and it matters more here than
+# usual: a refusal worded "that is somebody else's copy" would confirm the row
+# exists, which is exactly what a composed docname is fishing for.
+#
+# `acknowledge_shadow_log` IS THE MUTATING ONE. It is declared
+# `mutating=True` at `guard.WRITE_LIMIT`, which is what puts it in the route
+# table as a write and meters it at ten a minute rather than a read's rate.
+# THE ACKNOWLEDGEMENT SAYS "I SAW THIS", and only the person it was addressed to
+# can truthfully say it — an account that could acknowledge somebody else's copy
+# could clear a supervisor's unread feed from across the farm and leave the
+# record asserting they had read it.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _shadow_entry(name, user: str, allowed: list) -> str:
+	"""One Shadow Log Entry docname, proved to exist, to be in scope, AND to be the caller's.
+
+	Three checks, and the third is the one this helper exists for.
+	`guard.require_scoped_doc` answers "is this a real row in an entity this
+	account may reach" — which for a doctype whose docname is COMPOSED from the
+	recipient's own Employee ID is not enough on its own. A picker who knows
+	their foreman's employee number can write down a `shadow_key` without ever
+	having been shown one.
+
+	THE REFUSAL IS `DoesNotExistError` AND IS WORDED AS A MISS, matching
+	`guard.require_scoped_doc` exactly. Saying "that copy is not addressed to
+	you" would confirm the row is there, and a composed docname that draws a
+	different error from a nonexistent one has learned something.
+	"""
+	docname = guard.require_scoped_doc(SHADOW_LOG_ENTRY, name, "name", allowed)
+	recipient = str(frappe.db.get_value(SHADOW_LOG_ENTRY, docname, "recipient_employee") or "")
+	if recipient != _employee(user):
+		frappe.throw(f"name {docname} was not found.", frappe.DoesNotExistError)
+	return docname
+
+
+# ── 104. list_shadow_log_entries ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_shadow_log_entries", limit=guard.READ_LIMIT)
+def list_shadow_log_entries(
+	user: str,
+	level=None,
+	acknowledged=None,
+	event_type=None,
+	source_doctype=None,
+	source_name=None,
+	subject_employee=None,
+	company=None,
+	limit=None,
+) -> dict:
+	"""What happened below this supervisor, frozen as it was at the time.
+
+	THE CALLER'S OWN FEED AND NOBODY ELSE'S. The tool's `employee` argument names
+	the RECIPIENT, and it is deliberately not on this signature — so
+	`routes.bind` cannot deliver it and the recipient is always the Employee this
+	login resolves to. An account that could name somebody else would be reading
+	a colleague's whole view of their crew: who was disciplined, whose shift ran
+	long, whose bucket count was corrected.
+
+	`acknowledged=false` IS THE CALL THE SCREEN ACTUALLY MAKES — the unread
+	badge. The unfiltered call is the history behind it.
+
+	AN EMPTY FEED IS A REAL ANSWER and the tool says so in `empty_note`: nobody
+	may report to this person, the feed may be switched off in ERPNext MCP
+	Settings, or nothing may have happened below them. A handset that drew "no
+	entries" as an error would send foremen looking for a fault that is not
+	there.
+
+	`subject_employee` NARROWS WITHIN THE CALLER'S OWN FEED and cannot widen it.
+	It is checked as a scoped Employee docname for the ordinary reason — a
+	misspelling should refuse rather than quietly return nothing, which on a feed
+	whose empty answer is meaningful would be indistinguishable from good news.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner: dict = {"employee": _employee(user)}
+	entity = guard.require_company(user, company, allowed)
+	if entity:
+		inner["company"] = entity
+	if level is not None:
+		inner["level"] = level
+	if acknowledged is not None:
+		inner["acknowledged"] = acknowledged
+	for key, value in (
+		("event_type", event_type),
+		("source_doctype", source_doctype),
+		("source_name", source_name),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	if subject_employee not in (None, ""):
+		inner["subject_employee"] = _employee_argument(subject_employee, allowed, "subject_employee")
+	if limit is not None:
+		inner["limit"] = limit
+
+	data = dict(shadow_log_tools.list_shadow_log_entries(inner).data)
+	# BELT TO THE TOOL'S BRACES, the same one every list on this surface gets.
+	# The filter above already restricts to this recipient inside this caller's
+	# entities; this drops anything that reached the result another way.
+	data["entries"] = guard.scoped(data.get("entries") or [], allowed)
+	return data
+
+
+# ── 105. get_shadow_log_entry ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_shadow_log_entry", limit=guard.READ_LIMIT)
+def get_shadow_log_entry(user: str, name=None) -> dict:
+	"""One copy in full: the frozen snapshot, and what the source says now.
+
+	ADDRESSED TO THE CALLER OR NOT FOUND — see `_shadow_entry`. The docname is
+	composed from the recipient's own Employee ID, so scope alone would let a
+	worker who knows a colleague's number read their copies by writing the key
+	out rather than by being shown it.
+
+	THE TWO HALVES OF THE ANSWER ARE REPORTED SEPARATELY AND NEVER MERGED. The
+	snapshot is what this person was shown; `source_still_exists` and the tool's
+	own `integrity_warning` are what is true now. A reader who cannot see the two
+	disagree has the feed a notification would have given them, which is the
+	thing this doctype exists not to be.
+	"""
+	allowed = guard.require_scope(user)
+	return shadow_log_tools.get_shadow_log_entry({"name": _shadow_entry(name, user, allowed)}).data
+
+
+# ── 106. acknowledge_shadow_log ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("acknowledge_shadow_log", mutating=True, limit=guard.WRITE_LIMIT)
+def acknowledge_shadow_log(user: str, name=None, note=None, acknowledged_at=None) -> dict:
+	"""Record that this recipient has seen their copy. One-way, and safe to retry.
+
+	ONLY THE PERSON IT WAS ADDRESSED TO. `_shadow_entry` is the whole of the
+	gate and it is a stronger claim than the read pair need: "I saw this" is a
+	statement somebody makes about themselves, and an account that could make it
+	on another person's behalf could empty a supervisor's unread feed from
+	across the farm while leaving the record asserting they had read every row.
+	There is no operator switch behind that on this transport — the MCP surface
+	has one and a phone does not go through it — so the check is here.
+
+	RETRY-SAFE BY THE TOOL'S OWN DESIGN, not by anything added here. A second
+	call on an already-acknowledged row changes nothing, returns the existing
+	acknowledgement and says `x_idempotent: true`. That matters on a handset more
+	than anywhere: a phone that lost its response in a dead spot must not have to
+	choose between retrying and being correct.
+
+	`acknowledged_at` IS FOR THE QUEUED HANDSET CATCHING UP, so a batch posted
+	when signal came back is stamped when it was read rather than when it
+	uploaded. `note` is optional on purpose — an acknowledgement is not a review,
+	and requiring a sentence makes it something nobody does.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner = {"name": _shadow_entry(name, user, allowed)}
+	for key, value in (("note", note), ("acknowledged_at", acknowledged_at)):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return shadow_log_tools.acknowledge_shadow_log(inner).data
