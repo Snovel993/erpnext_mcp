@@ -41,6 +41,7 @@ from .errors import ToolError
 from .render import qr
 from .result import ToolResult
 from .tools import (
+	abc,
 	accidents,
 	accounts,
 	advisory,
@@ -382,6 +383,23 @@ _BIO_REQUIRES = (
 _STANDARD_REQUIRES = (
 	"the Standard Cost doctype, which ships with erpnext_mcp — run `bench migrate` after "
 	"installing v0.80.0"
+)
+#: v0.84.0, split three ways for the reason the phase-3 registers are. The
+#: activity register is usable on its own — an operation can write down what it
+#: does before it can cost any of it — the pools need the register, and only the
+#: engine needs all three. A site that migrated one and not the next should lose
+#: the tools for what is missing rather than the whole domain.
+_ACTIVITY_REQUIRES = (
+	"the Cost Activity doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.84.0"
+)
+_POOL_REQUIRES = (
+	"the Activity Cost Pool doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.84.0"
+)
+_ASSIGNMENT_REQUIRES = (
+	"the Cost Activity, Activity Cost Pool and ABC Cost Assignment doctypes, which ship with "
+	"erpnext_mcp — run `bench migrate` after installing v0.84.0"
 )
 
 
@@ -22036,7 +22054,316 @@ TOOLS = {
 		},
 		title="Generate a quarterly report skeleton",
 		available=_always,
+	),	# ── v0.84.0 · the activity-based costing engine ──────────────────────────
+	"create_cost_activity": _tool(
+		abc.create_cost_activity,
+		"MUTATING (default OFF). Define one thing the operation does that costs "
+		"money — spraying, pruning, irrigating, picking, packing.\n\n"
+		"WHY AN ACTIVITY AND NOT AN ACCOUNT. Spend arrives labelled by supplier and "
+		"by account, never by block. Dividing the overhead account by total acreage "
+		"is arithmetically fine and managerially useless: it charges the mature Gala "
+		"and the newly grafted replant the same spray cost when one was sprayed nine "
+		"times and the other four. ABC gathers cost per ACTIVITY, then pushes each "
+		"pool out by how much of that activity each block actually consumed.\n\n"
+		"`cost_driver` IS THE MOST CONSEQUENTIAL ARGUMENT HERE — it decides how every "
+		"dollar in this activity's pool reaches a block. Only `Acres` and `Direct "
+		"Assignment` are derivable from what this site already holds; the rest are "
+		"measurements somebody took, and compute_abc_allocation reports an activity "
+		"whose driver quantities never arrived as UNALLOCATED rather than spreading "
+		"it evenly.\n\n"
+		"`phase` is not a label. It decides where on the Growing → Harvest → "
+		"Post-Harvest → Packing → Sales waterfall this activity's money enters, and "
+		"an activity in the wrong phase reports real cost arriving at the wrong "
+		"moment — which is worse than a wrong total, because the point of the "
+		"waterfall is deciding where cost enters.",
+		{
+			"activity_name": _field(_STRING, "What this work is called on the ground — 'Dormant spray'."),
+			"name": _field(_STRING, "Accepted as an alias for activity_name."),
+			"company": _COMPANY,
+			"activity_type": _field(
+				_STRING,
+				"Cultural (default), Pest Management, Irrigation, Fertility, Harvest, Transport, "
+				"Packing, Storage, Sales, Administration or Other. Grouping only — it changes no "
+				"arithmetic.",
+			),
+			"phase": _field(
+				_STRING,
+				"Growing (default), Harvest, Post-Harvest, Packing or Sales. Where on the cost "
+				"waterfall this activity's money enters.",
+			),
+			"cost_driver": _field(
+				_STRING,
+				"Acres (default), Hours, Machine Hours, Applications, Units Harvested, Bins, Boxes, "
+				"Deliveries, Employees or Direct Assignment. Acres and Direct Assignment are the "
+				"only two this app can derive for itself.",
+			),
+			"driver_uom": _field(_STRING, "What the driver counts, in your words. Label only."),
+			"cost_center": _field(
+				_STRING,
+				"Where this activity's spending is booked. What makes a pool COMPUTABLE rather than "
+				"typed — an activity naming neither this nor an account can only have a Manual pool.",
+			),
+			"accounts": _field(
+				_STRING_ARRAY,
+				"Expense accounts carrying this activity's cost. Narrows the cost center where one "
+				"cost center carries several activities.",
+			),
+			"notes": _field(_STRING, "Anything about the activity."),
+		},
+		mutating=True,
+		title="Create cost activity",
+		available=_needs_doctype("Cost Activity"),
+		requires=_ACTIVITY_REQUIRES,
 	),
+	"get_cost_activity": _tool(
+		abc.get_cost_activity,
+		"One activity with its ledger scope, its accounts and every pool ever built "
+		"for it. Says plainly whether its driver is something this app can derive or "
+		"a measurement somebody has to supply. Read-only.",
+		{
+			"activity": _field(_STRING, "The activity's docname or its activity_name."),
+			"company": _COMPANY,
+		},
+		required=("activity",),
+		title="Get cost activity",
+		available=_needs_doctype("Cost Activity"),
+		requires=_ACTIVITY_REQUIRES,
+	),
+	"list_cost_activities": _tool(
+		abc.list_cost_activities,
+		"The activity register with what each one's cost is divided by, counted by "
+		"phase. Read-only.\n\n"
+		"THE TWO LISTS AT THE BOTTOM ARE THE USEFUL PART. "
+		"`drivers_needing_measurement` names the activities whose driver this app "
+		"cannot derive — allocate without supplying their quantities and their whole "
+		"pools come back unallocated. The cost-center note names the activities that "
+		"can only ever have a Manual pool.",
+		{
+			"company": _COMPANY,
+			"activity_type": _field(_STRING, "One kind of work."),
+			"phase": _field(_STRING, "Growing, Harvest, Post-Harvest, Packing or Sales."),
+			"cost_driver": _field(_STRING, "One driver."),
+			"cost_center": _field(_STRING, "Activities booked to one cost center."),
+			"include_disabled": _field(_BOOLEAN, "Include retired activities. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List cost activities",
+		available=_needs_doctype("Cost Activity"),
+		requires=_ACTIVITY_REQUIRES,
+	),
+	"update_cost_activity": _tool(
+		abc.update_cost_activity,
+		"MUTATING (default OFF). Change an activity's type, phase, driver, ledger "
+		"scope, accounts or retired flag.\n\n"
+		"IT DOES NOT RESTATE A STORED RUN. An ABC Cost Assignment line carries the "
+		"phase and driver it was computed under, so last year's waterfall goes on "
+		"saying what it said and the new values apply from the next allocation. "
+		"Passing `accounts` REPLACES the list outright.",
+		{
+			"activity": _field(_STRING, "The activity's docname or its activity_name."),
+			"company": _COMPANY,
+			"activity_name": _field(_STRING, "A new name."),
+			"activity_type": _field(_STRING, "A new kind."),
+			"phase": _field(_STRING, "A new phase."),
+			"cost_driver": _field(_STRING, "A new driver."),
+			"driver_uom": _field(_STRING, "A new driver label."),
+			"cost_center": _field(_STRING, "A new cost center."),
+			"accounts": _field(_STRING_ARRAY, "The complete new account list. Replaces the existing one."),
+			"disabled": _field(_BOOLEAN, "Retire or un-retire it. Retired rather than deleted, because prior runs point at it."),
+			"notes": _field(_STRING, "New notes."),
+		},
+		required=("activity",),
+		mutating=True,
+		title="Update cost activity",
+		available=_needs_doctype("Cost Activity"),
+		requires=_ACTIVITY_REQUIRES,
+	),
+	"create_activity_cost_pool": _tool(
+		abc.create_activity_cost_pool,
+		"MUTATING (default OFF). Gather one activity's cost for one fiscal year into "
+		"a pool — the noun ABC allocates.\n\n"
+		"TWO WAYS TO GET AN AMOUNT, AND THE DIFFERENCE IS A COLUMN. Pass nothing and "
+		"the pool is totalled off GL Entry over the activity's cost center and "
+		"accounts and ITEMISED BY ACCOUNT, so the figure walks back to the books. "
+		"Pass `pool_amount` and it is recorded as Manual — a legitimate pool and an "
+		"entirely different kind of evidence, which is why it is labelled rather "
+		"than footnoted.\n\n"
+		"THE SCOPE IS AN AND AND THE TRAIL IS A BREAKDOWN OF IT. Cost center and "
+		"accounts narrow the same set of ledger rows and the sources then split that "
+		"set by account, so the trail adds up to the figure exactly. Totalling each "
+		"filter independently would double-count every entry matching both and "
+		"produce a plausible pool whose evidence quietly disagreed with it.\n\n"
+		"A NEGATIVE POOL IS REFUSED, because allocating it credits every block in "
+		"proportion to how much of the activity it consumed. A ZERO pool is stored: "
+		"'this activity cost nothing' and 'nobody has computed this activity' are "
+		"different statements.",
+		{
+			"activity": _field(_STRING, "The activity's docname or its activity_name."),
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The year this pool covers, e.g. '2026'."),
+			"pool_amount": _field(
+				_NUMBER,
+				"Supply the figure and the pool is Manual. Omit it and the ledger is read.",
+			),
+			"period_start": _field(
+				_STRING,
+				"Override the fiscal year's own start. Goes with period_end; the window is COPIED "
+				"onto the pool so a later edit to the Fiscal Year cannot silently re-scope it.",
+			),
+			"period_end": _field(_STRING, "Override the fiscal year's own end."),
+			"cost_object": _field(
+				_STRING,
+				"The one Field this pool goes to in full. Required for a Direct Assignment activity "
+				"and meaningless otherwise.",
+			),
+			"status": _field(_STRING, "Draft, Ready (default) or Allocated. Draft pools are excluded from allocation."),
+			"currency": _field(_STRING, "The pool's currency."),
+			"basis": _field(_STRING, "How a Manual figure was arrived at."),
+			"notes": _field(_STRING, "Anything about the pool."),
+		},
+		required=("activity", "fiscal_year"),
+		mutating=True,
+		title="Create activity cost pool",
+		available=_needs_doctype("Activity Cost Pool"),
+		requires=_POOL_REQUIRES,
+	),
+	"list_activity_cost_pools": _tool(
+		abc.list_activity_cost_pools,
+		"Every pool for a company and year with the LEDGER/MANUAL SPLIT SEPARATED "
+		"OUT, because a typed figure and a read one are different kinds of evidence "
+		"and nobody should have to take a report's word for which is which. Draft "
+		"pools are named: a draft pool is excluded from allocation and is not a zero "
+		"pool. Read-only.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "One year's pools."),
+			"activity": _field(_STRING, "One activity's pools, by docname."),
+			"status": _field(_STRING, "Draft, Ready or Allocated."),
+			"amount_source": _field(_STRING, "Ledger or Manual."),
+			"limit": _LIMIT,
+		},
+		title="List activity cost pools",
+		available=_needs_doctype("Activity Cost Pool"),
+		requires=_POOL_REQUIRES,
+	),
+	"compute_abc_allocation": _tool(
+		abc.compute_abc_allocation,
+		"MUTATING (default OFF). Run the allocation engine: push every Ready pool "
+		"out to the blocks that consumed it, and store the whole run.\n\n"
+		"WHAT IT WRITES is one ABC Cost Assignment holding EVERY INTERMEDIATE — "
+		"driver quantity, share, pool, amount assigned and acres, on every line. A "
+		"per-acre cost is a quotient of two numbers that both moved during the year, "
+		"and an operation that keeps only the quotient can watch it rise for four "
+		"seasons without learning whether the block got dearer or simply smaller. "
+		"Reruns APPEND. `dry_run` computes everything and writes nothing.\n\n"
+		"IT WILL NOT ESTIMATE A DRIVER QUANTITY. `Acres` is derived from the Field "
+		"register weighted by days productive, and `Direct Assignment` comes off the "
+		"pool. Every other driver is a measurement: supply it in "
+		"`driver_quantities`, or the activity is reported UNALLOCATED with its full "
+		"amount and the sentence naming what would fix it. Its money lands in "
+		"`unassigned_amount`, never in the assigned total and never spread evenly — "
+		"an even spread is indistinguishable in the output from a measured one, "
+		"which is the answer ABC was adopted to stop giving.\n\n"
+		"`field` NARROWS THE ROWS AND NEVER THE ARITHMETIC. Shares are always "
+		"computed against every block that consumed the activity, because a share "
+		"computed against one block is 100% by construction — and the stored "
+		"document holds the whole run for the same reason.\n\n"
+		"THE ROUNDING RESIDUAL IS PLACED RATHER THAN DROPPED, on the largest "
+		"consumer where it is proportionally smallest, so the lines add up to the "
+		"pools exactly.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The year to allocate, e.g. '2026'."),
+			"field": _field(_STRING, "Narrow the rows returned to one block. Changes no arithmetic."),
+			"driver_quantities": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'The measurements: [{"activity": "Dormant spray", "cost_object": "FIELD-0001", '
+				'"quantity": 42}]. `activity` takes a docname or an activity_name; `cost_object` is '
+				"a Field docname. Supplying these for an Acres-driven activity overrides the "
+				"derived acreage, and the run says so on every line it touched.",
+			),
+			"period_start": _field(_STRING, "Override the fiscal year's start. Goes with period_end."),
+			"period_end": _field(_STRING, "Override the fiscal year's end."),
+			"dry_run": _field(_BOOLEAN, "Compute the whole run and write nothing. Default false."),
+		},
+		required=("fiscal_year",),
+		mutating=True,
+		title="Compute ABC allocation",
+		available=_all_doctypes("Cost Activity", "Activity Cost Pool", "ABC Cost Assignment"),
+		requires=_ASSIGNMENT_REQUIRES,
+	),
+	"get_abc_assignment": _tool(
+		abc.get_abc_assignment,
+		"One stored allocation run in full — every line with the driver quantity, "
+		"share and acres it was computed from, plus the activities that reached no "
+		"block. Omit `assignment` and the newest run for the year is read. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Which year's newest run to read."),
+			"assignment": _field(_STRING, "A specific run's docname, to read a superseded one."),
+		},
+		title="Get ABC assignment",
+		available=_all_doctypes("Cost Activity", "Activity Cost Pool", "ABC Cost Assignment"),
+		requires=_ASSIGNMENT_REQUIRES,
+	),
+	"get_abc_report": _tool(
+		abc.get_abc_report,
+		"Per-acre cost grouped by field, activity or phase — the primary management "
+		"report. Read-only.\n\n"
+		"THE DENOMINATOR CHANGES WITH THE GROUPING, and it is the one thing here "
+		"worth reading carefully. Grouped BY FIELD, each block is divided by ITS OWN "
+		"productive acres: 'what did the Home Block cost me per acre'. Grouped by "
+		"ACTIVITY or PHASE, the group total is divided by the WHOLE operation's "
+		"productive acres: 'what did spraying cost me per acre across the farm'. "
+		"`acres_basis` says which on every row, because a reader who assumes the "
+		"wrong one is wrong by the ratio of one block to the farm.\n\n"
+		"IT NEVER COMPUTES. The report reads a stored run, so it cannot disagree "
+		"with the allocation it claims to be reporting — and it says how much pool "
+		"money reached no block, because every per-acre figure it shows is "
+		"understated by that block's share of it.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Which year's newest run to report on."),
+			"group_by": _field(_STRING, "field (default), activity or phase."),
+			"field": _field(_STRING, "Narrow to one block before grouping."),
+			"assignment": _field(_STRING, "A specific run's docname."),
+		},
+		title="Get ABC report",
+		available=_all_doctypes("Cost Activity", "Activity Cost Pool", "ABC Cost Assignment"),
+		requires=_ASSIGNMENT_REQUIRES,
+	),
+	"get_phase_waterfall": _tool(
+		abc.get_phase_waterfall,
+		"Cost accumulating through Growing → Harvest → Post-Harvest → Packing → "
+		"Sales. Read-only.\n\n"
+		"THE SHAPE IS THE ANSWER, NOT THE TOTAL. Cost does not land on a bin all at "
+		"once, and 'where did this get expensive' is a question about the "
+		"accumulation rather than the sum. Every phase reports what it ADDED and "
+		"what the fruit is CARRYING as it leaves — per acre always, per unit when "
+		"you supply the units. The total is available from any ledger; the "
+		"accumulation is not.\n\n"
+		"IT WILL NOT INVENT A UNIT COUNT. With no `units` the per-unit column is "
+		"null and the report says why, which is the same rule "
+		"get_absorption_cost_report follows.\n\n"
+		"A PHASE NOTHING IS MAPPED TO IS REPORTED AT ZERO WITH A NOTE rather than "
+		"omitted, because an unmapped phase and a free one look identical in a total "
+		"and are not the same finding. Pool money that reached no block is broken "
+		"out BY PHASE, so a reader can see which stage of the pipeline is "
+		"under-measured rather than only that something is.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "Which year's newest run to read."),
+			"field": _field(_STRING, "One block's own waterfall."),
+			"units": _field(_NUMBER, "Bins packed, boxes shipped — the per-unit denominator."),
+			"uom": _field(_STRING, "What that quantity counts. Label only. Default 'bin'."),
+			"assignment": _field(_STRING, "A specific run's docname."),
+		},
+		title="Get phase waterfall",
+		available=_all_doctypes("Cost Activity", "Activity Cost Pool", "ABC Cost Assignment"),
+		requires=_ASSIGNMENT_REQUIRES,
+	),
+
 }
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype

@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "ONE CONTRIBUTOR TO A POOL, WITH ITS AMOUNT AND ITS ENTRY COUNT. What turns a pool from an assertion into a figure somebody can walk back to the ledger. `entry_count` matters as much as `amount`: a cost center that contributed $40,000 across two entries and one that contributed $40,000 across four hundred are different facts about the same number, and the first is usually a journal somebody should look at.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "source_type",
+  "reference",
+  "amount",
+  "entry_count",
+  "basis"
+ ],
+ "fields": [
+  {
+   "default": "Cost Center",
+   "fieldname": "source_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Source Type",
+   "options": "Cost Center\nAccount\nManual",
+   "reqd": 1
+  },
+  {
+   "description": "The Cost Center or Account docname. Data rather than a Link, deliberately: a source that was renamed or removed after the pool was computed must still read back as what the figure was actually built from, and a broken Link would render as empty.",
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reference"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  },
+  {
+   "description": "How many GL entries stand behind the amount. Zero on a Manual row, which is what a manual row honestly is.",
+   "fieldname": "entry_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Entry Count"
+  },
+  {
+   "description": "How this contribution was measured, in words — the filter that was applied and the window it covered.",
+   "fieldname": "basis",
+   "fieldtype": "Small Text",
+   "label": "Basis"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Activity Cost Pool Source",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

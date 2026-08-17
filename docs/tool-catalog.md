@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 642 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 652 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 311 read tools are **on** by default and can be switched off individually. A
+All 317 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -14089,3 +14089,140 @@ posture `list_wizard_definitions` has taken since v0.79.0. The ledger-facing
 records are not translated, and that is a decision: they are read by accountants
 and auditors in the language of the filing, and translating half of a financial
 statement would be worse than translating none of it.
+
+## Activity-based costing (v0.84.0)
+
+Ten tools, six doctypes, no new control point. It answers the question a chart of
+accounts cannot: **what did the Home Block cost per acre.**
+
+Spend arrives labelled by supplier and by account — never by block. Dividing the
+overhead account by total acreage is arithmetically fine and managerially
+useless: it charges the mature Gala and the newly grafted replant the same spray
+cost, when one was sprayed nine times and the other four. ABC's answer is a
+two-step. Gather cost into a **pool** per **activity**; push each pool out to
+blocks in proportion to how much of that activity each block actually consumed —
+the **cost driver**.
+
+```
+GL Entry ──▶ Activity Cost Pool ──▶ ABC Cost Assignment ──▶ per acre, per phase
+ (by account,     (by activity,          (by block,
+  by cost centre)  one per year)          every intermediate stored)
+```
+
+### The register and the pools
+
+| Tool | What it does |
+| --- | --- |
+| `create_cost_activity` | Define one thing the operation does that costs money, its driver and its phase. **Mutating** |
+| `get_cost_activity` | One activity with its ledger scope, its accounts and every pool ever built for it |
+| `list_cost_activities` | The register, counted by phase, naming the drivers nobody can derive |
+| `update_cost_activity` | Change its type, phase, driver, scope or accounts. **Mutating** |
+| `create_activity_cost_pool` | Gather one activity's cost for one year, off the ledger or by hand. **Mutating** |
+| `list_activity_cost_pools` | Every pool for a company and year, with the ledger/manual split separated out |
+
+### The engine and the reads
+
+| Tool | What it does |
+| --- | --- |
+| `compute_abc_allocation` | Push every Ready pool out to the blocks that consumed it, and store the run whole. **Mutating**; `dry_run` writes nothing |
+| `get_abc_assignment` | One stored run in full — every line with the driver quantity, share and acres behind it |
+| `get_abc_report` | Per-acre cost grouped by field, activity or phase. **The primary management report** |
+| `get_phase_waterfall` | Cost accumulating through Growing → Harvest → Post-Harvest → Packing → Sales |
+
+### The engine will not estimate a driver
+
+Two drivers are **derivable** from what the site already holds:
+
+* **`Acres`** — each Field's acreage weighted by the days it was productive in
+  the period, computed by the same code the Sustainable CF/Acre KPI uses so the
+  two reports cannot grow separate opinions about what an acre is.
+* **`Direct Assignment`** — the pool names the one block the cost was incurred
+  for, which is the honest way to model a replant rather than inventing a driver
+  to spread it.
+
+Every other driver — hours, applications, bins, deliveries — is a **measurement
+somebody took**. Supply it in `driver_quantities`, or the activity comes back
+`UNALLOCATED` with its full amount and the sentence naming what would fix it. Its
+money lands in `unassigned_amount`: not in the assigned total, and **not spread
+evenly across blocks**. An even spread is indistinguishable in the output from a
+measured one, and it is precisely the answer activity-based costing was adopted
+to stop giving.
+
+```json
+{"activity": "Dormant spray", "cost_object": "FIELD-0001", "quantity": 42}
+```
+
+Supplying quantities for an `Acres` activity overrides the derived acreage, and
+every line it touched says so in `driver_source`.
+
+### The intermediates are stored, and that is the point
+
+A per-acre cost is a quotient of two numbers that **both moved during the year**.
+An operation keeping only the quotient can watch it rise for four seasons and
+never learn whether the block got dearer or simply smaller. So every
+`ABC Cost Assignment Line` carries the driver quantity, the share, the pool, the
+amount assigned *and* the acres. Reruns **append** — the history of what this
+operation believed its costs were is itself a record — and
+`total_assigned + unassigned_amount = total_pool_amount` is stored on the
+document so a reader can check the identity without rerunning the engine.
+
+The **rounding residual is placed, not dropped**: on the largest consumer, where
+it is proportionally smallest, so the lines add up to the pools exactly.
+
+### `field` narrows the rows and never the arithmetic
+
+Shares are always computed against every block that consumed the activity,
+because a share computed against one block is 100% by construction. The stored
+document holds the whole run for the same reason; the argument filters what comes
+back.
+
+### The denominator changes with the grouping
+
+| `group_by` | Divided by |
+| --- | --- |
+| `field` | That block's **own** time-weighted productive acres |
+| `activity` | The **whole operation's** productive acres |
+| `phase` | The **whole operation's** productive acres |
+
+"What did the Home Block cost me per acre" and "what did spraying cost me per
+acre across the farm" are different numbers, and a reader who assumes the wrong
+one is wrong by the ratio of one block to the farm. So `acres_basis` says which
+was used on every single row.
+
+A group with no productive acres reports `cost_per_acre` as **null, never zero** —
+zero is a per-acre figure for a division nobody performed.
+
+### The waterfall: read the shape, not the total
+
+Cost does not land on a bin all at once. It accumulates as fruit moves through
+five phases, and "where did this get expensive" is a question about the
+accumulation rather than the sum — the total is available from any ledger, the
+accumulation is not. Each stage reports what it **added** and what the fruit is
+**carrying** as it leaves, per acre always and per unit when `units` is supplied.
+
+**It will not invent a unit count.** With no `units`, the per-unit column is null
+and the report says why — the same rule `get_absorption_cost_report` follows.
+
+**A phase nothing is mapped to is reported at zero with a note**, not omitted. An
+unmapped phase and a free one look identical in a total and are not the same
+finding. Unallocated pool money is broken out **by phase**, so a reader can see
+which stage of the pipeline is under-measured rather than only that something is.
+
+### Two kinds of evidence, kept apart
+
+A ledger pool is totalled off `GL Entry` over the activity's cost centre and
+accounts and **itemised by account**, so the figure walks back to the books. The
+scope is an **AND** and the trail is a **breakdown of it** — totalling each
+filter independently would double-count every entry matching both and produce a
+plausible pool whose evidence quietly disagreed with it, which the controller
+refuses.
+
+A manual pool is a legitimate figure and an entirely different kind of evidence.
+That is why `amount_source` is a column rather than a footnote, and why
+`list_activity_cost_pools` separates the two totals: nobody should have to take a
+report's word for which is which.
+
+A **negative** pool is refused — allocating it credits every block in proportion
+to how much of the activity it consumed. A **zero** pool is stored: "this
+activity cost nothing" and "nobody has computed this activity" are different
+statements, and only one is worth acting on.

@@ -813,7 +813,18 @@
   "allow_get_valve_runtime",
   "allow_create_irrigation_valve",
   "allow_toggle_irrigation_valve",
-  "allow_scan_valve_qr"
+  "allow_scan_valve_qr",
+  "abc_section",
+  "allow_create_cost_activity",
+  "allow_get_cost_activity",
+  "allow_list_cost_activities",
+  "allow_update_cost_activity",
+  "allow_create_activity_cost_pool",
+  "allow_list_activity_cost_pools",
+  "allow_compute_abc_allocation",
+  "allow_get_abc_assignment",
+  "allow_get_abc_report",
+  "allow_get_phase_waterfall"
  ],
  "fields": [
   {
@@ -6185,6 +6196,82 @@
    "fieldname": "allow_scan_valve_qr",
    "fieldtype": "Check",
    "label": "Scan Valve QR"
+  },
+  {
+   "description": "Activity-based costing. WHAT IT ANSWERS is the question a chart of accounts cannot: what did the Home Block cost per acre. Spend arrives labelled by supplier and by account, never by block, so ABC gathers cost into a POOL per ACTIVITY and then pushes each pool out by how much of that activity each block actually consumed. Every run is stored whole — driver quantity, share, pool, amount and acres on every line — because a per-acre cost is a quotient of two numbers that both moved during the year. THE ENGINE NEVER ESTIMATES A DRIVER: acres are derived from the Field register and a direct assignment comes off the pool, and every other driver is a measurement somebody supplies or the activity is reported unallocated with its full amount. The six reads default ON; the four writes are off until an operator turns them on.",
+   "fieldname": "abc_section",
+   "fieldtype": "Section Break",
+   "label": "Activity-Based Costing (v0.84.0)"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Define one thing the operation does that costs money — spraying, pruning, irrigating, picking. `cost_driver` decides how every dollar in its pool reaches a block, and `phase` decides where on the cost waterfall that money enters.",
+   "fieldname": "allow_create_cost_activity",
+   "fieldtype": "Check",
+   "label": "Create Cost Activity"
+  },
+  {
+   "default": "1",
+   "description": "One activity with its ledger scope, its accounts and every pool ever built for it. Says plainly whether its driver is derivable or a measurement somebody has to supply. Read-only.",
+   "fieldname": "allow_get_cost_activity",
+   "fieldtype": "Check",
+   "label": "Get Cost Activity"
+  },
+  {
+   "default": "1",
+   "description": "The activity register with what each one's cost is divided by, counted by phase — and the activities whose drivers this app cannot derive, which are the ones that come back unallocated if nobody measures them. Read-only.",
+   "fieldname": "allow_list_cost_activities",
+   "fieldtype": "Check",
+   "label": "List Cost Activities"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Change an activity's type, phase, driver, ledger scope or accounts. Stored runs are NOT restated — a line carries the phase and driver it was computed under.",
+   "fieldname": "allow_update_cost_activity",
+   "fieldtype": "Check",
+   "label": "Update Cost Activity"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Gather one activity's cost for one fiscal year into a pool, totalled off the ledger and itemised by account, or recorded as Manual where the figure is supplied. The difference is a column rather than a footnote.",
+   "fieldname": "allow_create_activity_cost_pool",
+   "fieldtype": "Check",
+   "label": "Create Activity Cost Pool"
+  },
+  {
+   "default": "1",
+   "description": "Every pool for a company and year with the ledger/manual split separated out, because a typed figure and a read one are different kinds of evidence. Read-only.",
+   "fieldname": "allow_list_activity_cost_pools",
+   "fieldtype": "Check",
+   "label": "List Activity Cost Pools"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Run the allocation engine and store the whole run, intermediates and all. It will not estimate a driver quantity: an activity whose measurements never arrived is reported unallocated with its full amount rather than spread evenly across blocks.",
+   "fieldname": "allow_compute_abc_allocation",
+   "fieldtype": "Check",
+   "label": "Compute ABC Allocation"
+  },
+  {
+   "default": "1",
+   "description": "One stored allocation run in full — every line with the driver quantity, share and acres it was computed from. Read-only.",
+   "fieldname": "allow_get_abc_assignment",
+   "fieldtype": "Check",
+   "label": "Get ABC Assignment"
+  },
+  {
+   "default": "1",
+   "description": "Per-acre cost grouped by field, activity or phase — the primary management report. The denominator changes with the grouping and every row says which it used. Read-only.",
+   "fieldname": "allow_get_abc_report",
+   "fieldtype": "Check",
+   "label": "Get ABC Report"
+  },
+  {
+   "default": "1",
+   "description": "Cost accumulating through Growing → Harvest → Post-Harvest → Packing → Sales. The shape is the answer, not the total. Read-only.",
+   "fieldname": "allow_get_phase_waterfall",
+   "fieldtype": "Check",
+   "label": "Get Phase Waterfall"
   }
  ],
  "index_web_pages_for_search": 0,

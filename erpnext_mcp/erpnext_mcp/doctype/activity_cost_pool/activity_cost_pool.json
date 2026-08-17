@@ -1,0 +1,174 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "THE MONEY ONE ACTIVITY CONSUMED IN ONE FISCAL YEAR, and where it was read from. The pool is the noun ABC allocates: costs are gathered into it by activity first and only then pushed out to blocks, which is the whole difference between activity-based costing and dividing the overhead account by the acreage. `sources` is not decoration — it is the itemised trail from the pool figure back to the cost centers and accounts that produced it, so a pool is never a number somebody asserts. A pool keyed in by hand is allowed and is labelled Manual, because the alternative is an operation that cannot cost an activity until its chart of accounts is perfect.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "activity",
+  "company",
+  "fiscal_year",
+  "period_start",
+  "period_end",
+  "identity_col",
+  "pool_amount",
+  "currency",
+  "amount_source",
+  "status",
+  "cost_object",
+  "sources_section",
+  "sources",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "activity",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Activity",
+   "options": "Cost Activity",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The year this pool belongs to. Part of the identity: one activity has one pool per year, and two pools for one activity and year would make 'what did spraying cost' depend on which row was read first.",
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The window the ledger was read over. Defaulted from the Fiscal Year and stored on the row rather than re-derived, because a fiscal year's dates can be edited afterwards and a pool that silently re-scoped itself would change a prior year's allocation with nothing on the record saying so.",
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "label": "Period Start"
+  },
+  {
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "label": "Period End"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What this activity cost over the period, before any of it is pushed out to a block.",
+   "fieldname": "pool_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Pool Amount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "default": "Ledger",
+   "description": "LEDGER means the figure was totalled off GL Entry over the activity's cost center and accounts, and `sources` itemises it. MANUAL means somebody typed it. The distinction is on the record because a manual pool is a perfectly legitimate figure and an entirely different kind of evidence, and a report that presented the two identically would be claiming a traceability half its rows do not have.",
+   "fieldname": "amount_source",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Amount Source",
+   "options": "Ledger\nManual",
+   "reqd": 1
+  },
+  {
+   "default": "Ready",
+   "description": "Draft is excluded from allocation; Ready is included; Allocated is set by `compute_abc_allocation` once a run has consumed it. Allocated pools are still re-read by later runs — the flag records that a run has happened, it does not lock the pool, because a corrected pool that could not be re-allocated would freeze an error in place.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nReady\nAllocated"
+  },
+  {
+   "description": "The one block this pool goes to in full. Meaningful ONLY where the activity's driver is Direct Assignment — a cost that was incurred for one block and no other, which is the honest way to model replant on a single field rather than inventing a driver to spread it.",
+   "fieldname": "cost_object",
+   "fieldtype": "Link",
+   "label": "Cost Object (Field)",
+   "options": "Field"
+  },
+  {
+   "fieldname": "sources_section",
+   "fieldtype": "Section Break",
+   "label": "Where the figure came from"
+  },
+  {
+   "description": "One row per cost center or account that contributed, with what it contributed and how many ledger entries stand behind it. The trail from the pool back to the books.",
+   "fieldname": "sources",
+   "fieldtype": "Table",
+   "label": "Sources",
+   "options": "Activity Cost Pool Source"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Activity Cost Pool",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "activity,fiscal_year,company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

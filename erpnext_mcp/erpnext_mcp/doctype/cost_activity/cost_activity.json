@@ -1,0 +1,167 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "ONE THING THE OPERATION DOES THAT COSTS MONEY — spraying, pruning, irrigating, harvesting, packing. The unit of activity-based costing, and the reason ABC exists: overhead does not belong to a block, it belongs to an ACTIVITY, and the activity belongs to blocks in proportion to how much of it each one consumed. `cost_driver` is what that proportion is measured in and is the most consequential field here — it decides how every dollar in this activity's pool reaches a block. `phase` places the activity on the Growing → Harvest → Post-Harvest → Packing → Sales waterfall, which is how cost per unit is watched accumulating rather than only totalled at the end.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "activity_name",
+  "company",
+  "activity_type",
+  "phase",
+  "identity_col",
+  "cost_driver",
+  "driver_uom",
+  "disabled",
+  "ledger_section",
+  "cost_center",
+  "ledger_col",
+  "accounts",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this is called on the ground — 'Dormant spray', 'Hand thinning', 'Pick and haul'. Free text: half of what a farm costs is an activity that is not an Item on anybody's site.",
+   "fieldname": "activity_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Activity",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Cultural",
+   "description": "What KIND of work this is. Grouping only — it changes no arithmetic. `phase` is the field that moves money along the waterfall.",
+   "fieldname": "activity_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Activity Type",
+   "options": "Cultural\nPest Management\nIrrigation\nFertility\nHarvest\nTransport\nPacking\nStorage\nSales\nAdministration\nOther",
+   "reqd": 1
+  },
+  {
+   "default": "Growing",
+   "description": "Where this activity sits on the production pipeline. THE ORDER IS THE POINT: a bin leaves the block carrying its growing cost, picks up harvest cost, then post-harvest, then packing, then sales — and `get_phase_waterfall` reads cumulative cost per unit at each of those five points. An activity in the wrong phase does not lose money from the total; it reports the cost as arriving at the wrong moment, which is worse, because the whole use of the waterfall is deciding where cost enters.",
+   "fieldname": "phase",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Phase",
+   "options": "Growing\nHarvest\nPost-Harvest\nPacking\nSales",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Acres",
+   "description": "WHAT THIS ACTIVITY'S COST IS DIVIDED BY. The single most consequential field on the doctype: it decides how every dollar in the pool reaches a block. Only two drivers are DERIVABLE from what this site already holds — Acres (from each Field's acreage, weighted by the days it was productive in the year) and Direct Assignment (the pool names its own cost object). Every other driver is a measurement somebody took, and `compute_abc_allocation` requires it to be supplied rather than estimating it: an activity whose driver quantities are unknown is reported UNALLOCATED with its amount, never spread evenly across blocks, because an even spread is indistinguishable in the output from a measured one.",
+   "fieldname": "cost_driver",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Cost Driver",
+   "options": "Acres\nHours\nMachine Hours\nApplications\nUnits Harvested\nBins\nBoxes\nDeliveries\nEmployees\nDirect Assignment",
+   "reqd": 1
+  },
+  {
+   "description": "What the driver counts, in this operation's words — 'tractor hours', '40lb boxes'. Label only; it enters no arithmetic.",
+   "fieldname": "driver_uom",
+   "fieldtype": "Data",
+   "label": "Driver UOM"
+  },
+  {
+   "default": "0",
+   "description": "A retired activity. Kept rather than deleted, because prior years' allocations point at it and a deleted activity would make a stored assignment unreadable.",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "ledger_section",
+   "fieldtype": "Section Break",
+   "label": "Where its cost lands"
+  },
+  {
+   "description": "The Cost Center this activity's spending is booked to. WHAT MAKES A POOL COMPUTABLE rather than typed: `create_activity_cost_pool` totals the ledger over this cost center and these accounts, and an activity naming neither can only ever have a pool somebody keyed in by hand.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "ledger_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Expense accounts carrying this activity's cost. Narrows the cost center where one cost center carries several activities; stands alone where no cost center does.",
+   "fieldname": "accounts",
+   "fieldtype": "Table",
+   "label": "Accounts",
+   "options": "Cost Activity Account"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Cost Activity",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "activity_name,company,phase,cost_driver",
+ "sort_field": "activity_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

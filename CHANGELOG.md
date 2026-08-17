@@ -3,6 +3,133 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.84.0 — 2026-08-16 — what the block cost, and what it cost per acre
+
+The activity-based costing engine: ten tools, six doctypes, and one refusal that
+the rest of it exists to protect.
+
+### The question a chart of accounts cannot answer
+
+Every farm can say what it spent. Almost none can say what a block cost, because
+spend arrives labelled by supplier and by account, never by block. The usual
+workaround — divide the overhead account by total acreage — is arithmetically
+fine and managerially useless: it charges the twelve-year-old Gala and the newly
+grafted replant the same spray cost when one was sprayed nine times and the other
+four. The number is not approximately right. It is systematically wrong in the
+direction that flatters whichever block is worked hardest, and nothing in the
+output says so.
+
+So cost is gathered into a **pool** per **activity**, and each pool is pushed out
+to blocks in proportion to how much of that activity each block actually consumed
+— the **cost driver**.
+
+### The engine will not estimate a driver
+
+Two drivers are derivable from what the site already holds. **Acres** comes from
+each Field's acreage weighted by the days it was productive, computed by the same
+code the Sustainable CF/Acre KPI uses so the two reports cannot grow separate
+opinions about what an acre is. **Direct Assignment** comes off the pool, which
+is the honest way to model a replant on one block rather than inventing a driver
+to spread it.
+
+Every other driver — hours, applications, bins, deliveries — is a **measurement
+somebody took**. Supply it in `driver_quantities`, or the activity comes back
+`UNALLOCATED` with its full amount and the sentence naming what would fix it. Its
+money lands in `unassigned_amount`: not in the assigned total, and **not spread
+evenly across the blocks**.
+
+That is the whole release. An even spread is indistinguishable in the output from
+a measured one, so a report that quietly performed it would give exactly the
+answer ABC was adopted to stop giving — with the confidence of a system that had
+done real work. `unassigned_amount` is the most useful figure on a run: it is
+precisely the cost this operation cannot yet attribute, and it names the
+measurement that would close the gap.
+
+### The intermediates are stored, and that is why the doctype exists
+
+A per-acre cost is a quotient of two numbers that **both moved during the year**.
+An operation keeping only the quotient can watch it rise for four seasons and
+never learn whether the block got dearer or simply smaller. So every assignment
+line carries the driver quantity, the share, the pool, the amount assigned *and*
+the acres — numerator, denominator and working. Reruns **append**, so a corrected
+pool is a visible event rather than a silent overwrite, and
+`total_assigned + unassigned_amount = total_pool_amount` is stored on the document
+so a reader can check the identity without rerunning the engine.
+
+The rounding residual is **placed, not dropped** — on the largest consumer, where
+it is proportionally smallest — because a run whose lines do not reach its pools
+is a run whose totals disagree with themselves.
+
+### `field` narrows the rows and never the arithmetic
+
+A driver share computed against one block is 100% by construction. Every share is
+computed against every block that consumed the activity, and the stored document
+holds the whole run for the same reason: a stored partial run would be a
+historical record of an allocation nobody performed.
+
+### Two kinds of evidence, kept apart
+
+A **ledger** pool is totalled off `GL Entry` over the activity's cost centre and
+accounts and itemised **by account**, so the figure walks back to the books. The
+scope is an AND and the trail is a breakdown of it — totalling each filter
+independently would double-count every entry matching both and produce a
+plausible pool whose evidence quietly disagreed with it. The controller refuses a
+ledger pool whose sources do not reach its amount: a trail that disagrees with
+the number above it is worse than no trail, because it reads as evidence.
+
+A **manual** pool is a legitimate figure and an entirely different kind of
+evidence, which is why `amount_source` is a column rather than a footnote. A
+**negative** pool is refused — allocating it credits every block. A **zero** pool
+is stored, because "this activity cost nothing" and "nobody has computed this
+activity" are different statements. A **Draft** pool is skipped and said to be
+skipped.
+
+### The denominator changes with the grouping, and every row says which
+
+Grouped by field, each block is divided by **its own** productive acres. Grouped
+by activity or phase, the group total is divided by the **whole operation's**.
+Those are different numbers, and a reader who assumes the wrong one is wrong by
+the ratio of one block to the farm — so `acres_basis` states which was used on
+every row. A block's acreage is counted **once**, not once per activity, and a
+group with no productive acres reports `cost_per_acre` as **null, never zero**.
+
+The report never computes. It reads a stored run, so it cannot disagree with the
+allocation it claims to be reporting.
+
+### The waterfall is the shape, not the total
+
+Cost accumulates as fruit moves Growing → Harvest → Post-Harvest → Packing →
+Sales, and "where did this get expensive" is a question about the accumulation.
+The total is available from any ledger; the accumulation is not. Each stage
+reports what it added and what the fruit is carrying, per acre always and per
+unit when `units` is supplied — and **it will not invent a unit count**, the same
+rule `get_absorption_cost_report` follows.
+
+A phase nothing is mapped to is reported **at zero with a note**, not omitted: an
+unmapped phase and a free one look identical in a total and are not the same
+finding. Unallocated money is broken out by phase, so a reader sees which stage
+is under-measured rather than only that something is.
+
+### What ships
+
+Six doctypes — `Cost Activity`, `Cost Activity Account`, `Activity Cost Pool`,
+`Activity Cost Pool Source`, `ABC Cost Assignment`, `ABC Cost Assignment Line`.
+
+Ten tools: `get_cost_activity`, `list_cost_activities`,
+`list_activity_cost_pools`, `get_abc_assignment`, `get_abc_report` and
+`get_phase_waterfall` are reads and ship **on**; `create_cost_activity`,
+`update_cost_activity`, `create_activity_cost_pool` and `compute_abc_allocation`
+are mutating and ship **off**.
+
+No new control point, deliberately: unallocated cost is a measurement gap rather
+than a policy breach, and an alert firing every time somebody had not yet counted
+their spray applications would be noise on a farm mid-setup.
+
+Nothing is posted. An ABC allocation is a management view of costs already
+booked; an app that posted entries to move them would keep a second set of books
+with no way to reconcile the two — the state cost accounting exists to avoid.
+Existing doctypes are unchanged and no custom fields are added.
+
 ## 0.83.0 — 2026-08-16 — the button that was always missing
 
 Three Desk surfaces and one delete that stops being refused. **No new MCP tools**

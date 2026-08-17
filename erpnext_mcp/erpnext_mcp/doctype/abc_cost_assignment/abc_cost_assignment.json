@@ -1,0 +1,190 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "ONE ALLOCATION RUN, STORED WHOLE. Every activity pool, every cost object it reached, the driver quantity that sent it there and the per-acre figure that came out — not just the answer. The stored intermediates are the doctype's reason for existing: a per-acre cost is a quotient of two numbers that both moved during the year, and an operation that keeps only the quotient cannot say afterwards whether a block got dearer or simply smaller. Reruns APPEND rather than overwrite, so the history of what this operation believed its costs were is itself on the record.\n\nA RUN IS ALWAYS THE WHOLE COMPANY. `compute_abc_allocation` takes a `field` argument, but it narrows the ROWS RETURNED and never the arithmetic — driver shares are computed against every block that consumed the activity, because a share computed against one block is 100% by construction. The document stores the full run for the same reason.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "fiscal_year",
+  "period_start",
+  "period_end",
+  "computed_on",
+  "computed_by",
+  "identity_col",
+  "total_pool_amount",
+  "total_assigned",
+  "unassigned_amount",
+  "productive_acres",
+  "activity_count",
+  "line_count",
+  "basis_section",
+  "basis",
+  "unallocated_note",
+  "lines_section",
+  "lines"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "period_start",
+   "fieldtype": "Date",
+   "label": "Period Start"
+  },
+  {
+   "fieldname": "period_end",
+   "fieldtype": "Date",
+   "label": "Period End"
+  },
+  {
+   "description": "When the run happened. Two runs over one year are the normal case and the point — the second one is what a revised pool or a corrected driver quantity looks like on the record.",
+   "fieldname": "computed_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Computed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "computed_by",
+   "fieldtype": "Link",
+   "label": "Computed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Every Ready pool in the year, added up, before allocation.",
+   "fieldname": "total_pool_amount",
+   "fieldtype": "Currency",
+   "label": "Total Pool Amount",
+   "read_only": 1
+  },
+  {
+   "description": "What actually reached a cost object. Equal to the pool total only when every activity had a driver quantity behind it.",
+   "fieldname": "total_assigned",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Assigned",
+   "read_only": 1
+  },
+  {
+   "description": "POOL MONEY THAT REACHED NO BLOCK, because its activity's driver had no measured quantity. Carried as its own figure rather than dissolved into the assigned total or spread evenly, which are the two ways this number normally disappears. It is the most useful column in the document: it is exactly the cost this operation cannot yet attribute, and it names the measurement that would fix it.",
+   "fieldname": "unassigned_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Unassigned Amount",
+   "read_only": 1
+  },
+  {
+   "description": "The denominator: acres that were actually earning in the period, weighted by the days each block was productive. Computed by the same code the Sustainable CF/Acre KPI uses, so the two reports cannot grow separate opinions about what an acre is.",
+   "fieldname": "productive_acres",
+   "fieldtype": "Float",
+   "label": "Productive Acres",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "activity_count",
+   "fieldtype": "Int",
+   "label": "Activity Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "line_count",
+   "fieldtype": "Int",
+   "label": "Line Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "basis_section",
+   "fieldtype": "Section Break",
+   "label": "How it was arrived at"
+  },
+  {
+   "description": "The run's own account of itself, in words: which drivers were derived, which were supplied, and over what window.",
+   "fieldname": "basis",
+   "fieldtype": "Small Text",
+   "label": "Basis"
+  },
+  {
+   "description": "Which activities reached nothing and why. Blank when everything allocated.",
+   "fieldname": "unallocated_note",
+   "fieldtype": "Small Text",
+   "label": "Unallocated"
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Assignments"
+  },
+  {
+   "description": "One row per activity per cost object. The intermediates, kept.",
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Lines",
+   "options": "ABC Cost Assignment Line"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "ABC Cost Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "company,fiscal_year,computed_on",
+ "sort_field": "computed_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

@@ -1053,10 +1053,22 @@ class Catalogue(SeededTestCase):
 		required reason and never deletes it. The two reads default ON — a
 		restricted-entry answer an operator has to switch on is one a worker
 		does not get.
+
+		v0.84.0 IS THE ACTIVITY-BASED COSTING ENGINE, ten tools over six new
+		doctypes. `create_cost_activity` and `create_activity_cost_pool` build
+		the register and gather each activity's money for a year;
+		`compute_abc_allocation` pushes every Ready pool out to the blocks that
+		consumed it and stores the whole run, intermediates included, because a
+		per-acre cost is a quotient of two numbers that both moved during the
+		year. `get_abc_report` and `get_phase_waterfall` are the two management
+		reads. THE ENGINE NEVER ESTIMATES A DRIVER: an activity whose driver
+		quantities nobody supplied is reported unallocated with its full amount
+		rather than spread evenly across blocks, because an even spread is
+		indistinguishable in the output from a measured one.
 		"""
-		self.assertEqual(len(registry.TOOLS), 642)
-		self.assertEqual(len(registry.READ_TOOLS), 311)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 331)
+		self.assertEqual(len(registry.TOOLS), 652)
+		self.assertEqual(len(registry.READ_TOOLS), 317)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 335)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

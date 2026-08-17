@@ -1571,6 +1571,17 @@ APP_DOCTYPES = {
 	"Reporting Template Section": "reporting_template_section",
 	"Disclosure Checklist": "disclosure_checklist",
 	"Disclosure Checklist Item": "disclosure_checklist_item",
+	# v0.84.0, the activity-based costing engine. An activity is the thing that
+	# costs money, a pool is its money for one year, and an assignment is one
+	# run of pushing the pools out to the blocks that consumed them — stored
+	# whole, intermediates and all, because a per-acre cost is a quotient of two
+	# numbers that both moved during the year. See `tools/abc.py`.
+	"Cost Activity": "cost_activity",
+	"Cost Activity Account": "cost_activity_account",
+	"Activity Cost Pool": "activity_cost_pool",
+	"Activity Cost Pool Source": "activity_cost_pool_source",
+	"ABC Cost Assignment": "abc_cost_assignment",
+	"ABC Cost Assignment Line": "abc_cost_assignment_line",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

@@ -1,0 +1,130 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 12:00:00.000000",
+ "description": "ONE ACTIVITY'S COST REACHING ONE COST OBJECT, with every number the quotient was built from. `driver_quantity` and `driver_share` are stored beside `assigned_amount` rather than recomputed on read, because the driver quantity somebody measured in March is a fact about March, and a report that re-derived it from today's Field table would quietly restate a prior year. `cost_per_acre` is null — never zero — where the block had no productive acres in the period: zero is a per-acre figure for a division nobody performed.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "activity",
+  "activity_name",
+  "phase",
+  "cost_driver",
+  "cost_object_type",
+  "cost_object",
+  "cost_object_name",
+  "driver_quantity",
+  "driver_share",
+  "pool_amount",
+  "assigned_amount",
+  "productive_acres",
+  "cost_per_acre",
+  "driver_source"
+ ],
+ "fields": [
+  {
+   "fieldname": "activity",
+   "fieldtype": "Link",
+   "label": "Activity",
+   "options": "Cost Activity"
+  },
+  {
+   "description": "The activity's name as it stood when the run happened. Denormalised on purpose: a renamed or deleted activity must not make a stored allocation unreadable.",
+   "fieldname": "activity_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Activity Name"
+  },
+  {
+   "fieldname": "phase",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Phase",
+   "options": "Growing\nHarvest\nPost-Harvest\nPacking\nSales"
+  },
+  {
+   "fieldname": "cost_driver",
+   "fieldtype": "Data",
+   "label": "Cost Driver"
+  },
+  {
+   "default": "Field",
+   "fieldname": "cost_object_type",
+   "fieldtype": "Select",
+   "label": "Cost Object Type",
+   "options": "Field\nCompany"
+  },
+  {
+   "description": "Which block the cost reached. Data rather than a Link so a retired block still reads back.",
+   "fieldname": "cost_object",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cost Object"
+  },
+  {
+   "fieldname": "cost_object_name",
+   "fieldtype": "Data",
+   "label": "Cost Object Name"
+  },
+  {
+   "description": "How much of the driver this cost object consumed — acres, hours, applications, bins.",
+   "fieldname": "driver_quantity",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Driver Quantity",
+   "precision": "4"
+  },
+  {
+   "description": "This object's share of the activity's total driver quantity, as a percentage. The shares within one activity sum to 100.",
+   "fieldname": "driver_share",
+   "fieldtype": "Float",
+   "label": "Driver Share %",
+   "precision": "4"
+  },
+  {
+   "description": "The whole pool this line drew from, carried on every line so a single row can be read without its siblings.",
+   "fieldname": "pool_amount",
+   "fieldtype": "Currency",
+   "label": "Pool Amount"
+  },
+  {
+   "fieldname": "assigned_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Assigned Amount"
+  },
+  {
+   "description": "This block's time-weighted productive acres in the period — the denominator of `cost_per_acre`, stored so the quotient can be checked without recomputing the year.",
+   "fieldname": "productive_acres",
+   "fieldtype": "Float",
+   "label": "Productive Acres",
+   "precision": "4"
+  },
+  {
+   "fieldname": "cost_per_acre",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Cost Per Acre",
+   "precision": "4"
+  },
+  {
+   "description": "WHETHER THE DRIVER QUANTITY WAS MEASURED OR DERIVED, in words. The column that tells a reader which half of this report is evidence and which half is arithmetic over the Field table.",
+   "fieldname": "driver_source",
+   "fieldtype": "Small Text",
+   "label": "Driver Source"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "ABC Cost Assignment Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
