@@ -37,6 +37,9 @@
   "completed_at",
   "completed_by",
   "records_created",
+  "document_col",
+  "generated_pdf",
+  "generated_pdf_on",
   "notes_section",
   "notes"
  ],
@@ -236,6 +239,25 @@
    "fieldname": "records_created",
    "fieldtype": "Int",
    "label": "Records Created",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The rendered sign-in sheet — one page, the course at the top, a line per person with their mark on it. THE PAGE AN AUDITOR ASKS TO SEE, and the thing seal_signed_document staples its verification appendix onto. A SNAPSHOT rather than a view: it is the record as it stood when it was drawn, so a second render refuses without overwrite=true, because the likeliest thing in this field is the copy somebody already printed.",
+   "fieldname": "generated_pdf",
+   "fieldtype": "Attach",
+   "label": "Sign-in Sheet",
+   "read_only": 1
+  },
+  {
+   "description": "When the sheet above was drawn. What tells a reader whether it predates the last signature on the session.",
+   "fieldname": "generated_pdf_on",
+   "fieldtype": "Datetime",
+   "label": "Sheet Rendered",
    "read_only": 1
   },
   {

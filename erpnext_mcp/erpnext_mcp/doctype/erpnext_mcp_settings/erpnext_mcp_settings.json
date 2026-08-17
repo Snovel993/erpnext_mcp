@@ -330,6 +330,7 @@
   "allow_add_session_attendee",
   "allow_sign_session_attendance",
   "allow_complete_training_session",
+  "allow_render_training_sign_in_sheet",
   "i9_section",
   "allow_get_i9_settings",
   "allow_get_i9_form",
@@ -3053,6 +3054,13 @@
    "fieldname": "allow_complete_training_session",
    "fieldtype": "Check",
    "label": "Complete Training Session"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Draws the sign-in sheet — the course at the top, a line per person with their badge, the moment they were scanned and their own mark on a ruled line. The page an auditor asks to see, and the page seal_signed_document staples its verification appendix onto. An unsigned line is drawn ruled and empty rather than omitted.",
+   "fieldname": "allow_render_training_sign_in_sheet",
+   "fieldtype": "Check",
+   "label": "Render Training Sign-in Sheet"
   },
   {
    "description": "Structured Form I-9 workflow — employment eligibility verification with Section 1/2 status tracking, retention dates, audit logging, and USCIS document type lookup. Only usable where the I-9 doctypes exist (run bench migrate after installing v0.27.0).",

@@ -157,6 +157,7 @@ ALERT = "Compliance Alert"
 I9_FORM = "I-9 Form"
 W4_FORM = "W-4 Form"
 TAX_FORM = "Tax Form"
+TRAINING_SESSION = "Training Session"
 FARM_TASK = "Farm Task"
 
 #: The most a signature capture may be, in bytes. See the module docstring: it
@@ -221,6 +222,28 @@ class SignatureBox:
 	form_type: str = ""
 	#: The child table this box lives in, empty for a box on the form itself.
 	child_table: str = ""
+	#: What one of those rows IS, in the words a refusal should use — "reverification
+	#: entry", "attendee". Written here rather than in `_child_row` because that
+	#: function used to be about Supplement B and is now about any table of rows
+	#: that get signed one at a time, and a message that still said
+	#: "reverification" to somebody signing a training sheet would be this app
+	#: describing the wrong document.
+	child_label: str = "row"
+	#: The tool that puts a row on the table, named in the refusal when there are
+	#: none. `reverify_i9` records a reverification; `add_session_attendee` puts
+	#: somebody on a sign-in sheet.
+	child_hint: str = ""
+	#: The column on a row naming WHO it is about, where the rows are per-person.
+	#: When set, that person — not `doc.employee` — is the subject an identity
+	#: check is made against: a training session has no single employee, and
+	#: twelve people sign one document in their own names.
+	child_subject_field: str = ""
+	#: What "the next unsigned one" is ordered by. `reverification_date` picks the
+	#: newest, which is what the alert was about; `idx` picks the first one down
+	#: the sheet, which is the order a room is signed in.
+	child_order_field: str = ""
+	#: Newest-first, or first-down-the-page. See `child_order_field`.
+	child_order_desc: bool = True
 	#: Columns on the row that say WHO signed, filled from the roster where the
 	#: caller is on one and left alone where they are not.
 	name_field: str = ""
@@ -306,6 +329,9 @@ SIGNATURE_BOXES = (
 		signed_ip_field="signed_ip",
 		form_type="I-9",
 		child_table="reverifications",
+		child_label="reverification entry",
+		child_hint="reverify_i9 records one.",
+		child_order_field="reverification_date",
 		name_field="verifier_name",
 		title_field="verifier_title",
 		alert_types=("i9_supplement_b_unsigned",),
@@ -374,6 +400,46 @@ SIGNATURE_BOXES = (
 			"Under penalties of perjury, I declare that I have examined this return, including "
 			"accompanying schedules and statements, and to the best of my knowledge and belief, it "
 			"is true, correct, and complete."
+		),
+	),
+	# THE SIXTH BOX, AND THE FIRST WHERE ONE DOCUMENT IS SIGNED BY A ROOM. The
+	# five above are one form, one signer, one attestation; a training sign-in
+	# sheet is twelve people signing the same afternoon in their own names, which
+	# is why `child_subject_field` exists and why `_identity` reads its subject
+	# off the ROW rather than off `doc.employee` — a Training Session has no
+	# single employee, and checking a picker's badge against a column that is not
+	# there would have made every scan pass.
+	#
+	# NOT ROSTER-GATED, and it is the Section 1 argument rather than a new one: a
+	# worker signing to say they were taught something is signing for themselves,
+	# under nobody's authority but their own, and requiring the phone that
+	# collects it to belong to an authorized signer would mean only the people
+	# who may attest FOR the employer could collect a worker's own mark.
+	#
+	# NO `alert_types`, and that is honest rather than pending. There is no rule
+	# that fires on an unsigned attendee row — an incomplete sheet is caught by
+	# `complete_training_session` refusing to file it, which happens the same
+	# afternoon and in front of the person who can fix it, rather than by an
+	# alert somebody reads on Thursday.
+	SignatureBox(
+		doctype=TRAINING_SESSION,
+		field="signature",
+		label="Training session attendance (worker's own attestation)",
+		signed_at_field="signed_at",
+		child_table="attendees",
+		child_label="attendee",
+		child_hint="add_session_attendee puts somebody on the sheet, with the badge scanned at the door.",
+		child_subject_field="employee",
+		child_order_field="idx",
+		child_order_desc=False,
+		signer_role="employee",
+		signer_label="Signature of person trained",
+		form_label="Training session attendance record",
+		form_label_field="training_type",
+		section_label="Attendance and acknowledgment",
+		attestation=(
+			"I attest that I attended and understood the training described on this record, that "
+			"the topics listed were covered, and that I had the opportunity to ask questions."
 		),
 	),
 )
@@ -467,6 +533,11 @@ DOCTYPE_ALIASES = {
 	"oq": TAX_FORM,
 	"wa-esd": TAX_FORM,
 	"waesd": TAX_FORM,
+	"training session": TRAINING_SESSION,
+	"training": TRAINING_SESSION,
+	"sign-in sheet": TRAINING_SESSION,
+	"sign in sheet": TRAINING_SESSION,
+	"attendance": TRAINING_SESSION,
 }
 
 #: Forms a caller may reasonably NAME and this app will never sign, with the
@@ -526,7 +597,30 @@ FORM_HANDLERS = {
 		"pdf_field": "generated_pdf",
 		"renderer": "render_tax_form_pdf",
 	},
+	# The sign-in sheet. IMPORTED INSIDE THE LAMBDA rather than at the top of
+	# this module, and it is the one entry that has to be: `tools/training_sessions`
+	# imports this module for `collect_form_signature`, so naming it up there
+	# would close the circle at load time. The other three are imported by
+	# modules that do not import back.
+	TRAINING_SESSION: {
+		"resolve": lambda args: _training_session_name(args),
+		"render": lambda name: _render_training_sheet(name),
+		"pdf_field": "generated_pdf",
+		"renderer": "render_training_sign_in_sheet",
+	},
 }
+
+
+def _training_session_name(args: dict) -> str:
+	from . import training_sessions as training_session_tools
+
+	return str(training_session_tools._resolve_session(args).get("name") or "")
+
+
+def _render_training_sheet(name: str):
+	from . import training_sessions as training_session_tools
+
+	return training_session_tools.render_training_sign_in_sheet({"session": name, "overwrite": True})
 
 
 # ── resolving what is being signed ──────────────────────────────────────────
@@ -601,49 +695,112 @@ def _form_name(box: SignatureBox, args: dict) -> str:
 
 
 def _child_row(box: SignatureBox, doc, args: dict) -> object:
-	"""Which Supplement B row is being signed, or the refusal.
+	"""Which row of a signable table is being signed, or the refusal.
 
-	DEFAULTS TO THE NEWEST UNSIGNED ROW, because that is what the alert was
-	about: `i9_supplement_b_unsigned` fires on the form and its message quotes
-	the most recent unsigned entry. A caller who means a different one names it,
-	and a caller who names one that is already signed is refused rather than
-	silently redirected — "I signed the wrong row" and "the row I meant was
-	already done" are different mistakes.
+	WRITTEN FOR SUPPLEMENT B AND GENERALISED WHEN THE SIXTH BOX ARRIVED. A
+	training sign-in sheet is the same shape — a table whose rows are signed one
+	at a time, over an afternoon rather than over years — and the only things
+	that differ are what a row is CALLED, what identifies one, and which unsigned
+	one is "next". All three are on the box, so this function no longer knows
+	what document it is looking at.
+
+	THREE WAYS TO NAME A ROW, and the third is what a room full of people needs.
+	A docname and a 1-based position are what Supplement B took; `employee` is
+	what a training session takes, because the person at the pad is identified by
+	who they are and not by where they landed on the sheet.
+
+	DEFAULTS TO THE NEXT UNSIGNED ROW. For Supplement B that is the newest, which
+	is what the alert was about; for a sheet it is the first one still blank,
+	which is the order a room signs in. A caller who names a row that is already
+	signed is refused rather than silently redirected — "I signed the wrong row"
+	and "the row I meant was already done" are different mistakes.
 	"""
+	label = box.child_label
 	rows = list(doc.get(box.child_table) or [])
 	if not rows:
 		raise ToolError(
-			f"{doc.name} has no reverification entries, so there is no Supplement B "
-			f"attestation to sign. reverify_i9 records one. Nothing was changed."
+			f"{doc.name} has no {label}s, so there is nothing on it to sign."
+			+ (f" {box.child_hint}" if box.child_hint else "")
+			+ " Nothing was changed."
 		)
-	wanted = as_str(args, "row") or as_str(args, "reverification") or as_str(args, "child_row")
+
+	wanted = (
+		as_str(args, "row")
+		or as_str(args, "reverification")
+		or as_str(args, "child_row")
+		or (as_str(args, box.child_subject_field) if box.child_subject_field else "")
+	)
 	if wanted:
 		for row in rows:
 			if str(row.get("name") or "") == wanted:
 				return row
+		if box.child_subject_field:
+			# Resolved through the subject's own resolver, so a docname, an
+			# employee number, a name or a login all find the row — the four
+			# things somebody calls a person, and the same four `resolve_employee`
+			# takes everywhere else on this surface.
+			subject = _resolve_subject(box, wanted)
+			for row in rows:
+				if str(row.get(box.child_subject_field) or "") == subject:
+					return row
 		if wanted.isdigit() and 1 <= int(wanted) <= len(rows):
 			return rows[int(wanted) - 1]
 		raise ToolError(
-			f"{doc.name} has no reverification row {wanted!r}. Its rows are: "
+			f"{doc.name} has no {label} {wanted!r}. Its rows are: "
 			+ ", ".join(
-				f"{index}. {row.get('name')} ({row.get('reverification_date') or 'undated'})"
+				f"{index}. {row.get('name')} ({_row_caption(box, row)})"
 				for index, row in enumerate(rows, start=1)
 			)
-			+ ". Pass the row docname or its 1-based position. Nothing was changed."
+			+ f". Pass the row docname"
+			+ (f", the {box.child_subject_field}" if box.child_subject_field else "")
+			+ " or its 1-based position. Nothing was changed."
 		)
+
 	unsigned = [row for row in rows if not str(row.get(box.field) or "").strip()]
 	if not unsigned:
 		raise AlreadySignedError(
-			f"every reverification entry on {doc.name} already carries a signature. Name the "
-			f"row explicitly with `row` and pass overwrite=true to replace one filed in error. "
-			f"Nothing was changed."
+			f"every {label} on {doc.name} already carries a signature. Name the row explicitly "
+			f"with `row` and pass overwrite=true to replace one filed in error. Nothing was "
+			f"changed."
 		)
-	unsigned.sort(key=lambda row: str(row.get("reverification_date") or ""), reverse=True)
+	if box.child_order_field:
+		unsigned.sort(
+			key=lambda row: str(row.get(box.child_order_field) or ""), reverse=box.child_order_desc
+		)
 	return unsigned[0]
 
 
+def _resolve_subject(box: SignatureBox, value: str) -> str:
+	"""One row's subject from whatever a caller called it. "" where it will not resolve.
+
+	NEVER RAISES: a value that resolves to nobody falls through to the refusal
+	above, which lists the rows that ARE on the sheet — a more useful answer than
+	"no such employee" to somebody who is holding the right sheet and the wrong
+	name for it.
+	"""
+	if box.child_subject_field != "employee":
+		return value
+	from . import employee as employee_tool
+
+	try:
+		return employee_tool.resolve_employee(value)
+	except Exception:
+		return ""
+
+
+def _row_caption(box: SignatureBox, row) -> str:
+	"""How one row is described when a refusal lists them all."""
+	if box.child_subject_field:
+		return str(
+			row.get(f"{box.child_subject_field}_name")
+			or row.get(box.child_subject_field)
+			or "unnamed"
+		)
+	return str(row.get(box.child_order_field or "") or "undated")
+
+
 # ── the image ───────────────────────────────────────────────────────────────
-def _capture(box: SignatureBox, form: str, args: dict) -> tuple[str, bytes, str]:
+def _capture(box: SignatureBox, form: str, args: dict, target=None) -> tuple[str, bytes, str]:
 	"""(file_docname, content, file_url) for the image, from base64 or a token.
 
 	Returns bytes for the base64 path and an empty `content` for the token path,
@@ -700,7 +857,21 @@ def _capture(box: SignatureBox, form: str, args: dict) -> tuple[str, bytes, str]
 		)
 	extension = _sniff(content)
 	_check_extension(f"x{extension}")
-	name = f"{form}-{box.field}-{FILE_STEM}{extension}"
+	# THE SUBJECT IS IN THE NAME WHERE THE ROWS ARE PER-PERSON. A sign-in sheet
+	# hangs twelve captures off one document, and twelve Files all called
+	# `TRNS-2026-0001-signature.png` is a private files directory nobody can read
+	# by eye — which is the whole reason the docname and the field are in it.
+	stem = form
+	if box.child_subject_field and target is not None:
+		subject = str(target.get(box.child_subject_field) or "").strip()
+		if subject:
+			stem = f"{form}-{subject}"
+	# `signature-signature.png` where the column is already called `signature`,
+	# which is the training box and would be the next one too. The stem is there
+	# to say what the file IS; a field that already says it does not need it said
+	# twice.
+	tail = box.field if box.field.endswith(FILE_STEM) else f"{box.field}-{FILE_STEM}"
+	name = f"{stem}-{tail}{extension}"
 	return "", content, name
 
 
@@ -794,11 +965,26 @@ def collect_form_signature(args: dict) -> ToolResult:
 	company = str(doc.get("company") or "")
 	signer = _require_signer(box, company)
 
+	role = _evidence_role(box, args)
+
+	# THE ROW BEFORE THE IDENTITY, because on a table of per-person rows the row
+	# is what says who the signer is supposed to BE. A Training Session has no
+	# `employee` column — twelve people sign one afternoon in their own names —
+	# so an identity check made against the parent would have had no subject to
+	# compare a badge against and would have passed everything. Both are still
+	# refusals before any write, and both are still after the permission check,
+	# so the only thing this ordering changes is which of two pre-write refusals
+	# a caller sees first.
+	target = doc
+	child = None
+	if box.child_table:
+		child = _child_row(box, doc, args)
+		target = child
+
 	# THE CAPACITY AND THE IDENTITY, BEFORE ANY OF THE FOUR WRITES. A badge naming
 	# the wrong person and a role the box contradicts are both refusals, and both
 	# have to land while there is still nothing of this caller's on the site.
-	role = _evidence_role(box, args)
-	identity = _identity(box, doc, role, args)
+	identity = _identity(box, doc, role, args, target=target)
 
 	# THE FINGERPRINT, TAKEN NOW. `doc` has not been touched yet, so this is the
 	# record as the signer was shown it — which is the only moment at which the
@@ -806,12 +992,6 @@ def collect_form_signature(args: dict) -> ToolResult:
 	fingerprint = signing_evidence.document_fingerprint(
 		doc, exclude=hash_exclusions(box.doctype)
 	)
-
-	target = doc
-	child = None
-	if box.child_table:
-		child = _child_row(box, doc, args)
-		target = child
 
 	overwrite = as_bool(args, "overwrite", False)
 	existing = str(target.get(box.field) or "").strip()
@@ -823,7 +1003,7 @@ def collect_form_signature(args: dict) -> ToolResult:
 			f"either way. Nothing was changed."
 		)
 
-	file_docname, content, file_name = _capture(box, name, args)
+	file_docname, content, file_name = _capture(box, name, args, target=target)
 
 	# ── 1. the image ────────────────────────────────────────────────────
 	if content:
@@ -985,12 +1165,9 @@ def _record_evidence(
 	previous evidence row happens to mention would otherwise claim to supersede a
 	record it has nothing to do with.
 	"""
-	who = identity.get("employee") or (
-		str(doc.get("employee") or "") if role == "Employee" else ""
-	)
-	who_name = identity.get("employee_name") or (
-		str(doc.get("employee_name") or "") if who and who == str(doc.get("employee") or "") else ""
-	)
+	subject, subject_name = _subject(box, doc, target)
+	who = identity.get("employee") or (subject if role == "Employee" else "")
+	who_name = identity.get("employee_name") or (subject_name if who and who == subject else "")
 	context = _context(args)
 	return signing_evidence.record(
 		document_type=box.doctype,
@@ -1164,7 +1341,24 @@ def _evidence_role(box: SignatureBox, args: dict) -> str:
 	return from_box or asked
 
 
-def _identity(box: SignatureBox, doc, role: str, args: dict) -> dict:
+def _subject(box: SignatureBox, doc, target=None) -> tuple:
+	"""`(employee, employee_name)` this box is signed BY, on this record.
+
+	THE ROW WINS WHERE THERE IS ONE. Five of the six boxes are on a form about one
+	person and `doc.employee` is that person; the sixth is a sheet whose rows are
+	each about a different one, and reading the parent there would compare a
+	picker's badge against an empty column — an identity check that passes
+	everything, which is worse than none because it looks like one.
+	"""
+	if box.child_subject_field and target is not None:
+		return (
+			str(target.get(box.child_subject_field) or ""),
+			str(target.get(f"{box.child_subject_field}_name") or ""),
+		)
+	return str(doc.get("employee") or ""), str(doc.get("employee_name") or "")
+
+
+def _identity(box: SignatureBox, doc, role: str, args: dict, target=None) -> dict:
 	"""Who was proved to be at the pad, or the refusal that stops the call.
 
 	THE STEP THAT MAKES A SIGNATURE WORTH SOMETHING, and it is the one this app
@@ -1193,7 +1387,7 @@ def _identity(box: SignatureBox, doc, role: str, args: dict) -> dict:
 	"""
 	badge_id = as_str(args, "signer_badge") or as_str(args, "badge_id") or as_str(args, "badge")
 	method = signing_evidence.normalise_verification_method(as_str(args, "verification_method"))
-	subject = str(doc.get("employee") or "")
+	subject, subject_name = _subject(box, doc, target)
 	out = {"badge": "", "method": method, "employee": "", "employee_name": ""}
 
 	if not badge_id:
@@ -1210,7 +1404,7 @@ def _identity(box: SignatureBox, doc, role: str, args: dict) -> dict:
 		# about stands in where the box is one they sign themselves.
 		if method and role == "Employee" and subject:
 			out["employee"] = subject
-			out["employee_name"] = str(doc.get("employee_name") or "")
+			out["employee_name"] = subject_name
 		return out
 
 	resolved = badges.resolve_badge(
@@ -1221,7 +1415,7 @@ def _identity(box: SignatureBox, doc, role: str, args: dict) -> dict:
 		raise ToolError(
 			f"badge {badge_id!r} belongs to {holder} ({resolved.get('employee_name')}), and "
 			f"{box.label} on {doc.name} is signed by {subject} "
-			f"({doc.get('employee_name') or 'the employee named on it'}) in their own name. "
+			f"({subject_name or 'the person named on the row'}) in their own name. "
 			f"Either the wrong person is at the pad or the wrong form is open, and a signature "
 			f"filed across that gap would attest under one person's penalty of perjury to another "
 			f"person's document. Nothing was changed."

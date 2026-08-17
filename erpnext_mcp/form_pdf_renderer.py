@@ -423,6 +423,50 @@ class _Sheet:
 		self.text(x + size + 3, top + size - 0.8, label, FONT_LABEL, SIZE_SMALL)
 		return size + 6 + self.width_of(label, FONT_LABEL, SIZE_SMALL)
 
+	def ink(self, x: float, baseline_top: float, image_bytes: bytes, max_width: float,
+	        max_height: float) -> bool:
+		"""Draw a signature capture sitting ON a ruled line. True if it landed.
+
+		THE CROPPING IS `pdf_signing.ink_only`, NOT A SECOND ONE. That function
+		already knows what a capture from this app's pad looks like — a mostly
+		white PNG with a stroke somewhere in it — and trims to the stroke so a
+		signature drawn in the corner of a canvas does not render as a dot in the
+		middle of a box. A second implementation here would be a second answer to
+		"where is the ink", and the two would disagree on the same picture.
+
+		ANCHORED TO THE BASELINE AND GROWING UPWARD, because that is where
+		handwriting goes on a printed rule. Scaled to fit both bounds, never
+		stretched: a signature squashed to fill a box is not the mark that was
+		made.
+
+		FALSE RATHER THAN AN EXCEPTION on a bench without Pillow or reportlab's
+		image reader, or on bytes that hold no ink. The caller draws the ruled
+		line either way and the page says the row is unsigned, which is a true
+		statement about a sheet somebody has to go and finish.
+		"""
+		from . import pdf_signing
+
+		prepared = pdf_signing.ink_only(image_bytes)
+		if not prepared:
+			return False
+		try:
+			from reportlab.lib.utils import ImageReader
+		except ImportError:  # pragma: no cover - a bench without reportlab cannot be here
+			return False
+		png, ink_width, ink_height = prepared
+		if ink_width <= 0 or ink_height <= 0:
+			return False
+		scale = min(max_width / ink_width, max_height / ink_height)
+		width, height = ink_width * scale, ink_height * scale
+		try:
+			self._canvas.drawImage(
+				ImageReader(io.BytesIO(png)), x, self._y(baseline_top),
+				width=width, height=height, mask="auto",
+			)
+		except Exception:  # pragma: no cover - an image reportlab will not decode
+			return False
+		return True
+
 	# -- the flowing half ----------------------------------------------------
 	def masthead(self, title: str, form_line: str, right: str, copy_line: str = "") -> None:
 		"""The band every form opens with: what it is, for when, and which copy."""

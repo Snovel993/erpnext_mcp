@@ -9931,7 +9931,9 @@ def add_session_attendee(
 	session=None,
 	badge_scan=None,
 	employee=None,
-	scan_location=None,
+	scan_latitude=None,
+	scan_longitude=None,
+	scan_accuracy_meters=None,
 	scanned_at=None,
 	attended=None,
 	notes=None,
@@ -9950,7 +9952,9 @@ def add_session_attendee(
 	inner: dict = {"session": name}
 	for key, value in (
 		("badge_scan", badge_scan),
-		("scan_location", scan_location),
+		("scan_latitude", scan_latitude),
+		("scan_longitude", scan_longitude),
+		("scan_accuracy_meters", scan_accuracy_meters),
 		("scanned_at", scanned_at),
 		("attended", attended),
 		("notes", notes),
@@ -9972,7 +9976,9 @@ def sign_session_attendance(
 	employee=None,
 	badge_scan=None,
 	signature=None,
-	signed_at=None,
+	signature_base64=None,
+	file_token=None,
+	verification_method=None,
 	replace_signature=None,
 	device_id=None,
 	gps_latitude=None,
@@ -9980,17 +9986,28 @@ def sign_session_attendance(
 ) -> dict:
 	"""Take a worker's signature on the pad they are holding.
 
-	The signature file gets here through `stage_file_chunk` like every other
-	piece of field evidence, so a pad used in a shed with no signal still
-	arrives. The evidence row is written one layer down, hash and all.
+	IT GOES THROUGH `collect_form_signature`, the same chain a Form I-9 and a
+	W-4 are signed with — the capture is size-limited and sniffed by its magic
+	bytes, the badge is resolved against this employer's own register and refused
+	when it names somebody other than the person on the row, the session is
+	hashed before the mark is written, and a `Signing Evidence` row records who,
+	how, on what device and where.
+
+	`signed_at` IS NOT IN THIS SIGNATURE AND CANNOT BE. The shared chain stamps
+	the server's clock, so the evidence row and the column it is evidence about
+	say the same moment. A signing time a phone could choose is the one field on
+	an attestation worth forging.
 	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
 
-	inner: dict = {"session": name, "signature": signature}
+	inner: dict = {"session": name}
 	for key, value in (
+		("signature", signature),
+		("signature_base64", signature_base64),
+		("file_token", file_token),
+		("verification_method", verification_method),
 		("badge_scan", badge_scan),
-		("signed_at", signed_at),
 		("replace_signature", replace_signature),
 		("device_id", device_id),
 		("gps_latitude", gps_latitude),
@@ -10883,3 +10900,26 @@ def _remittance_args(company: str, fiscal_year, quarter) -> dict:
 	if quarter not in (None, ""):
 		inner["quarter"] = str(quarter).strip()
 	return inner
+
+
+# ── 132. render_training_sign_in_sheet ───────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("render_training_sign_in_sheet", mutating=True, limit=guard.WRITE_LIMIT)
+def render_training_sign_in_sheet(user: str, session=None, overwrite=None) -> dict:
+	"""Draw the sheet in the shed, while the crew is still in it.
+
+	THE ONE PDF ROUTE ON THIS TABLE THAT IS NOT A READ, and it is here because
+	of when it is wanted: a crew leader who has just completed a session is
+	standing next to the people who signed it, and "I will print it when I am
+	back at the office" is how a sheet gets printed a week later with somebody
+	missing from it. The result carries the file_url, so the app can show the
+	page it has just made.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
+
+	inner: dict = {"session": name}
+	if overwrite not in (None, ""):
+		inner["overwrite"] = overwrite
+
+	return training_session_tools.render_training_sign_in_sheet(inner).data

@@ -61,13 +61,13 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, training, training_sessions
-from ..args import as_bool, as_date, as_int, as_limit, as_str, resolve_company
+from .. import compat, geo, training, training_sessions, training_sheet_pdf
+from ..args import as_bool, as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+from . import artifacts, files, signatures
 from . import badges as badge_tools
 from . import employee as employee_tool
-from . import signing_evidence as evidence
 from . import training as training_tools
 
 DOCTYPE = training_sessions.DOCTYPE
@@ -668,14 +668,40 @@ def add_session_attendee(args: dict) -> ToolResult:
 			"their signature. Nothing was changed."
 		)
 
+	# THE FIX IS PARSED BY `geo.coordinates`, WHICH IS WHAT `log_shift_location`
+	# USES. A breadcrumb on a shift track and a fix taken at a shed door are the
+	# same measurement — same aliases, same range check, same all-or-nothing
+	# rule — and the H3 cell is derived on write so scans and tracks can be
+	# grouped by place without comparing floats. `scan_latitude` is accepted
+	# alongside the plain pair because a handset sending several fixes in one
+	# call needs to say which is which.
+	latitude, longitude = geo.coordinates(
+		args, prefix="scan_", required=False, tail="Nothing was changed."
+	)
+	if latitude is None and longitude is None:
+		latitude, longitude = geo.coordinates(args, required=False, tail="Nothing was changed.")
+
 	entry = doc.append(
 		"attendees",
 		{
 			"employee": person,
 			"attended": 1 if as_bool(args, "attended", True) else 0,
 			"badge_scan": badge,
-			"scan_location": as_str(args, "scan_location") or as_str(args, "gps"),
 			"scanned_at": as_str(args, "scanned_at") or (frappe.utils.now() if badge else None),
+			"scan_latitude": latitude,
+			"scan_longitude": longitude,
+			"scan_accuracy_meters": (
+				as_float(args.get("scan_accuracy_meters", args.get("accuracy_meters")), "accuracy_meters")
+				if args.get("scan_accuracy_meters", args.get("accuracy_meters")) not in (None, "")
+				else None
+			),
+			"scan_h3_cell": geo.point_cell(latitude, longitude),
+			"scan_source": as_choice(
+				training_sessions.ATTENDEE_DOCTYPE,
+				"scan_source",
+				as_str(args, "scan_source") or "iOS",
+				"scan_source",
+			),
 			"notes": as_str(args, "notes"),
 		},
 	)
@@ -704,7 +730,7 @@ def add_session_attendee(args: dict) -> ToolResult:
 			"complete_training_session will not write a training record from it — pass "
 			"`badge_scan` from the door, or scan them later and add the row then."
 		)
-	if not mine.get("scan_location"):
+	if not mine.get("scan_position"):
 		data["location_note"] = (
 			"No coordinates came with the scan. FSMA §112.161(a)(1)(i) asks an activity record "
 			"where it happened, and the session's `location` answers it in words; this row simply "
@@ -722,115 +748,135 @@ def add_session_attendee(args: dict) -> ToolResult:
 
 # ── 5. sign_session_attendance ──────────────────────────────────────────────
 def sign_session_attendance(args: dict) -> ToolResult:
-	"""Take one attendee's signature, and file the evidence row that says how.
+	"""Take one attendee's signature — through the chain an I-9 is signed with.
 
-	A SEPARATE CALL FROM `add_session_attendee`, DELIBERATELY, and for the reason
-	`sign_training_supervisor_review` is separate from `record_training`: the
-	badge is scanned when somebody walks in and the signature is given when the
-	session ends, and a single call that took both would make it trivial to
-	record them at the same instant. Thirty scans and thirty signatures sharing
-	one timestamp is the shape of a sheet an inspector reads as having been
-	assembled afterwards.
+	IT IS A DOOR ONTO `collect_form_signature`, NOT A SECOND IMPLEMENTATION, and
+	that is the whole design. This app already had one answer to "somebody drew a
+	mark on a pad and it has to become evidence": the capture is size-limited and
+	sniffed by its magic bytes rather than trusted by its filename, the caller's
+	`write` permission and company scope are checked through Frappe's own system,
+	the badge is resolved through `resolve_badge` and refused when it names
+	somebody other than the person the row is about, the document is fingerprinted
+	BEFORE the signature is written, and a `Signing Evidence` row records who,
+	how, on what device and where. Writing a second, thinner version of that for
+	training would have produced a signature that looks the same on screen and
+	proves less — and the difference would only ever have surfaced in a room with
+	an auditor in it.
 
-	IT WRITES A `Signing Evidence` ROW where that register is on the site: who
-	signed, how they were identified, where the handset was, and the hash of the
-	session as it stood when they signed it. An operation that later edits the
-	topics list can be shown to have done so after the crew signed — which is the
-	question a sign-in sheet has never been able to answer.
+	WHAT THIS FUNCTION ADDS is the training-shaped part: it names the box, turns
+	`employee` or a badge into the attendee row that is being signed, and reports
+	the answer in the session's own vocabulary — what the row's state is now,
+	what is still outstanding on the sheet, and whether the session can be
+	completed. `SIGNATURE_BOXES` does the rest, and gains nothing it has to know
+	about training.
+
+	THE SEPARATION FROM `add_session_attendee` IS UNCHANGED and is still the
+	point: the badge is scanned when somebody walks in and the mark is made when
+	the session ends, so two calls, two timestamps, and a note when they share a
+	minute.
 	"""
 	_require()
 	actor = employee_tool.require_hr_role()
 	row = _open_session(args, actor, "signing")
 
-	badge = as_str(args, "badge_scan") or as_str(args, "badge_id") or as_str(args, "badge")
-	named = as_str(args, "employee")
-	if not (badge or named):
+	inner = dict(args)
+	inner.pop("name", None)
+	inner.update(
+		{
+			"doctype": DOCTYPE,
+			"field": "signature",
+			"form": row["name"],
+			# The row is chosen by WHO, not by where they landed on the sheet.
+			# `_child_row` takes the employee through `resolve_employee`, so a
+			# docname, an employee number, a name or a login all find the line.
+			# RESOLVED HERE, ONCE. `_child_row` would resolve it too, but the
+			# result below has to find the same row to report it — and a name
+			# that reached this function and a docname that reached the table
+			# would be two answers to "who signed".
+			"employee": (
+				employee_tool.resolve_employee(as_str(args, "employee"))
+				if as_str(args, "employee")
+				else ""
+			),
+			# The badge goes in as the signer's identity rather than as a row
+			# selector: `_identity` resolves it and refuses one that belongs to
+			# somebody other than the person on the row, which is the check this
+			# tool used to make for itself and makes worse.
+			"signer_badge": as_str(args, "badge_scan") or as_str(args, "badge_id") or as_str(args, "badge"),
+			"overwrite": as_bool(args, "replace_signature", False) or as_bool(args, "overwrite", False),
+		}
+	)
+	if not inner["employee"] and not inner["signer_badge"]:
 		raise ToolError(
 			"sign_session_attendance needs an employee or the badge that identifies them. "
 			"Nothing was changed."
 		)
-	person = (
-		employee_tool.resolve_employee(named)
-		if named
-		else str(badge_tools.resolve_badge({"badge_id": badge, "company": str(row.get("company") or "")}).data.get("employee") or "")
-	)
+	# `signature` IS ROUTED BY SHAPE, because this tool has always taken one
+	# argument for the mark and `_capture` takes two — a base64 capture from a
+	# pad and a token for a File already uploaded through stage_file_chunk. A
+	# path or a docname is the second; anything else is the first. Both spellings
+	# are also accepted verbatim, so a client written against the I-9 pad sends
+	# what it already sends.
+	given = as_str(args, "signature")
+	if given and not (as_str(args, "signature_base64") or as_str(args, "file_token")):
+		inner.pop("signature", None)
+		looks_like_file = given.startswith(("/", "http://", "https://")) or frappe.db.exists(
+			"File", given
+		)
+		inner["file_token" if looks_like_file else "signature_base64"] = given
 
-	signature = as_str(args, "signature") or as_str(args, "signature_file", required=True)
+	if not inner["employee"] and inner["signer_badge"]:
+		# A badge alone has to become a row selector as well as an identity, and
+		# `_child_row` looks for `employee`. Resolved here through the same
+		# `resolve_badge` the identity check will run again a moment later — the
+		# second call is against the same register and cannot disagree.
+		inner["employee"] = str(
+			badge_tools.resolve_badge(
+				{"badge_id": inner["signer_badge"], "company": str(row.get("company") or "")}
+			).data.get("employee")
+			or ""
+		)
 
-	doc = frappe.get_doc(DOCTYPE, row["name"])
-	index = _attendee_index(doc, person)
-	if index < 0:
+	try:
+		signed = signatures.collect_form_signature(inner)
+	except signatures.AlreadySignedError as exc:
 		raise ToolError(
-			f"{person} is not on {row['name']}'s attendee list, so there is nothing to sign. "
-			"add_session_attendee puts them there — with the badge scanned at the door, which is "
-			"what makes the signature evidence of a particular person rather than of a mark. "
-			"Nothing was changed."
-		)
-	entry = doc.attendees[index]
-	existing = str(entry.get("signature") or "")
-	if existing and not as_bool(args, "replace_signature", False):
-		when = str(entry.get("signed_at") or "") or "an unrecorded date"
-		raise ToolError(
-			f"{person} already signed {row['name']} on {when}. Replacing a signature that is "
-			"already on a compliance record is a decision rather than a retry — pass "
-			"replace_signature=true to say so. Nothing was changed."
-		)
+			f"{exc} On a training sheet this usually means the wrong person is named: "
+			"sign_session_attendance signs ONE attendee's line, and pass replace_signature=true "
+			"only to replace a mark filed in error."
+		) from None
 
-	# The hash is taken BEFORE the signature is written, which is the only moment
-	# that answers the question it exists to answer — see
-	# `signing_evidence.document_fingerprint`. It covers the session as the signer
-	# was shown it: the curriculum, the date, the topics, the other attendees.
-	fingerprint = evidence.document_fingerprint(doc, exclude=("signature", "signed_at", "signing_evidence"))
-
-	signed_at = as_str(args, "signed_at") or frappe.utils.now()
-	entry.signature = signature
-	entry.signed_at = signed_at
-	if not entry.get("attended"):
-		entry.attended = 1
-	doc.flags.ignore_permissions = True
-	doc.save(ignore_permissions=True)
-
-	written = evidence.record(
-		document_type=DOCTYPE,
-		document_name=doc.name,
-		signature_role="Employee",
-		signed_at=signed_at,
-		company=str(row.get("company") or ""),
-		signer=person,
-		signer_name=str(entry.get("employee_name") or person),
-		signer_badge=str(entry.get("badge_scan") or ""),
-		verification_method="Badge QR" if entry.get("badge_scan") else "",
-		signature_field=f"attendees[{entry.idx}].signature",
-		signature_image=signature,
-		document_hash=fingerprint["hash"],
-		hashed_fields=",".join(fingerprint["fields"]),
-		device_id=as_str(args, "device_id"),
-		gps_latitude=_coordinate(args, entry, 0),
-		gps_longitude=_coordinate(args, entry, 1),
+	described = _described(dict(frappe.get_doc(DOCTYPE, row["name"]).as_dict()))
+	person = str(signed.data.get("evidence", {}).get("signer") or inner["employee"])
+	mine = next(
+		(item for item in described["attendee_rows"] if item["employee"] == person),
+		{},
 	)
-	if written.get("evidence") and compat.has_field(
-		training_sessions.ATTENDEE_DOCTYPE, "signing_evidence"
-	):
-		frappe.db.set_value(
-			training_sessions.ATTENDEE_DOCTYPE, entry.name, "signing_evidence", written["evidence"]
-		)
-
-	described = _described(dict(frappe.get_doc(DOCTYPE, doc.name).as_dict()))
-	mine = next((item for item in described["attendee_rows"] if item["employee"] == person), {})
 	data = {
-		"session": doc.name,
+		"session": row["name"],
 		"actor": actor,
 		"attendee": mine,
 		"attendance": described["attendance"],
-		"replaced_signature": bool(existing),
-		"signing_evidence": written,
+		"replaced_signature": bool(signed.data.get("replaced")),
+		"signature": signed.data.get("signature"),
+		"signed_at": signed.data.get("signed_at"),
+		"signing_evidence": signed.data.get("evidence"),
+		"sign_in_sheet": signed.data.get("pdf"),
 		"note": (
 			"§112.161(a)(4) is answered for this person: the record of the activity is signed by "
-			"the person who performed it. The supervisor review §112.161(b) asks for is a separate "
-			"act at a later moment — sign_training_supervisor_review, on the record this session "
-			"produces."
+			"the person who performed it. It went through the same chain a Form I-9 signature "
+			"does — capture validated, identity resolved from the badge, the session hashed as it "
+			"stood when they signed — so the packet around this mark is the same packet."
 		),
 	}
+	if (signed.data.get("evidence") or {}).get("status") == "Unverified" and mine.get("badge_scanned"):
+		data["identity_note"] = (
+			"This person's badge was scanned at the door and no badge came with the signature, so "
+			"the evidence row records the signature as Unverified. That is the honest reading "
+			"rather than a gap: the door scan proves who ATTENDED, and a scan at the pad is what "
+			"would prove who made this mark. Send `badge_scan` on this call where the card is "
+			"rescanned at signing."
+		)
 	if mine.get("state") == training_sessions.ATTENDEE_READY:
 		data["next_step"] = (
 			"This row is ready. complete_training_session turns it and every other ready row into "
@@ -841,8 +887,8 @@ def sign_session_attendance(args: dict) -> ToolResult:
 			"Still outstanding on this row: " + ", ".join(mine["missing"]) + ". Without it the row "
 			"produces no training record."
 		)
-	same_moment = str(entry.get("scanned_at") or "")[:16] == str(signed_at)[:16]
-	if same_moment and entry.get("scanned_at"):
+	scanned_at = str(mine.get("scanned_at") or "")
+	if scanned_at and scanned_at[:16] == str(signed.data.get("signed_at") or "")[:16]:
 		data["timing_note"] = (
 			"The badge scan and the signature share a minute. A short toolbox talk genuinely is "
 			"one moment and this is recorded as given — but where a session ran an hour, a sheet "
@@ -852,10 +898,11 @@ def sign_session_attendance(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=(
-			f"{mine.get('employee_name') or person} signed {doc.name} at {signed_at}"
+			f"{mine.get('employee_name') or person} signed {row['name']} at "
+			f"{signed.data.get('signed_at')}"
 			+ (
-				f" (evidence {written['evidence']})"
-				if written.get("evidence")
+				f" (evidence {signed.data['evidence']['evidence']})"
+				if (signed.data.get("evidence") or {}).get("evidence")
 				else " — no evidence row was written"
 			)
 		),
@@ -863,28 +910,117 @@ def sign_session_attendance(args: dict) -> ToolResult:
 	)
 
 
-def _coordinate(args: dict, entry, index: int):
-	"""One half of a lat/long, from the call or from the badge scan's own fix.
+# ── 6. render_training_sign_in_sheet ────────────────────────────────────────
+def render_training_sign_in_sheet(args: dict) -> ToolResult:
+	"""Draw the sheet: the course at the top, a line per person with their mark on it.
 
-	The signature's coordinates where the caller sent them, and the SCAN's
-	otherwise — a phone that had a fix at the door and none an hour later is
-	ordinary, and the door fix is a true statement about where this person was
-	for this session. None where neither has one; a zero would be a point in the
-	Gulf of Guinea.
+	THE PAGE AN AUDITOR ASKS TO SEE. The training records a session produces are
+	what a compliance matrix reads; this is what somebody hands across a table.
+	It is also what makes the session SEALABLE — `seal_signed_document` staples
+	its verification appendix onto a rendered form, and until this existed a
+	training session could collect signatures through the same chain as an I-9
+	and could not produce the same tamper-evident copy at the end.
+
+	A SNAPSHOT, NOT A VIEW, exactly as `render_i9_pdf` and `render_w4_pdf` are:
+	a second render refuses without `overwrite=true`, because the likeliest thing
+	in that field is the copy somebody already printed.
 	"""
-	explicit = args.get("gps_latitude" if index == 0 else "gps_longitude")
-	if explicit not in (None, ""):
+	_require()
+	training_sheet_pdf.require()
+	actor = employee_tool.require_hr_role()
+	row = _resolve_session(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	existing = str(row.get("generated_pdf") or "").strip()
+	if existing and not as_bool(args, "overwrite", False):
+		raise ToolError(
+			f"{row['name']} already has a sign-in sheet at {existing}. The likeliest thing in "
+			"that field is the copy somebody printed and had signed. Pass overwrite=true to draw "
+			"a fresh page and repoint the field; the existing File stays attached to the record "
+			"either way. Nothing was changed."
+		)
+
+	described = _described(row)
+	captures = _captures(described["attendee_rows"])
+	pdf = training_sheet_pdf.render_sheet(
+		described,
+		described["attendee_rows"],
+		company={"name": row.get("company")},
+		signatures=captures,
+	)
+	attachment = artifacts.attach_bytes(
+		DOCTYPE, row["name"], training_sheet_pdf.file_name_for(described), pdf, field="generated_pdf"
+	)
+	frappe.db.set_value(
+		DOCTYPE, row["name"], "generated_pdf_on", frappe.utils.now(), update_modified=False
+	)
+
+	unsigned = [
+		item["employee"] for item in described["attendee_rows"] if item["attended"] and not item["signed"]
+	]
+	data = {
+		"session": row["name"],
+		"name": row["name"],
+		"actor": actor,
+		"training_type": described["training_type"],
+		"session_date": described["session_date"],
+		# `file_url` AT THE TOP LEVEL because `signed_documents._base_page` reads
+		# it there off whatever `FORM_HANDLERS[...]["render"]` returns — the same
+		# key `render_i9_pdf` and `render_w4_pdf` answer with. A seal that could
+		# not find the page it had just asked for would redraw it forever.
+		"file_url": attachment.get("file_url"),
+		"file_name": attachment.get("file_name"),
+		"file": attachment.name,
+		"attendees_drawn": len(described["attendee_rows"]),
+		"signatures_drawn": len(captures),
+		"without_signature": unsigned,
+		"replaced": existing or None,
+		"note": (
+			f"{len(captures)} of {len(described['attendee_rows'])} line(s) carry a signature "
+			"image. seal_signed_document staples the verification appendix onto this page and "
+			"hashes the result, which is the copy that survives being emailed."
+		),
+	}
+	if unsigned:
+		data["unsigned_note"] = (
+			f"{len(unsigned)} person(s) marked present have no signature, and their lines are "
+			"drawn ruled and empty rather than omitted. A sheet that hid them would be the one "
+			"document in this app that flatters the record."
+		)
+	return ToolResult(
+		data=data,
+		summary=(
+			f"drew the sign-in sheet for {row['name']} — {len(described['attendee_rows'])} "
+			f"line(s), {len(captures)} signed"
+		),
+		docstatus_delta="0 → 0 (amended)",
+	)
+
+
+def _captures(attendees: list) -> dict:
+	"""`{employee: signature bytes}` for every row that has one.
+
+	READ THROUGH `files.read_file_bytes`, which applies the same permission check
+	`get_attachment_content` does — whoever may read the session may read what
+	hangs off it. A capture this call cannot read is DROPPED rather than fatal:
+	the page draws that line ruled and empty and says so, which is a truthful
+	page, where a refusal would be no page at all.
+	"""
+	found: dict = {}
+	for row in attendees:
+		reference = str(row.get("signature") or "").strip()
+		if not reference:
+			continue
+		docname = reference
+		if not frappe.db.exists("File", docname):
+			docname = str(frappe.db.get_value("File", {"file_url": reference}, "name") or "")
+		if not docname:
+			continue
 		try:
-			return float(explicit)
-		except (TypeError, ValueError):
-			return None
-	pieces = str(entry.get("scan_location") or "").split(",")
-	if len(pieces) != 2:
-		return None
-	try:
-		return float(pieces[index].strip())
-	except (TypeError, ValueError):
-		return None
+			found[str(row.get("employee") or "")] = files.read_file_bytes(docname)
+		except Exception:
+			continue
+	return found
 
 
 # ── 6. complete_training_session ────────────────────────────────────────────

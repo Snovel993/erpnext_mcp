@@ -590,6 +590,7 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"complete_training_session",
 		"get_training_session",
 		"list_training_sessions",
+		"render_training_sign_in_sheet",
 		# The payroll deduction register: three reads and two writes.
 		# `MobileAPI.swift` names none of the five — there is no deductions
 		# screen in the app — so the server half is published first and the iOS

@@ -43,6 +43,7 @@ is not valid GeoJSON is refused on any site.
 import json
 import math
 
+from .args import as_float
 from .errors import ToolError
 
 try:  # pragma: no cover - exercised by whichever branch the test bench has
@@ -352,6 +353,82 @@ def h3_cells(geometry: dict, resolutions=H3_RESOLUTIONS) -> dict:
 def cell_for_point(lat: float, lon: float, resolution: int) -> str:
 	require()
 	return h3.latlng_to_cell(float(lat), float(lon), int(resolution))
+
+
+#: The resolution a point fix is filed at. ~66 m edge, which is the scale at
+#: which "was the crew at the shed or at the block" is a question with an answer
+#: and "which side of the row" is not.
+POINT_RESOLUTION = 9
+
+
+def coordinates(args: dict, *, prefix: str = "", required: bool = True, tail: str = "Nothing was created.") -> tuple:
+	"""`(latitude, longitude)` in decimal degrees from a call, or `(None, None)`.
+
+	ONE READING OF A PAIR OF COORDINATES FOR THE WHOLE APP. `log_shift_location`
+	had this inline and a training session's badge scan needed the same thing an
+	hour later; two copies of "is this a point on Earth" is two chances for one
+	surface to accept the pair the wrong way round.
+
+	`lat` AND `lon` ARE ACCEPTED because that is what a phone's location API hands
+	back and what `find_fields_containing_point` calls them. `prefix` gives a
+	record that carries more than one fix its own pair — `scan_latitude` and
+	`scan_lat` for the badge scan — without a second function.
+
+	ALL OR NOTHING, ALWAYS. A latitude with no longitude is a point on a line
+	rather than a place, and half a fix stored as if it were a whole one is worse
+	than none — so where the pair is optional, one half alone is still refused
+	rather than silently dropped. That refusal is the difference between "the
+	phone had no signal" and "the phone had a fix and this app kept half of it".
+	"""
+	pairs = {}
+	for full, short in (("latitude", "lat"), ("longitude", "lon")):
+		value = args.get(f"{prefix}{full}")
+		if value in (None, ""):
+			value = args.get(f"{prefix}{short}")
+		if value in (None, ""):
+			pairs[full] = None
+			continue
+		pairs[full] = as_float(value, f"{prefix}{full}")
+
+	latitude, longitude = pairs["latitude"], pairs["longitude"]
+	if latitude is None and longitude is None:
+		if required:
+			raise ToolError(
+				f"{prefix}latitude and {prefix}longitude are required, in decimal degrees "
+				f"({prefix}lat and {prefix}lon are accepted for them). A fix with no position is "
+				f"a timestamp. {tail}"
+			)
+		return None, None
+	if latitude is None or longitude is None:
+		missing = f"{prefix}latitude" if latitude is None else f"{prefix}longitude"
+		raise ToolError(
+			f"{missing} is required and the other half of the pair was given without it. Half a "
+			f"fix is a point on a line rather than a place, and storing it as if it were a whole "
+			f"one is worse than storing nothing. Send both or neither. {tail}"
+		)
+	if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+		raise ToolError(
+			f"[{longitude}, {latitude}] is not a point on Earth. Latitude runs -90 to 90 and "
+			"longitude -180 to 180 — a latitude past 90 is almost always the pair the wrong way "
+			f"round, which is the one version of this mistake a computer can catch. {tail}"
+		)
+	return latitude, longitude
+
+
+def point_cell(latitude, longitude, resolution: int = POINT_RESOLUTION) -> str:
+	"""The H3 cell one fix falls in, or "" on a site without the library.
+
+	NEVER RAISES, which is the difference from `cell_for_point` and the reason
+	this exists beside it. An H3 index is a convenience for grouping fixes that
+	happened in the same place; a bench without the library should lose the
+	grouping and keep the coordinates, not lose the record.
+	"""
+	if latitude is None or longitude is None or not available():
+		return ""
+	try:
+		return cell_for_point(float(latitude), float(longitude), int(resolution))
+	except Exception:  # pragma: no cover - an h3 build that will not index a point
+		return ""
 
 
 def cell_resolution(cell: str) -> int:

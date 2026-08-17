@@ -14259,8 +14259,25 @@ TOOLS = {
 				"Who attended, where there is no badge to scan. Docname, employee number, name or "
 				"login. Given alongside a badge, the two must agree.",
 			),
-			"scan_location": _field(
-				_STRING, "Where the handset was when the badge was scanned — '45.5152,-122.6784'."
+			"scan_latitude": _field(
+				_NUMBER,
+				"Where the handset was when the badge was scanned, in decimal degrees. THE SAME "
+				"PAIR log_shift_location TAKES, through the same parser — `scan_lat` is accepted, "
+				"a plain `latitude`/`longitude` pair is accepted, the range is checked and half a "
+				"fix is refused. Omitting both is fine and is not a refusal: a metal packing shed "
+				"is where GPS goes to die.",
+			),
+			"scan_longitude": _field(_NUMBER, "See scan_latitude."),
+			"scan_accuracy_meters": _field(
+				_NUMBER,
+				"What the handset said the fix was worth. Kept for the reason log_shift_location "
+				"keeps it: a bad fix is still the only record somebody was there, and it will not "
+				"settle which side of a line they were on.",
+			),
+			"scan_source": _field(
+				_STRING,
+				"iOS (default) or Manual. A coordinate a phone measured at a door and one somebody "
+				"typed at a desk are different kinds of evidence.",
 			),
 			"scanned_at": _field(
 				_STRING, "When it was scanned, YYYY-MM-DD HH:MM:SS. Defaults to now where a badge was given."
@@ -14308,11 +14325,21 @@ TOOLS = {
 			"badge_scan": _field(_STRING, "Their badge, where that is what the handset has."),
 			"signature": _field(
 				_STRING,
-				"The signature file, as a File docname or file_url — upload it through "
-				"stage_file_chunk first. It is what §112.161(a)(4) asks for by name.",
+				"The mark. Base64 PNG or JPEG for a capture taken on a pad, or a File docname or "
+				"file_url for one already uploaded through stage_file_chunk — routed by shape, so "
+				"one argument takes both. `signature_base64` and `file_token` are accepted "
+				"verbatim for a client written against the I-9 pad. THE BYTES ARE SNIFFED, not "
+				"the filename: a signature box holding something that merely ends in .png is "
+				"worse than an empty one.",
 			),
-			"signed_at": _field(
-				_STRING, "When they signed, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			"signature_base64": _field(_STRING, "The capture, explicitly as base64. Up to 512 KB."),
+			"file_token": _field(_STRING, "A File already on the site, explicitly as a token."),
+			"verification_method": _field(
+				_STRING,
+				"Badge QR, Employee ID or Photo — how identity was established AT THE PAD. Omit "
+				"it where no check was made; the evidence row records that honestly as Unverified "
+				"rather than claiming a check that did not happen. Saying Badge QR without a "
+				"badge is refused.",
 			),
 			"replace_signature": _field(
 				_BOOLEAN,
@@ -14390,6 +14417,47 @@ TOOLS = {
 		required=("session",),
 		mutating=True,
 		title="Complete a training session",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"render_training_sign_in_sheet": _tool(
+		training_sessions.render_training_sign_in_sheet,
+		"MUTATING (default OFF). Draw the sign-in sheet: the course at the top, a "
+		"line per person with their badge, the moment they were scanned, and their "
+		"own mark on a ruled line.\n\n"
+		"THE PAGE AN AUDITOR ASKS TO SEE. The training records a session produces "
+		"are what a compliance matrix reads; this is what somebody hands across a "
+		"table. Drawn on the same primitives the six tax forms and the pay stub are "
+		"drawn on, with its own footer — it is NOT a working copy of a government "
+		"form, because there is no government form for this. It is the employer's "
+		"own record of an afternoon.\n\n"
+		"IT IS WHAT MAKES THE SESSION SEALABLE. seal_signed_document staples its "
+		"verification appendix onto a RENDERED form and hashes the result; a "
+		"training session could collect signatures through the same chain as an "
+		"I-9 and, until this existed, could not produce the same tamper-evident "
+		"copy at the end. get_document_preview reads the same page.\n\n"
+		"AN UNSIGNED LINE IS DRAWN RULED AND EMPTY and says 'not signed'. A sheet "
+		"that hid the four of twelve who never signed would be the one document in "
+		"this app that flatters the record.\n\n"
+		"WHAT IS DELIBERATELY NOT ON THE PAGE is the GPS fix. It is on the record "
+		"and in the Signing Evidence rows; printing coordinates against a worker's "
+		"name on a document that gets handed around is tracking data on a page that "
+		"does not need it.\n\n"
+		"A SNAPSHOT, NOT A VIEW: a second render refuses without overwrite=true, "
+		"because the likeliest thing in that field is the copy somebody printed.",
+		{
+			"session": _field(_STRING, "The Training Session docname — TRNS-2026-0001."),
+			"name": _field(_STRING, "Alias for session."),
+			"training_session": _field(_STRING, "Alias for session."),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Draw a fresh page over one already rendered. Default false. The existing File "
+				"stays attached to the record either way.",
+			),
+		},
+		required=("session",),
+		mutating=True,
+		title="Render a training sign-in sheet",
 		available=_needs_doctype("Training Session"),
 		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

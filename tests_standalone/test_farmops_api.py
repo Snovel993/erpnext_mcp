@@ -495,6 +495,7 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/complete_training_session",
 		"/mobile/get_training_session",
 		"/mobile/list_training_sessions",
+		"/mobile/render_training_sign_in_sheet",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 		# v0.91.0. Direct deposit. The read is the caller's own accounts and the

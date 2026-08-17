@@ -703,6 +703,7 @@ ROUTES = (
 	Route("/mobile", mobile_api.complete_training_session),
 	Route("/mobile", mobile_api.get_training_session),
 	Route("/mobile", mobile_api.list_training_sessions),
+	Route("/mobile", mobile_api.render_training_sign_in_sheet),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 	# Direct deposit. The worker's OWN bank details and nobody else's —

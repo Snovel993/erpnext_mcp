@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 723 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 724 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -7318,8 +7318,15 @@ sheet recording one person's badge against another's name would be the one
 document in this app that states something nobody believes.
 
 A row with **no** badge is allowed and produces no training record — it says
-somebody typed a name, which is true and is not evidence. `scan_location` is not
-required; a metal packing shed is where GPS goes to die.
+somebody typed a name, which is true and is not evidence.
+
+**The fix is `log_shift_location`'s, not a second format.** `scan_latitude` /
+`scan_longitude` go through the same parser a shift breadcrumb does — the same
+`lat`/`lon` aliases, the same range check, the same refusal of half a pair — and
+the row stores the same four columns a `Shift Location Log` carries, H3 cell
+included, so a scan at a shed door and a track across a block can be grouped by
+place without comparing floats. Coordinates are optional and their absence is not
+a refusal; a metal packing shed is where GPS goes to die.
 
 #### `sign_session_attendance`
 
@@ -7327,12 +7334,37 @@ required; a metal packing shed is where GPS goes to die.
 `employee` or `badge_scan`, `signed_at`, `replace_signature`, `device_id`,
 `gps_latitude` / `gps_longitude`.
 
+**It is a door onto `collect_form_signature`, not a second implementation.**
+`Training Session.signature` is a box in the same closed registry the I-9's three
+boxes and the W-4's live in, so a training signature gets the whole chain: the
+capture is size-limited and sniffed by its **magic bytes** rather than trusted by
+its filename, the caller's `write` permission and company scope are checked
+through Frappe's own system, the badge is resolved by `resolve_badge` and
+**refused when it names somebody other than the person on the row**, the session
+is fingerprinted before the mark is written, and a `Signing Evidence` row records
+who, how, on what device and where. What this tool adds is the training-shaped
+part: it names the box, turns an `employee` or a badge into the attendee row, and
+reports the sheet's state back.
+
+**The row is chosen by who, not by position.** A training session has no single
+`employee` — twelve people sign one afternoon in their own names — so the
+identity check reads its subject from the **attendee row**. Before that it had
+nothing to compare a badge against and every scan passed, which is the failure
+mode an identity check must not have, because it looks exactly like one that
+works.
+
+**`signed_at` is the server's clock and is not an argument.** The evidence row and
+the column it is evidence about must say the same moment, and a signing time a
+caller could choose is the one field on an attestation worth forging.
+
 **A separate call from `add_session_attendee`, deliberately** — the same reason
 `sign_training_supervisor_review` is separate from `record_training`. The badge
 is scanned when somebody walks in and the signature is given when the session
 ends; one call taking both would make a single timestamp the default, and thirty
 scans and thirty signatures sharing a minute is the shape of a sheet an inspector
-reads as filled in at the end. The result says so when it sees it.
+reads as filled in at the end. The result says so when it sees it. A door scan an
+hour earlier is **not** recorded as the signature's verification method: it proves
+who attended, and a scan at the pad is what proves who made the mark.
 
 **The session is hashed before the signature is written,** which is the only
 moment that answers what the signer was shown — the curriculum, the date, the
@@ -7360,6 +7392,32 @@ A row that fails does not take the others with it, and a second call files only
 what is outstanding — a row that already produced a record is skipped, so this is
 safe to retry. It refuses a cancelled session, a session with no regimes, a
 session with no topics, and a session where nobody is ready.
+
+#### `render_training_sign_in_sheet`
+
+**MUTATING, default OFF.** Draws the sheet: the course at the top, a line per
+person with their badge, when they were scanned, and their own mark on a ruled
+line. Takes `session` (required) and `overwrite`.
+
+**It is what makes the session sealable.** `seal_signed_document` staples its
+verification appendix onto a *rendered* form and hashes the result; until this
+existed a training session could collect signatures through the same chain as an
+I-9 and could not produce the same tamper-evident copy at the end.
+`get_document_preview` reads the same page, and `Training Session` resolves
+through `signatures.FORM_HANDLERS` exactly as the other three forms do.
+
+Drawn on the primitives the six tax forms and the pay stub share, with its own
+footer — this is **not** a working copy of a government form, because there is no
+government form for it. It is the employer's own record of an afternoon.
+
+**An unsigned line is drawn ruled and empty** and says so. A sheet that hid the
+four of twelve who never signed would be the one document in this app that
+flatters the record. **The GPS fix is deliberately not on the page**: it is on the
+record and in the evidence rows, and printing coordinates against a worker's name
+on a document that gets handed around is tracking data on a page that does not
+need it.
+
+A snapshot, not a view: a second render refuses without `overwrite=true`.
 
 #### `get_training_session` / `list_training_sessions`
 

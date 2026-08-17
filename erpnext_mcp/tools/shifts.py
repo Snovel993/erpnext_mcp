@@ -1305,30 +1305,15 @@ def log_shift_location(args: dict) -> ToolResult:
 def _coordinates(args: dict) -> tuple:
 	"""`latitude` and `longitude` from the call, both required and both on Earth.
 
-	`lat` and `lon` are accepted as aliases because that is what
-	`find_fields_containing_point` calls them and what a phone's location API
-	hands back. One spelling refused is one round trip for nothing.
+	DELEGATED TO `geo.coordinates` SINCE THE TRAINING SESSION NEEDED THE SAME
+	PAIR. This was written inline here and copied an hour later, which is two
+	chances for one surface to accept the pair the wrong way round; the aliases,
+	the range check and the all-or-nothing rule now live in one function and both
+	callers get the same refusal. The wrapper stays because "a breadcrumb with no
+	position is a timestamp" is a sentence about a SHIFT TRACK, and the shared
+	function has no business knowing what its caller is recording.
 	"""
-	pairs = {}
-	for full, short in (("latitude", "lat"), ("longitude", "lon")):
-		value = args.get(full)
-		if value in (None, ""):
-			value = args.get(short)
-		if value in (None, ""):
-			raise ToolError(
-				f"{full} is required, in decimal degrees ({short!r} is accepted for it). A "
-				"breadcrumb with no position is a timestamp. Nothing was created."
-			)
-		pairs[full] = as_float(value, full)
-	latitude, longitude = pairs["latitude"], pairs["longitude"]
-	if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
-		raise ToolError(
-			f"[{longitude}, {latitude}] is not a point on Earth. Latitude runs -90 to 90 and "
-			"longitude -180 to 180 — a latitude past 90 is almost always the pair the wrong way "
-			"round, which is the one version of this mistake a computer can catch. Nothing was "
-			"created."
-		)
-	return latitude, longitude
+	return geo.coordinates(args, required=True, tail="Nothing was created.")
 
 
 # ── 9. get_shift_track ──────────────────────────────────────────────────────

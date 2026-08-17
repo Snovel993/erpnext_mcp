@@ -374,6 +374,8 @@ FIELDS = (
 	"completed_at",
 	"completed_by",
 	"records_created",
+	"generated_pdf",
+	"generated_pdf_on",
 	"notes",
 )
 
@@ -391,8 +393,12 @@ ATTENDEE_FIELDS = (
 	"employee_name",
 	"attended",
 	"badge_scan",
-	"scan_location",
 	"scanned_at",
+	"scan_latitude",
+	"scan_longitude",
+	"scan_accuracy_meters",
+	"scan_h3_cell",
+	"scan_source",
 	"signature",
 	"signed_at",
 	"training_record",
@@ -461,6 +467,28 @@ def attendees_for_parents(names, limit_per_parent: int = 200) -> dict:
 	return found
 
 
+def scan_position(row: dict) -> dict | None:
+	"""Where the badge was scanned, in the shape a shift breadcrumb reports it.
+
+	`shifts.describe_location_row`'s KEYS, not a second set. A fix taken at a shed
+	door and one taken on a block are the same measurement, and a client that had
+	to read `lat` on one and `scan_latitude` on the other would be reading two
+	formats of one thing. `None` where the phone had no fix, because an object of
+	nulls reads on a screen as a position that failed rather than one nobody took.
+	"""
+	latitude, longitude = row.get("scan_latitude"), row.get("scan_longitude")
+	if latitude in (None, "") or longitude in (None, ""):
+		return None
+	accuracy = row.get("scan_accuracy_meters")
+	return {
+		"lat": round(float(latitude), 7),
+		"lon": round(float(longitude), 7),
+		"accuracy_meters": round(float(accuracy), 2) if accuracy not in (None, "") else None,
+		"h3_cell": row.get("scan_h3_cell") or None,
+		"source": row.get("scan_source") or None,
+	}
+
+
 def describe_attendee(row: dict) -> dict:
 	"""One attendee row, with the state that decides whether it becomes a record.
 
@@ -494,8 +522,8 @@ def describe_attendee(row: dict) -> dict:
 		"attended": bool(attended),
 		"badge_scan": row.get("badge_scan") or None,
 		"badge_scanned": scanned,
-		"scan_location": row.get("scan_location") or None,
 		"scanned_at": str(row.get("scanned_at") or "") or None,
+		"scan_position": scan_position(row),
 		"signature": row.get("signature") or None,
 		"signed": signed,
 		"signed_at": str(row.get("signed_at") or "") or None,

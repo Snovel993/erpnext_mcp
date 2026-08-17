@@ -12,8 +12,14 @@
   "attended",
   "identity_col",
   "badge_scan",
-  "scan_location",
   "scanned_at",
+  "position_section",
+  "scan_latitude",
+  "scan_longitude",
+  "position_col",
+  "scan_accuracy_meters",
+  "scan_h3_cell",
+  "scan_source",
   "signature_section",
   "signature",
   "signed_at",
@@ -63,17 +69,57 @@
    "search_index": 1
   },
   {
-   "description": "Where the handset was when the badge was scanned — '45.5152,-122.6784'. FSMA §112.161(a)(1)(i) asks an activity record where it happened, and a training session's location field says which shed while this says where the person was standing. A scan with no coordinates is recorded without them rather than refused: a metal packing shed is where GPS goes to die, and a training that happened is better evidence than a refusal.",
-   "fieldname": "scan_location",
-   "fieldtype": "Data",
-   "label": "Scan Location (GPS)"
-  },
-  {
    "description": "When the badge was scanned. Written by add_session_attendee at the moment it happens, which is what makes 'thirty scans inside four seconds' visible to anybody who reads the column — a sheet signed in one hand at the end of the week looks exactly like a sheet signed as people arrived, and this is the difference.",
    "fieldname": "scanned_at",
    "fieldtype": "Datetime",
    "label": "Scanned At",
    "read_only": 1
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Where the scan happened"
+  },
+  {
+   "description": "Where the handset was when the badge was scanned, in decimal degrees. THE SAME FOUR COLUMNS A Shift Location Log ROW CARRIES, and deliberately so: a breadcrumb on a shift track and a fix taken at a shed door are the same measurement, and a second shape for it would need a second reader. FSMA §112.161(a)(1)(i) asks an activity record where it happened; the session's `location` answers it in words and this corroborates it. A scan with no coordinates is recorded without them rather than refused — a metal packing shed is where GPS goes to die, and a training that happened is better evidence than a refusal.",
+   "fieldname": "scan_latitude",
+   "fieldtype": "Float",
+   "label": "Scan Latitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "scan_longitude",
+   "fieldtype": "Float",
+   "label": "Scan Longitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "position_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the handset said its fix was worth, in metres. Kept for the reason log_shift_location keeps it: a fix under a canopy reads badly and is still the only record that somebody was there, but it will not settle which side of a line they were on.",
+   "fieldname": "scan_accuracy_meters",
+   "fieldtype": "Float",
+   "label": "Accuracy (m)",
+   "precision": "2"
+  },
+  {
+   "description": "The H3 cell the fix falls in at resolution 9 (~66 m), derived on write by geo.point_cell — the same index a shift breadcrumb carries, so scans and tracks can be grouped by place without comparing floats. Empty on a bench without the h3 library, which loses the grouping and keeps the coordinates.",
+   "fieldname": "scan_h3_cell",
+   "fieldtype": "Data",
+   "label": "H3 Cell",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "iOS",
+   "description": "Where the fix came from, in Shift Location Log's own vocabulary. A coordinate somebody typed at a desk and one a phone measured at a door are different kinds of evidence and the column says which.",
+   "fieldname": "scan_source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "iOS\nManual"
   },
   {
    "fieldname": "signature_section",

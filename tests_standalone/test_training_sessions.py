@@ -45,9 +45,13 @@ EIGHT CLAIMS.
    produced no record and is invisible to `list_trainings`.
 """
 
+import base64
+import unittest
+
 import frappe
 
-from erpnext_mcp import roles, training, training_sessions
+from erpnext_mcp import form_pdf_renderer, roles, training, training_sessions
+from erpnext_mcp.tools import signatures
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
 from .harness import ROLES, STORE
@@ -70,6 +74,11 @@ ON = {
 		"get_training",
 		"get_training_compliance_report",
 		"resolve_badge",
+		"render_training_sign_in_sheet",
+		"collect_form_signature",
+		"list_signing_evidence",
+		"get_document_preview",
+		"seal_signed_document",
 	)
 }
 
@@ -89,7 +98,15 @@ BEN_BADGE = "ETC-0002"
 THIRD_BADGE = "ETC-0003"
 RETIRED_BADGE = "ETC-0009"
 
-SIGNATURE = "/files/ben-signature.png"
+#: The smallest thing that is genuinely a PNG — an 8-byte magic number and a
+#: payload. `_sniff` reads the BYTES rather than trusting a filename, which is
+#: the whole reason this suite sends one instead of a path: the signature chain
+#: this tool now delegates to would refuse a string that merely looks like a
+#: file, and that refusal is the improvement over what this tool used to accept.
+SIGNATURE = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"signature").decode()
+
+
+SECOND_SIGNATURE = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"second").decode()
 
 
 def days_out(count: int) -> str:
@@ -150,7 +167,7 @@ class TrainingSessionTestCase(V12TestCase):
 		for badge in (BEN_BADGE, THIRD_BADGE):
 			self.tool_data(
 				"add_session_attendee",
-				{"session": session, "badge_scan": badge, "scan_location": "45.5152,-122.6784"},
+				{"session": session, "badge_scan": badge, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
 			)
 		for person in (TRAINEE, SECOND):
 			self.tool_data(
@@ -407,13 +424,15 @@ class TheBadgeIsTheIdentification(TrainingSessionTestCase):
 		session = self.open_session()["name"]
 		data = self.tool_data(
 			"add_session_attendee",
-			{"session": session, "badge_scan": BEN_BADGE, "scan_location": "45.5152,-122.6784"},
+			{"session": session, "badge_scan": BEN_BADGE, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
 		)
 		row = data["attendee"]
 		self.assertEqual(row["employee"], TRAINEE)
 		self.assertEqual(row["employee_name"], "Ben Packhouse")
 		self.assertEqual(row["badge_scan"], BEN_BADGE)
-		self.assertEqual(row["scan_location"], "45.5152,-122.6784")
+		self.assertEqual(row["scan_position"]["lat"], 45.5152)
+		self.assertEqual(row["scan_position"]["lon"], -122.6784)
+		self.assertEqual(row["scan_position"]["source"], "iOS")
 		self.assertTrue(row["scanned_at"])
 		self.assertEqual(row["state"], training_sessions.ATTENDEE_INCOMPLETE)
 		self.assertEqual(row["missing"], ["signature"])
@@ -481,14 +500,33 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 		session = self.open_session()["name"]
 		self.tool_data(
 			"add_session_attendee",
-			{"session": session, "badge_scan": BEN_BADGE, "scan_location": "45.5152,-122.6784"},
+			{"session": session, "badge_scan": BEN_BADGE, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
 		)
+		# THE CARD IS RESCANNED AT THE PAD, which is what makes the evidence row
+		# say Badge QR. A door scan an hour earlier proves who ATTENDED; a scan at
+		# the moment of signing is what proves who made THIS mark, and the chain
+		# will not conflate the two.
 		data = self.tool_data(
 			"sign_session_attendance",
-			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
+			{
+				"session": session,
+				"employee": TRAINEE,
+				"badge_scan": BEN_BADGE,
+				"signature": SIGNATURE,
+				# The pad's OWN fix, not the door scan's. The evidence row says
+				# where this mark was made; where the badge was scanned is on the
+				# attendee row, and conflating the two would have the evidence
+				# assert something nobody measured.
+				"gps_latitude": 45.5152,
+				"gps_longitude": -122.6784,
+			},
 		)
 
-		self.assertEqual(data["attendee"]["signature"], SIGNATURE)
+		# The column holds the URL of the File the shared chain wrote, not the
+		# base64 that was sent in — the capture became a private File attached to
+		# the session, exactly as an I-9's does.
+		self.assertTrue(data["attendee"]["signature"].startswith("/private/files/"))
+		self.assertIn(TRAINEE, data["attendee"]["signature"])
 		self.assertTrue(data["attendee"]["signed_at"])
 		self.assertEqual(data["attendee"]["state"], training_sessions.ATTENDEE_READY)
 		self.assertTrue(data["signing_evidence"]["recorded"])
@@ -516,24 +554,34 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 		self.assertNotIn("signature", evidence["hashed_fields"].split(","))
 
 	def test_signing_for_somebody_who_is_not_on_the_sheet_is_refused(self):
+		"""An empty sheet and a sheet without THIS person are two refusals."""
 		session = self.open_session()["name"]
-		error = self.tool_error(
+		empty = self.tool_error(
 			"sign_session_attendance",
 			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
 		)
-		self.assertIn("not on", error)
-		self.assertIn("add_session_attendee", error)
+		self.assertIn("has no attendees", empty)
+		self.assertIn("add_session_attendee", empty)
+
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": THIRD_BADGE})
+		wrong = self.tool_error(
+			"sign_session_attendance",
+			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
+		)
+		self.assertIn("has no attendee", wrong)
+		# The refusal lists who IS on the sheet, which is the useful half.
+		self.assertIn(SECOND_NAME, wrong)
 
 	def test_replacing_a_signature_is_a_decision_rather_than_a_retry(self):
 		session = self.open_session()["name"]
 		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
-		self.tool_data(
+		first = self.tool_data(
 			"sign_session_attendance",
 			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
-		)
+		)["attendee"]["signature"]
 		error = self.tool_error(
 			"sign_session_attendance",
-			{"session": session, "employee": TRAINEE, "signature": "/files/second.png"},
+			{"session": session, "employee": TRAINEE, "signature": SECOND_SIGNATURE},
 		)
 		self.assertIn("replace_signature=true", error)
 
@@ -542,12 +590,17 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 			{
 				"session": session,
 				"employee": TRAINEE,
-				"signature": "/files/second.png",
+				"signature": SECOND_SIGNATURE,
 				"replace_signature": True,
 			},
 		)
 		self.assertTrue(data["replaced_signature"])
-		self.assertEqual(data["attendee"]["signature"], "/files/second.png")
+		self.assertTrue(data["attendee"]["signature"])
+		# The new evidence row names the one it replaced, which is the claim that
+		# matters: `supersedes` is how an auditor reads a replaced attestation as
+		# replaced rather than as the only one there ever was.
+		replaced = dict(STORE.get_raw("Signing Evidence", data["signing_evidence"]["evidence"]))
+		self.assertTrue(replaced["supersedes"])
 
 	def test_a_signature_without_a_badge_records_the_evidence_as_unverified(self):
 		session = self.open_session()["name"]
@@ -561,19 +614,19 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 		self.assertEqual(data["attendee"]["missing"], ["badge_scan"])
 
 	def test_a_scan_and_a_signature_sharing_a_minute_are_recorded_and_named(self):
+		"""Scanned and signed in one breath, which is what a toolbox talk is.
+
+		`signed_at` IS THE SERVER'S CLOCK AND NOT AN ARGUMENT, which is the
+		shared chain's rule rather than this tool's: an evidence row and the
+		column it is evidence about must say the same moment, and a signing time
+		a caller could choose is the one field on an attestation worth forging.
+		So this test makes the two moments coincide by doing them at once.
+		"""
 		session = self.open_session()["name"]
-		self.tool_data(
-			"add_session_attendee",
-			{"session": session, "badge_scan": BEN_BADGE, "scanned_at": "2026-07-01 09:00:00"},
-		)
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
 		data = self.tool_data(
 			"sign_session_attendance",
-			{
-				"session": session,
-				"employee": TRAINEE,
-				"signature": SIGNATURE,
-				"signed_at": "2026-07-01 09:00:30",
-			},
+			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
 		)
 		self.assertIn("filled in at the end", data["timing_note"])
 
@@ -598,7 +651,7 @@ class CompletionWritesOneRecordPerProvableAttendance(TrainingSessionTestCase):
 			self.assertEqual(row["company"], MAIN)
 			self.assertEqual(row["regimes"], "OR-OSHA")
 			self.assertEqual(str(row["completed_date"]), frappe.utils.today())
-			self.assertEqual(row["person_performed_signature"], SIGNATURE)
+			self.assertTrue(str(row["person_performed_signature"]).startswith("/private/files/"))
 			self.assertTrue(row["expires_date"])
 
 	def test_the_attendee_row_names_the_record_it_produced(self):
@@ -785,3 +838,170 @@ class ReadingTheRegister(TrainingSessionTestCase):
 			"list_training_sessions", {"company": MAIN, "from_date": days_out(-7)}
 		)
 		self.assertEqual([row["name"] for row in data["sessions"]], [recent])
+
+
+# ── 9 ───────────────────────────────────────────────────────────────────────
+class ItUsesTheSignatureChainRatherThanOneOfItsOwn(TrainingSessionTestCase):
+	"""The integration claim: a training signature IS an I-9 signature's machinery.
+
+	Every assertion here is about something this module does NOT implement.
+	`sign_session_attendance` names a box and a row; `collect_form_signature`
+	validates the capture, resolves the badge, checks the permission, hashes the
+	document and writes the evidence — and the point of testing it from this side
+	is that a future edit which quietly reimplements any of that would fail here.
+	"""
+
+	def test_the_box_is_in_the_shared_registry(self):
+		box = signatures.BOXES_BY_KEY.get("Training Session.signature")
+		self.assertIsNotNone(box)
+		self.assertEqual(box.child_table, "attendees")
+		self.assertEqual(box.child_subject_field, "employee")
+		self.assertTrue(box.attestation)
+		# Every signature column on the doctype leaves the fingerprint, computed
+		# from the registry rather than listed — so this box cannot be added
+		# without its own columns dropping out of the hash.
+		self.assertIn("signature", signatures.hash_exclusions("Training Session"))
+		self.assertIn("signed_at", signatures.hash_exclusions("Training Session"))
+
+	def test_collect_form_signature_signs_a_session_directly(self):
+		"""Reachable by the generic tool, not only through the training wrapper."""
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
+		data = self.tool_data(
+			"collect_form_signature",
+			{
+				"doctype": "Training Session",
+				"form": session,
+				"field": "signature",
+				"employee": TRAINEE,
+				"signature_base64": SIGNATURE,
+			},
+		)
+		self.assertEqual(data["doctype"], "Training Session")
+		self.assertTrue(data["evidence"]["recorded"])
+
+	def test_a_badge_at_the_pad_naming_somebody_else_is_refused(self):
+		"""`_identity`'s check, against the ROW's employee rather than the parent's.
+
+		A Training Session has no `employee` column. Before the subject was read
+		off the attendee row this comparison had nothing to compare against and
+		every badge passed — which is the failure mode an identity check must not
+		have, because it looks exactly like one that works.
+		"""
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
+		error = self.tool_error(
+			"sign_session_attendance",
+			{"session": session, "employee": TRAINEE, "badge_scan": THIRD_BADGE, "signature": SIGNATURE},
+		)
+		self.assertIn("belongs to", error)
+		self.assertIn("Nothing was changed", error)
+
+	def test_the_capture_is_sniffed_rather_than_trusted(self):
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
+		error = self.tool_error(
+			"sign_session_attendance",
+			{
+				"session": session,
+				"employee": TRAINEE,
+				"signature": base64.b64encode(b"<svg onload=alert(1)>").decode(),
+			},
+		)
+		self.assertIn("neither a PNG nor a JPEG", error)
+
+	def test_a_method_claiming_a_badge_without_one_is_refused(self):
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "employee": TRAINEE})
+		error = self.tool_error(
+			"sign_session_attendance",
+			{
+				"session": session,
+				"employee": TRAINEE,
+				"signature": SIGNATURE,
+				"verification_method": "Badge QR",
+			},
+		)
+		self.assertIn("no signer_badge came with it", error)
+
+	def test_the_evidence_row_is_the_register_the_i9_writes_to(self):
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
+		self.tool_data(
+			"sign_session_attendance",
+			{"session": session, "employee": TRAINEE, "badge_scan": BEN_BADGE, "signature": SIGNATURE},
+		)
+		listed = self.tool_data(
+			"list_signing_evidence", {"document_type": "Training Session", "document_name": session}
+		)
+		self.assertEqual(listed["count"], 1)
+		self.assertEqual(listed["evidence"][0]["signer"], TRAINEE)
+		self.assertEqual(listed["evidence"][0]["signature_role"], "Employee")
+
+	def test_signing_names_the_row_by_any_of_the_four_names_for_a_person(self):
+		"""`_child_row` takes the subject through `resolve_employee`."""
+		session = self.open_session()["name"]
+		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
+		data = self.tool_data(
+			"sign_session_attendance",
+			{"session": session, "employee": "Ben Packhouse", "signature": SIGNATURE},
+		)
+		self.assertEqual(data["attendee"]["employee"], TRAINEE)
+
+
+# ── 10 ──────────────────────────────────────────────────────────────────────
+@unittest.skipUnless(form_pdf_renderer.available(), "reportlab is not installed on this bench")
+class TheSignInSheetIsAPageAndThenASealedOne(TrainingSessionTestCase):
+	def test_it_draws_a_page_with_a_line_per_attendee(self):
+		session = self.a_full_session()
+		data = self.tool_data("render_training_sign_in_sheet", {"session": session})
+
+		self.assertEqual(data["attendees_drawn"], 2)
+		self.assertEqual(data["signatures_drawn"], 2)
+		self.assertTrue(data["file_url"].endswith(".pdf"))
+		self.assertEqual(
+			dict(STORE.get_raw(training_sessions.DOCTYPE, session))["generated_pdf"],
+			data["file_url"],
+		)
+
+	def test_an_unsigned_line_is_drawn_and_named_rather_than_omitted(self):
+		session = self.a_full_session()
+		self.tool_data("add_session_attendee", {"session": session, "employee": SUPERVISOR})
+		data = self.tool_data("render_training_sign_in_sheet", {"session": session})
+		self.assertEqual(data["attendees_drawn"], 3)
+		self.assertEqual(data["signatures_drawn"], 2)
+		self.assertEqual(data["without_signature"], [SUPERVISOR])
+		self.assertIn("flatters the record", data["unsigned_note"])
+
+	def test_a_second_render_is_a_decision_rather_than_a_retry(self):
+		session = self.a_full_session()
+		self.tool_data("render_training_sign_in_sheet", {"session": session})
+		error = self.tool_error("render_training_sign_in_sheet", {"session": session})
+		self.assertIn("overwrite=true", error)
+		self.assertTrue(
+			self.tool_data("render_training_sign_in_sheet", {"session": session, "overwrite": True})["replaced"]
+		)
+
+	def test_the_preview_reads_the_same_page(self):
+		session = self.a_full_session()
+		self.tool_data("render_training_sign_in_sheet", {"session": session})
+		preview = self.tool_data(
+			"get_document_preview", {"document_type": "Training Session", "document_name": session}
+		)
+		self.assertEqual(preview["document_name"], session)
+		self.assertTrue(preview["available"])
+		self.assertTrue(preview["signature_boxes"])
+
+	def test_the_sheet_seals_like_any_other_signed_document(self):
+		"""The half of the pattern that needed a renderer to exist at all."""
+		session = self.a_full_session()
+		data = self.tool_data("seal_signed_document", {"document_type": "Training Session", "document_name": session})
+
+		self.assertTrue(data["sealed"])
+		self.assertTrue(data["file_url"].endswith(".pdf"))
+		self.assertTrue(data["sealed_pdf_hash"].startswith("sha256:"))
+		self.assertEqual(len(data["evidence"]), 2)
+		# A Training Session names no single employee, so the sealed copy is not
+		# cross-filed into a personnel folder — the same honest answer a Tax Form
+		# gets, rather than an invented link.
+		self.assertFalse(data["employee_copy"]["filed"])
