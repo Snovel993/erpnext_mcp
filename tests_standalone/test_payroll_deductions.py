@@ -715,6 +715,41 @@ class DeductionTools(V12TestCase):
 		)
 		self.assertTrue(any("FICA" in note for note in created["notes"]))
 
+	def test_a_mistyped_category_is_refused_at_write_time(self):
+		"""'401k' is not the key — `retirement_401k` is. Caught here, it never
+		reaches a pay stub as an unlabelled 'Other' line with a real amount."""
+		error = self.tool_error("create_payroll_deduction", {
+			"employee": "HR-EMP-00001", "company": MAIN,
+			"deduction_category": "401k", "amount": 100.0,
+		})
+		self.assertIn("must be one of", error)
+		self.assertIn("Retirement 401k", error)
+
+	def test_a_category_written_around_the_tools_is_flagged_on_every_read(self):
+		"""The tools refuse it and the Desk field is a Select, so a row like this
+		was written by a patch, an import or the console — which is exactly the
+		row nobody is watching. It resolves to the `other` spec silently, so the
+		reads say so rather than leaving it to surface on somebody's pay stub."""
+		created = self._create()
+		name = created["deduction"]["name"]
+		# Write around the tool the way a patch or an import would.
+		STORE.tables["Farm Payroll Deduction"][name]["deduction_category"] = "401k"
+
+		got = self.tool_data("get_payroll_deduction", {"deduction": name})
+		self.assertFalse(got["deduction"]["deduction_category_recognised"])
+		self.assertTrue(any("not one this app recognises" in note for note in got["notes"]))
+		self.assertTrue(any("Other" in note for note in got["notes"]))
+
+	def test_a_genuine_other_category_is_recognised(self):
+		"""`Other` is a real category and must not be confused with the fallback
+		an unrecognised one lands on — they resolve to the same spec."""
+		created = self._create(deduction_category="Other", deduction_type="Voluntary",
+		                       amount=15, reference="MISC-1")
+		self.assertTrue(created["deduction"]["deduction_category_recognised"])
+		self.assertFalse(
+			any("not one this app recognises" in note for note in created.get("notes", []))
+		)
+
 	def test_an_ambiguous_employee_name_is_refused(self):
 		STORE.tables.setdefault("Employee", {}).update({
 			f"HR-EMP-0000{index}": {

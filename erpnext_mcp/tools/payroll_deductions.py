@@ -157,7 +157,26 @@ def _describe(row: dict) -> dict:
 	described["pay_stub_label"] = payroll_deductions.row_label(row)
 	described["limit_rule"] = payroll_deductions._limit_of(row)
 	described["in_force_today"] = payroll_deductions.is_active(row, frappe.utils.today())
+	# Does the stored category actually name one this app knows? `_key` falls back
+	# to `other` rather than raising, which is right for a payroll run — a
+	# category nobody recognises is not worth refusing a whole company's pay over
+	# — but the fallback is SILENT, and the place it stops being silent is here.
+	# See `_notes` for what it costs when it is not caught.
+	described["deduction_category_recognised"] = _recognised(row)
 	return described
+
+
+def _recognised(row: dict) -> bool:
+	"""Is the stored category one of the twelve, or is it falling back to `other`?
+
+	A row whose category is genuinely `Other` is recognised; one that says `401k`
+	is not, and the two are indistinguishable downstream because both resolve to
+	the same spec.
+	"""
+	raw = str(row.get("deduction_category") or "").strip()
+	if not raw:
+		return False
+	return payroll_deductions._key(raw, payroll_deductions.CATEGORIES, "") != ""
 
 
 def _notes(row: dict) -> list[str]:
@@ -171,6 +190,33 @@ def _notes(row: dict) -> list[str]:
 		row.get("deduction_category"), payroll_deductions.CATEGORIES, "other",
 	)
 	kind = payroll_deductions.row_type(row)
+
+	# FIRST, because it changes what every other note below is talking about: an
+	# unrecognised category resolves to the `other` spec, which decides the
+	# priority, the ceiling and the pre-tax treatment — so the row is being
+	# processed as something other than what somebody meant.
+	#
+	# THE COST IS PAID ON A WORKER'S PAY STATEMENT. `row_label` falls back to the
+	# spec's label, so a row filed as `401k` prints as an unlabelled "Other" line
+	# with a real amount against it, indistinguishable from a genuine `Other`
+	# deduction by the time it is on the page.
+	#
+	# `create_payroll_deduction` and `update_payroll_deduction` REFUSE this by
+	# name — `as_choice` validates against the doctype's own Select — and the
+	# Desk field is a Select too. So a row that reaches here unrecognised was
+	# written around both: a bench console, a patch, or a data import. That is
+	# exactly the row nobody is watching, which is why it is said on every read
+	# rather than only at write time.
+	if not _recognised(row):
+		notes.append(
+			f"Category {str(row.get('deduction_category') or '')!r} is not one this app "
+			f"recognises, so it is being processed as 'Other' — priority "
+			f"{payroll_deductions.category_spec('other')['priority']}, no statutory ceiling of "
+			"its own, and post-tax. It will also print as an unlabelled 'Other' line on a pay "
+			"stub. The tools refuse this at write time, so this row was written around them "
+			f"(a patch, an import, or the console). Valid categories: "
+			f"{', '.join(payroll_deductions.CATEGORIES)}."
+		)
 
 	if kind == "garnishment" and not str(row.get("reference") or "").strip():
 		notes.append(
