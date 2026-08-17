@@ -407,3 +407,199 @@ class TheFlowIsChecked(WizardTestCase):
 		annoyance; a required question silently hidden by a typo is a record
 		with a hole in it that nobody notices."""
 		self.assertIsNone(wizards._condition("{not json"))
+
+
+# ── 5. a field is a row, and Frappe does not write it for you ───────────────
+class TheFieldsAreStoredWhereTheyCanBeReadBack(WizardTestCase):
+	"""v0.91.0. The grandchild that reached no table, and the five empty forms.
+
+	`Wizard Field` is a child table of `Wizard Step`, which is a child table of
+	`Wizard Definition`. FRAPPE TRAVERSES EXACTLY ONE LEVEL IN BOTH DIRECTIONS:
+	`insert()` walks `get_all_children()`, which reads the table fields off the
+	PARENT's meta, and `db_insert` builds its row from `get_valid_dict()`, which
+	has no column for a Table field — so a field appended onto a step row is
+	validated and then dropped on the floor. `load_from_db` fills the
+	definition's `steps` and stops, so `step.get("fields")` comes back empty even
+	where something did write them.
+
+	The seeder appended, `describe()` read what it had appended, and 9,859 tests
+	agreed with both — because the double stored documents whole and the nesting
+	was real here and fiction in MariaDB. On Tim's site all five shipped wizards
+	answered `fields: []` and the handset refused to draw a form with nothing on
+	it, which was the correct call about an incorrect payload.
+
+	So: the rows are written as documents of their own, and they are FETCHED by
+	`parent`. Both halves are asserted here, and the double drops grandchildren
+	now so neither can pass on the strength of the other.
+	"""
+
+	def steps_of(self, wizard="accident_investigation"):
+		import frappe
+
+		return frappe.db.get_all(
+			"Wizard Step",
+			filters={"parent": wizard, "parenttype": "Wizard Definition", "parentfield": "steps"},
+			fields=["name", "step_key"],
+			order_by="idx asc",
+		)
+
+	def rows_under(self, step):
+		import frappe
+
+		return frappe.db.get_all(
+			"Wizard Field",
+			filters={"parent": step, "parenttype": "Wizard Step", "parentfield": "fields"},
+			fields=["name", "fieldname", "idx"],
+			order_by="idx asc",
+		)
+
+	# ── the storage ─────────────────────────────────────────────────────────
+	def test_a_field_is_a_row_of_its_own_pointing_at_its_step(self):
+		first = self.steps_of()[0]
+		names = [row["fieldname"] for row in self.rows_under(first["name"])]
+		self.assertEqual(names, ["occurred_at", "severity", "incident_description", "narrative_audio"])
+
+	def test_the_document_in_hand_is_not_where_they_live(self):
+		"""THE ASSERTION THAT WOULD HAVE CAUGHT THIS. A loaded definition's step
+		carries no fields on any site, because Frappe does not fetch a
+		grandchild — so anything reading them off the step in hand serves an
+		empty form and cannot tell that it has."""
+		import frappe
+
+		doc = frappe.get_doc("Wizard Definition", "accident_investigation")
+		self.assertEqual(list(doc.get("steps")[0].get("fields") or []), [])
+		data = self.tool_data("get_wizard_definition", {"wizard": "accident_investigation", "language": "en"})
+		self.assertEqual(data["field_count"], 13)
+
+	def test_the_order_the_questions_are_asked_in_is_stored(self):
+		"""`idx`, not docname. A step whose fields came back sorted by a hash
+		would ask for a signature before the incident."""
+		first = self.steps_of()[0]
+		self.assertEqual([row["idx"] for row in self.rows_under(first["name"])], [1, 2, 3, 4])
+
+	def test_every_shipped_wizard_has_fields_after_a_migrate(self):
+		"""The register-wide version, so a sixth wizard added later that forgets
+		to write its fields fails here rather than in an orchard."""
+		for wizard in ("accident_investigation", "progressive_discipline", "asset_registration",
+		               "employee_onboarding", "inspection_session"):
+			with self.subTest(wizard=wizard):
+				data = self.tool_data("get_wizard_definition", {"wizard": wizard, "language": "en"})
+				self.assertTrue(data["field_count"], f"{wizard} has no fields")
+				for step in data["steps"]:
+					self.assertTrue(step["fields"], f"{wizard}.{step['step_key']} has no fields")
+
+	def test_the_seeder_reports_how_many_it_wrote(self):
+		"""Fifty-three questions across five flows, and the count is in the report
+		because a migration that wrote none of them used to report success."""
+		expected = sum(len(step["fields"]) for spec in wizards.SHIPPED_WIZARDS for step in spec["steps"])
+		self.assertEqual(expected, 53)
+		report = wizards.install_wizard_definitions(overwrite=True)
+		self.assertEqual(report["fields_written"], expected)
+
+	# ── the repair ──────────────────────────────────────────────────────────
+	def test_a_site_that_already_migrated_gets_its_fields_put_back(self):
+		"""THE SEEDER WOULD NOT HAVE FIXED THIS ON ITS OWN. Every site that
+		migrated a release before this one has five definitions with their steps
+		intact and not one field anywhere, and "never overwrite an existing
+		wizard" means the next migration would leave them exactly as broken."""
+		import frappe
+
+		for step in self.steps_of():
+			for row in self.rows_under(step["name"]):
+				frappe.delete_doc("Wizard Field", row["name"], force=True)
+		self.assertEqual(
+			self.tool_data("get_wizard_definition", {"wizard": "accident_investigation"})["field_count"], 0
+		)
+
+		report = wizards.install_wizard_definitions()
+		self.assertIn("accident_investigation", report["repaired"])
+		self.assertIn("accident_investigation", report["existing"])
+		self.assertEqual(report["created"], [])
+		self.assertEqual(
+			self.tool_data("get_wizard_definition", {"wizard": "accident_investigation"})["field_count"], 13
+		)
+
+	def test_the_repair_leaves_a_step_that_has_fields_completely_alone(self):
+		"""ADDITIVE AND CANNOT LOSE ANYTHING. An operator adding, removing or
+		rewording questions is the whole point of the doctype, and a repair that
+		restored the shipped set over the top of that would be the reset
+		`install_wizard_definitions` exists to avoid."""
+		import frappe
+
+		first = self.steps_of()[0]["name"]
+		keep = self.rows_under(first)[0]["name"]
+		for row in self.rows_under(first)[1:]:
+			frappe.delete_doc("Wizard Field", row["name"], force=True)
+
+		wizards.install_wizard_definitions()
+		self.assertEqual([row["name"] for row in self.rows_under(first)], [keep])
+
+	def test_a_repaired_step_is_matched_by_key_rather_than_by_position(self):
+		"""An operator who added their state's extra step in the middle has
+		shifted every index after it, and repairing by position would put the
+		injury questions on the step that asks who saw it."""
+		import frappe
+
+		steps = self.steps_of()
+		for step in steps:
+			for row in self.rows_under(step["name"]):
+				frappe.delete_doc("Wizard Field", row["name"], force=True)
+		doc = frappe.get_doc("Wizard Definition", "accident_investigation")
+		existing = [dict(step) for step in doc.get("steps")]
+		for position, step in enumerate(existing, start=2):
+			step["idx"] = position
+		doc.set(
+			"steps",
+			[{"step_key": "local_rule", "title_en": "Our own step", "idx": 1}] + existing,
+		)
+		doc.save()
+		self.assertEqual([step["step_key"] for step in self.steps_of()][0], "local_rule")
+
+		wizards.install_wizard_definitions()
+		by_key = {step["step_key"]: step["name"] for step in self.steps_of()}
+		self.assertEqual(
+			[row["fieldname"] for row in self.rows_under(by_key["who"])],
+			["injured_person", "injury_type", "body_part", "medical_treatment"],
+		)
+		self.assertEqual(self.rows_under(by_key["local_rule"]), [])
+
+	def test_an_overwrite_does_not_leave_the_old_rows_behind(self):
+		"""`delete_doc` takes the `Wizard Step` rows because they are the
+		definition's own table. A `Wizard Field` points at a STEP, which the
+		cascade never looks at — so an overwrite would grow the table by one
+		wizard's worth every time it ran."""
+		import frappe
+
+		before = len(frappe.db.get_all("Wizard Field", fields=["name"]))
+		wizards.install_wizard_definitions(overwrite=True)
+		self.assertEqual(len(frappe.db.get_all("Wizard Field", fields=["name"])), before)
+
+	# ── authoring one ───────────────────────────────────────────────────────
+	def test_a_wizard_authored_in_code_needs_write_wizard_fields(self):
+		"""The public half of the lesson. `doc.insert()` alone stores no fields
+		and gives no sign that it has not, which is exactly how this shipped."""
+		import frappe
+
+		doc = frappe.new_doc("Wizard Definition")
+		doc.wizard_key = "hand_rolled"
+		doc.__newname = "hand_rolled"
+		doc.title_en = "Hand rolled"
+		row = doc.append("steps", {"step_key": "one", "title_en": "One"})
+		row.append("fields", {"fieldname": "a", "field_type": "text", "label_en": "A"})
+		doc.insert()
+		self.assertEqual(
+			self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 0
+		)
+
+		self.assertEqual(wizards.write_wizard_fields(doc), 1)
+		self.assertEqual(
+			self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 1
+		)
+
+	def test_an_unsaved_definition_still_reads_the_rows_in_hand(self):
+		"""`WizardDefinition.validate` walks the fields appended onto a document
+		that has no docnames yet, and that path has to keep working — it is what
+		refuses two fields under one name."""
+		self.assertEqual(
+			[field["fieldname"] for field in wizards.fields_of({"fields": [{"fieldname": "a"}]})], ["a"]
+		)

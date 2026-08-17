@@ -447,6 +447,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# `inspection_session` wizard named one that existed nowhere, so the form
 		# loaded and could not be filed. There is still no `submit_wizard`.
 		"/mobile/start_inspection",
+		# v0.91.0. The envelope every wizard posts, and NOT the dispatcher this
+		# table refuses: it takes no method name from a caller, resolves its
+		# target against this very table, and calls it through the target's own
+		# guard and argument filter. `submit_wizard` is still absent.
+		"/mobile/submit_wizard_via_mobile",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

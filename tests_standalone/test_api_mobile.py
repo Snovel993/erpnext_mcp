@@ -60,6 +60,7 @@ from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.tools import mobile as mobile_tools
 from erpnext_mcp.tools import shifts as shift_tools
+from erpnext_mcp.tools import wizards as wizard_tools
 
 from .fixtures import (
 	MAIN,
@@ -538,6 +539,13 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_reorder_alerts",
 		"create_stock_entry",
 		"start_inspection",
+		# `submit_wizard_via_mobile` is here for `start_inspection`'s reason and
+		# then some: `MobileAPI.swift` will never name it either, because
+		# `WizardAPI.submit` posts to the `submit_endpoint` the SPEC handed it.
+		# The app already sends this method's exact envelope — `{"wizard",
+		# "answers"}` — and had it dropped at the door by `routes.bind`; what
+		# changed in v0.91.0 is that a method now declares those two names.
+		"submit_wizard_via_mobile",
 	}
 
 	def _whitelisted(self, module):
@@ -3336,8 +3344,13 @@ class TheWizardKnowsWhereToPostItsAnswers(MobileAPITestCase):
 	def test_a_wizard_names_a_path_the_app_can_post_to(self):
 		self.be()
 		answer = mobile_api.get_wizard_definition(wizard="accident_investigation")
+		# THE METHOD IS THE TARGET AND THE ENDPOINT IS THE ENVELOPE, and v0.91.0
+		# separated them. The app posts `{"wizard", "answers"}`, which
+		# `create_accident_report` declares neither of and `routes.bind` therefore
+		# dropped whole; `submit_wizard_via_mobile` unpacks it and calls the
+		# target named here, through the target's own guard.
 		self.assertEqual(answer["submit_method"], "create_accident_report")
-		self.assertEqual(answer["submit_endpoint"], "farmops/api/mobile/create_accident_report")
+		self.assertEqual(answer["submit_endpoint"], "farmops/api/mobile/submit_wizard_via_mobile")
 		self.assertEqual(answer["submit_context"], {})
 
 	def test_every_seeded_wizard_now_has_a_route_behind_it(self):
@@ -3546,7 +3559,29 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 		for attribute, value in overrides.items():
 			setattr(doc, attribute, value)
 		doc.insert()
+		# `insert()` DOES NOT STORE THE FIELDS AND NEVER DID. They are a
+		# grandchild — `Wizard Field` hangs off `Wizard Step`, which hangs off
+		# the definition — and Frappe writes one level. This fixture authored a
+		# wizard exactly the way the seeder did, which is why it agreed with the
+		# seeder about a payload no site ever produced.
+		wizard_tools.write_wizard_fields(doc)
 		return doc
+
+	def retype(self, doc, fieldname, field_type):
+		"""Put a type on a STORED field that this build's Select does not offer.
+
+		A `geo` cannot be inserted: `Wizard Field.field_type` is a Select and
+		Frappe refuses a value it does not list, which the double now does too.
+		The case under test is not an insert — it is a site whose doctype grew a
+		fifteenth option after this build shipped, so the column holds a word
+		this build's mapping table has never heard of. A column write is what
+		that looks like from here.
+		"""
+		step = str((doc.get("steps") or [])[0].get("name"))
+		row = frappe.db.get_all(
+			"Wizard Field", filters={"parent": step, "fieldname": fieldname}, pluck="name"
+		)[0]
+		frappe.db.set_value("Wizard Field", row, "field_type", field_type)
 
 	def a_spec(self, wizard="mixed_types"):
 		self.be()
@@ -3675,7 +3710,7 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 		was written for, and drawing it as a text box asks a worker to TYPE a
 		location and posts the sentence they typed where coordinates belong.
 		Nobody finds out; the record just has the wrong thing in it."""
-		self.a_mixed_wizard(key="odd_one", field_overrides={"plain": {"field_type": "geo"}})
+		self.retype(self.a_mixed_wizard(key="odd_one"), "plain", "geo")
 		spec = self.a_spec(wizard="odd_one")
 		self.assertEqual(self.fields_by_name(spec)["plain"]["type"], "geo")
 		decoded = decode_wizard_definition(spec)["steps"][0]["fields"]
@@ -3749,7 +3784,8 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 		"""`_with_submit_endpoint` runs AFTER the reshape and reads `wizard_key`
 		and `submit_method` off it — both of which the reshape leaves alone."""
 		spec = self.a_spec()
-		self.assertEqual(spec["submit_endpoint"], "farmops/api/mobile/create_accident_report")
+		self.assertEqual(spec["submit_endpoint"], "farmops/api/mobile/submit_wizard_via_mobile")
+		self.assertEqual(spec["submit_method"], "create_accident_report")
 		self.assertEqual(spec["submit_context"], {})
 		self.assertIsNone(decode_wizard_definition(spec)["unrenderable_reason"])
 
@@ -3776,3 +3812,210 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 		self.assertEqual(data["steps"][0]["fields"][0]["type"], "text")
 		self.assertEqual(data["steps"][0]["fields"][1]["type"], "long_text")
 		self.assertIsNotNone(data["steps"][0]["fields"][0]["visible_if"])
+
+
+# ── 10. the answers reach the endpoint that was named ───────────────────────
+class TheWizardFilesWhatWasFilledIn(MobileAPITestCase):
+	"""v0.91.0. `submit_wizard_via_mobile`, and the envelope nothing accepted.
+
+	THE POST SUCCEEDED AND FILED NOTHING. `WizardAPI.submit` sends one shape for
+	every wizard — `{"wizard": "accident_investigation", "answers": {…}}` —
+	because the app cannot know what an accident report's parameters are called.
+	`routes.bind` keeps the body keys that match the HANDLER'S SIGNATURE and
+	drops the rest, and `create_accident_report` declares neither `wizard` nor
+	`answers`, so every answer a worker gave was dropped at the door and the
+	target was called with nothing at all. Not a 404 and not a refusal — a 200
+	over a record with nothing in it.
+
+	AND IT IS STILL NOT A DISPATCHER. The four properties that make it one are
+	each asserted below: the caller does not name the target, the target must be
+	on the route table, the target's own guard runs, and the target's own
+	argument filter runs.
+	"""
+
+	OCCURRED = "2026-07-24 08:00:00"
+
+	def setUp(self):
+		super().setUp()
+		wizard_tools.install_wizard_definitions()
+
+	def file(self, wizard="accident_investigation", **answers):
+		self.be()
+		return mobile_api.submit_wizard_via_mobile(wizard=wizard, answers=answers)
+
+	def an_accident(self, **extra):
+		answers = {
+			"occurred_at": self.OCCURRED,
+			"incident_description": "Fell from the third ladder on the north end.",
+			"severity": "First Aid",
+		}
+		answers.update(extra)
+		return self.file(**answers)
+
+	# ── the bug ─────────────────────────────────────────────────────────────
+	def test_the_answers_reach_the_record_rather_than_the_bin(self):
+		"""The whole failure in one assertion. Before this method existed the
+		same call filed a report with no description, no severity and no time."""
+		answer = self.an_accident()
+		self.assertTrue(answer["filed"])
+		self.assertEqual(answer["submit_method"], "create_accident_report")
+		report = frappe.get_doc("Accident Report", answer["result"]["name"])
+		self.assertEqual(report.severity, "First Aid")
+		self.assertIn("third ladder", report.incident_description)
+		self.assertEqual(str(report.occurred_at), self.OCCURRED)
+
+	def test_the_envelope_the_app_sends_is_declared_here_and_nowhere_else(self):
+		"""Which is exactly why it was being dropped. `accepted_arguments` reads
+		the signature, and only one method on the table declares these two."""
+		self.assertNotIn("answers", farmops_routes.accepted_arguments(mobile_api.create_accident_report))
+		self.assertNotIn("wizard", farmops_routes.accepted_arguments(mobile_api.create_accident_report))
+		accepted = farmops_routes.accepted_arguments(mobile_api.submit_wizard_via_mobile)
+		self.assertEqual(accepted, {"wizard", "wizard_key", "answers"})
+
+	def test_the_endpoint_the_spec_hands_the_renderer_is_this_one(self):
+		"""The read and the write have to agree about where a form goes, and the
+		app posts to whatever `submit_endpoint` says."""
+		self.be()
+		spec = mobile_api.get_wizard_definition(wizard="accident_investigation")
+		self.assertEqual(spec["submit_endpoint"], "farmops/api/mobile/submit_wizard_via_mobile")
+		self.assertIn(spec["submit_endpoint"].rsplit("/", 1)[-1], {r.path.rsplit("/", 1)[-1] for r in farmops_routes.ROUTES})
+
+	# ── it is not a dispatcher ──────────────────────────────────────────────
+	def test_the_caller_does_not_get_to_name_the_target(self):
+		"""THE ONE PROPERTY THAT WOULD MAKE THIS A DISPATCHER. The method comes
+		off the Wizard Definition, which only Desk access writes; a body key
+		naming a destination is not on the signature and cannot become one."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.submit_wizard_via_mobile)
+		self.assertNotIn("submit_method", accepted)
+		self.assertNotIn("method", accepted)
+		# And an answer trying to name one is an answer like any other: it is
+		# not a parameter of the target either, so it is reported and dropped.
+		answer = self.an_accident(submit_method="create_journal_entry")
+		self.assertIn("submit_method", answer["ignored"])
+		self.assertEqual(answer["submit_method"], "create_accident_report")
+
+	def test_a_target_that_is_not_on_the_route_table_is_refused(self):
+		"""The reachable set is exactly what a phone could already post to
+		directly. A `submit_method` naming an unrouted tool — or an MCP tool that
+		is deliberately not published, which is most of them — files nothing."""
+		frappe.db.set_value("Wizard Definition", "accident_investigation", "submit_method", "create_journal_entry")
+		with self.assertRaises(Exception) as caught:
+			self.an_accident()
+		self.assertIn("does not publish", str(caught.exception))
+		self.assertIn("Nothing was written", str(caught.exception))
+		self.assertEqual(frappe.db.count("Accident Report"), 0)
+
+	def test_the_targets_own_guard_still_runs(self):
+		"""`route.handler` is the `@guard.endpoint`-wrapped function, gates and
+		all — so a company this caller is not scoped to is refused by the
+		target's own scope check and not by anything here."""
+		with self.assertRaises(Exception) as caught:
+			self.an_accident(company=OTHER)
+		self.assertIn("not one of this account's entities", str(caught.exception))
+
+	def test_the_targets_own_argument_filter_still_runs(self):
+		"""`worker`, `foreman`, `record_data` and a W-4's `status` are
+		unreachable from a phone because they are not on the target's signature.
+		Routing the answers through here must not change that by one name."""
+		answer = self.an_accident(reported_by=OUTSIDER_EMPLOYEE)
+		self.assertIn("reported_by", answer["ignored"])
+		report = frappe.get_doc("Accident Report", answer["result"]["name"])
+		self.assertEqual(report.reported_by, WORKER_EMPLOYEE)
+
+	def test_an_answer_cannot_name_a_different_caller(self):
+		"""Two locks already — `accepted_arguments` excludes `user` and
+		`guard.endpoint` pops it — and this is the third, so it never even
+		reaches `ignored` where it would read as an authoring mistake."""
+		answer = self.an_accident(user=OUTSIDER)
+		self.assertNotIn("user", answer["ignored"])
+		report = frappe.get_doc("Accident Report", answer["result"]["name"])
+		self.assertEqual(report.reported_by, WORKER_EMPLOYEE)
+
+	# ── what the target cannot take ─────────────────────────────────────────
+	def test_an_answer_the_target_has_no_parameter_for_is_named(self):
+		"""NAMED, NOT COUNTED, AND NOT SILENT. `scene_photo` is a real question
+		on the accident wizard and `create_accident_report` has nowhere to put
+		it; that was true before this method existed and the answer was going in
+		the bin unremarked. Now it is in the response."""
+		answer = self.an_accident(scene_photo={"file_name": "a.jpg", "sha256": "x", "byte_count": 1})
+		self.assertEqual(answer["ignored"], ["scene_photo"])
+		self.assertEqual(answer["accepted_count"], 3)
+
+	def test_the_spec_says_so_before_a_worker_fills_anything_in(self):
+		"""Which is the moment somebody can still do something about it. Three
+		of the five shipped wizards ask for something their endpoint cannot
+		take, and `progressive_discipline` asks for two signatures."""
+		self.be()
+		spec = mobile_api.get_wizard_definition(wizard="progressive_discipline")
+		self.assertIn("manager_signature", spec["submit_unmapped"])
+		self.assertIn("employee_signature", spec["submit_unmapped"])
+		self.assertNotIn("incident_description", spec["submit_unmapped"])
+
+	def test_filing_the_rest_beats_filing_nothing(self):
+		"""THE DECISION THIS METHOD MAKES, STATED. Refusing a wizard whose spec
+		asks for one thing too many would take three of the five shipped flows
+		away; a discipline record with no signature attached is worth more than
+		no record and a foreman who typed it twice."""
+		answer = self.an_accident(scene_photo="x", narrative_audio="y")
+		self.assertTrue(answer["filed"])
+		self.assertEqual(answer["ignored"], ["narrative_audio", "scene_photo"])
+
+	# ── the envelope itself ─────────────────────────────────────────────────
+	def test_the_answers_may_arrive_as_a_json_string(self):
+		"""A JSON body arrives as a dict and a form-encoded one as a string, and
+		both reach this transport — which is why `fallback_auth` exists."""
+		self.be()
+		answer = mobile_api.submit_wizard_via_mobile(
+			wizard="accident_investigation",
+			answers=json.dumps({
+				"occurred_at": self.OCCURRED,
+				"incident_description": "Filed from a form-encoded body.",
+			}),
+		)
+		self.assertTrue(answer["filed"])
+
+	def test_answers_that_are_not_an_object_are_refused_rather_than_emptied(self):
+		"""A list has no keys to unpack, and coercing it to `{}` would file the
+		empty record this whole method exists to stop."""
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.submit_wizard_via_mobile(wizard="accident_investigation", answers=["a", "b"])
+		self.assertIn("Nothing was written", str(caught.exception))
+		self.assertEqual(frappe.db.count("Accident Report"), 0)
+
+	def test_a_wizard_nobody_named_is_refused(self):
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.submit_wizard_via_mobile(answers={"a": 1})
+		self.assertIn("needs a wizard", str(caught.exception))
+
+	def test_a_wizard_that_does_not_exist_is_refused_in_the_reads_own_sentence(self):
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.submit_wizard_via_mobile(wizard="nope", answers={"a": 1})
+		self.assertIn("no wizard called", str(caught.exception))
+
+	def test_a_withdrawn_wizard_is_refused_rather_than_filed(self):
+		"""A worker whose form was withdrawn between opening it and finishing it
+		should be told, not have it filed against a spec an operator pulled."""
+		frappe.db.set_value("Wizard Definition", "accident_investigation", "enabled", 0)
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			self.an_accident()
+		self.assertIn("is disabled", str(caught.exception))
+		self.assertEqual(frappe.db.count("Accident Report"), 0)
+
+	def test_wizard_key_is_accepted_as_well_as_wizard(self):
+		"""`describe()` answers `wizard_key` and the app decodes `name`; both
+		spellings arrive in the wild and neither should be a 500."""
+		self.be()
+		answer = mobile_api.submit_wizard_via_mobile(
+			wizard_key="accident_investigation",
+			answers={"occurred_at": self.OCCURRED, "incident_description": "By key."},
+		)
+		self.assertEqual(answer["wizard"], "accident_investigation")
+
+	def test_submit_wizard_is_still_not_a_route(self):
+		"""The refusal `12f4e6f` wrote down, and the one `WizardAPI.swift`'s
+		header repeats. Nothing on this table takes a method name from a body."""
+		self.assertNotIn("submit_wizard", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES})

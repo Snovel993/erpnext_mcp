@@ -193,13 +193,140 @@ validated. **`key` is `target_field`, not `fieldname`** — they are the same un
 an operator says otherwise, and a wizard that set one and had its answers keyed by
 the other would file every record with the field it cares about empty.
 
+### …and the questions themselves are now stored where they can be read back
+
+**Every step of every wizard answered `fields: []`, on every site, always.** The
+spec loaded, the steps came back in order with their titles and their conditional
+logic, and not one of them carried a single question. The handset refused to draw
+them — correctly; a form with nothing on it is nothing to fill — so five flows
+that had just been given endpoints still could not be started.
+
+`Wizard Field` is a child table of `Wizard Step`, which is a child table of
+`Wizard Definition`. **Frappe traverses exactly one level, in both directions.**
+`Document.insert()` walks `get_all_children()`, which reads the table fields off
+the *parent's* meta and stops there, and `db_insert` builds its row from
+`get_valid_dict()`, which has no column for a Table field — so a field appended
+onto a step row is validated and then dropped on the floor. `load_from_db` fills
+the definition's `steps` and stops for the same reason, so `step.get("fields")`
+comes back empty even where something did manage to write them. The seeder
+appended; `describe()` read back what the seeder had appended in memory; both
+agreed; nothing was ever in `tabWizard Field`.
+
+Two changes and neither is clever. `install_wizard_definitions` now writes each
+field as a **`Wizard Field` document of its own**, with `parent`, `parenttype`
+and `parentfield` set by hand — exactly the row Frappe would have written if it
+traversed this far — and `idx` from the spec's order, because that is the order
+the questions are asked in. `describe()` **fetches** them by `parent` rather than
+reading them off the document in hand. The rows appended for
+`WizardDefinition.validate` stay, because that controller's refusals (a field
+with no fieldname, two on one step under one name, options that will not parse)
+are worth keeping and run against the document in memory.
+
+**A site that already migrated does not fix itself, so the seeder repairs it.**
+Every existing install has five definitions with their steps intact and no fields
+anywhere, and `install_wizard_definitions` promises never to overwrite an
+existing wizard — so the next `bench migrate` would have left them exactly as
+broken as it found them, and the only lever an operator had was `overwrite=True`,
+which also throws away every edit they ever made. The repair is **additive and
+matched on `step_key`**: a step that already has one field is left completely
+alone, and a step with nothing on it gets the shipped set. An operator who added
+their state's extra step in the middle keeps it, and does not get the injury
+questions filed onto the step that asks who saw it. The report gains `repaired`
+and `fields_written` (53 across the five).
+
+An overwrite now deletes the field rows **before** deleting the definition.
+`delete_doc` cascades to the `Wizard Step` rows because they are the definition's
+own table; a `Wizard Field` points at a *step*, which the cascade never looks at,
+so a reset would otherwise have grown the table by one wizard's worth every time
+it ran.
+
+`write_wizard_fields` is public and is the answer to "I built a Wizard Definition
+in code and it has no questions on it". Call it after `insert()`.
+
+**The double was the reason nobody saw this.** `tests_standalone/harness.py`
+stored documents whole, so `definition → step → field` survived a save here and
+came back nested on the next read; 9,859 tests agreed with a payload no site has
+ever produced. The double now **drops grandchildren on write**, the way Frappe
+does, so the pattern fails here the way it fails on a bench. The in-memory
+document keeps its nested rows, because that is faithful too and it is what the
+controller walks — only the stored copy is stripped.
+
+### A wizard's answers reach the endpoint it names
+
+**The submit succeeded and filed nothing.** `WizardAPI.submit` posts one envelope
+for every wizard — `{"wizard": "accident_investigation", "answers": {…}}` —
+because the app cannot know what an accident report's parameters are called.
+`routes.bind` keeps the body keys that match the **handler's signature** and drops
+the rest, and `create_accident_report` declares neither `wizard` nor `answers`, so
+every answer a worker gave was dropped at the door and the target was called with
+nothing at all. Not a 404 and not a refusal: a 200 over a record with nothing in
+it, which is the worst of the three.
+
+`submit_wizard_via_mobile` is the one method that speaks that envelope. It reads
+the target off the Wizard Definition's `submit_method`, unpacks the answers into
+the kwargs the target actually declares, and calls it. `submit_endpoint` now
+names this method rather than the target — the target is still named, in
+`submit_method`, and both travel.
+
+**It is not the dispatcher `routes.py` refuses, and the difference is the point.**
+`12f4e6f` wrote that refusal down and it still stands: one route that took a
+method name from a caller and forwarded to it would put the permission decision
+in the wrong place. This makes no decision.
+
+- **The caller does not name the target.** It comes off the Wizard Definition,
+  which only Desk access writes. `submit_method` is not on this method's
+  signature and cannot arrive in a body.
+- **The target must be on the route table.** It is resolved against the same
+  closed list `app.py` resolves paths against, so the reachable set is exactly
+  the methods a phone could already post to directly. This adds no path to that
+  surface.
+- **The target's own guard still runs.** `route.handler` is the
+  `@guard.endpoint`-wrapped function — its role check, its scope check, its rate
+  limit, its audit row, and the authenticated caller injected by its own
+  decorator.
+- **The target's own argument filter still runs.** The answers are reduced by
+  `routes.accepted_arguments(route.handler)`, the identical filter `routes.bind`
+  would have applied, so `worker`, `foreman`, `record_data` and a W-4's `status`
+  stay exactly as unreachable from a phone as they were.
+
+There is still **no `submit_wizard`**, and the placeholder spec's 404 is unchanged.
+
+**Answers the target cannot take are named rather than swallowed.** Three of the
+five shipped wizards ask for something their endpoint has no parameter for:
+`progressive_discipline` collects two signatures, `inspection_session` collects
+findings and photographs, `employee_onboarding` asks which language the worker
+reads. Those answers were being dropped by the argument filter before this method
+existed too — what changed is that the response says which (`ignored`), and
+`get_wizard_definition` says so (`submit_unmapped`) **before a worker fills
+anything in**, which is the moment somebody can still do something about it.
+Filing the rest is the right call: refusing would take three of the five flows
+away, and a discipline record with no signature attached is worth more than no
+record and a foreman who typed it twice. Closing those gaps is a parameter on the
+target or a question the wizard stops asking, and both are somebody's decision
+rather than this method's.
+
 ### Tests
 
-**9,859 tests, all passing, 126 skipped** — 52 new (16 for the shadow log, 16 for
-the inventory and wizard routes, 20 for the wizard's shape), and every one of them
-*invokes* a wrapper rather than asserting it is published. That is the lesson of
-`bd66550`: the pause pair were listed in the surface-is-closed registry, asserted
-to exist, and never once called.
+**9,888 tests, all passing, 126 skipped** — 81 new (16 for the shadow log, 16 for
+the inventory and wizard routes, 20 for the wizard's shape, 11 for where a wizard
+field is stored, 18 for filing one), and every one of them *invokes* a wrapper
+rather than asserting it is published. That is the lesson of `bd66550`: the pause
+pair were listed in the surface-is-closed registry, asserted to exist, and never
+once called.
+
+**The double now drops grandchildren, and that is the test change that matters.**
+`test_the_document_in_hand_is_not_where_they_live` asserts a loaded definition's
+step carries no fields — which is true on every site and was false in the
+harness — so anything that goes back to reading them off the document in hand
+fails there rather than on a phone in an orchard. `a_mixed_wizard`, the fixture
+for the twenty shape tests, was authoring wizards the same way the seeder was and
+therefore agreed with it about a payload MariaDB has never held.
+
+The eighteen submit tests each assert one of the four properties that keep
+`submit_wizard_via_mobile` from being a dispatcher, and the round trip runs
+through the real `create_accident_report` — its guard, its scope check, its
+argument filter and its controller — rather than a stub, so a report filed with
+`reported_by` named in the answers still comes back reported by the caller.
 
 `test_every_seeded_wizard_now_has_a_route_behind_it` walks the real installed
 register rather than a fixture, so a sixth spec added later with an unrouted

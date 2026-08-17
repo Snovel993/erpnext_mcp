@@ -129,7 +129,7 @@ from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
 from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
-from . import guard, rectify, shape
+from . import fallback_auth, guard, rectify, shape
 
 ALERT = "Compliance Alert"
 FARM_TASK = "Farm Task"
@@ -7804,14 +7804,95 @@ def _ios_wizard_spec(data: dict) -> dict:
 	return data
 
 
+#: The one route a wizard posts to, and the method name behind it. v0.91.0.
+SUBMIT_WIZARD = "submit_wizard_via_mobile"
+
+
+def _wizard_answers(raw) -> dict:
+	"""The answers dict, however the transport delivered it.
+
+	A JSON BODY ARRIVES AS A DICT AND A FORM-ENCODED ONE AS A STRING, and both
+	reach this transport — `fallback_auth` exists because the app sends its
+	credential three ways for the same reason. Parsing a string here rather than
+	refusing it keeps the endpoint working from `curl` and from the Desk console,
+	which is where somebody debugging a wizard actually is.
+
+	ANYTHING THAT IS NOT AN OBJECT IS REFUSED RATHER THAN COERCED. A list of
+	answers has no keys to unpack and would silently file an empty record —
+	which is the exact failure this whole endpoint exists to end.
+
+	`user` AND `_auth` ARE DROPPED HERE TOO. Neither can survive
+	`accepted_arguments` (which excludes `user`) or `guard.endpoint` (which pops
+	both), so this is a third lock on the one pair that would matter — and it
+	keeps them out of the `ignored` list, where they would read as an authoring
+	mistake rather than as envelope somebody sent by habit.
+	"""
+	if raw in (None, ""):
+		return {}
+	if isinstance(raw, str):
+		try:
+			raw = json.loads(raw)
+		except (json.JSONDecodeError, ValueError, TypeError):
+			raise ToolError(
+				"answers is not valid JSON. Send an object keyed by the wizard's field keys, like "
+				'{"occurred_at": "2026-08-17", "severity": "First Aid"}. Nothing was written.'
+			)
+	if not isinstance(raw, dict):
+		raise ToolError(
+			"answers must be an object keyed by the wizard's field keys — the `key` each field "
+			"carries in its spec. Nothing was written."
+		)
+	return {
+		str(name): value
+		for name, value in raw.items()
+		if str(name) not in ("user", fallback_auth.BODY_KEY)
+	}
+
+
+def wizard_submit_route(method: str):
+	"""The Route behind a wizard's `submit_method`, or None if it has none.
+
+	The route table is the authority on what a handset may reach, and reading it
+	here is what keeps this wrapper from widening that surface by one path: a
+	`submit_method` naming a tool nobody routed resolves to nothing, exactly as
+	it did when the app posted to the target directly.
+	"""
+	from ..farmops_api import routes as route_table
+
+	if not method:
+		return None
+	for route in route_table.ROUTES:
+		if route.path.rsplit("/", 1)[-1] == method:
+			return route
+	return None
+
+
+def _wizard_answer_keys(data: dict) -> list:
+	"""Every key the app will post an answer under, in the order they are asked."""
+	return [
+		str(field.get("key") or field.get("target_field") or field.get("fieldname") or "")
+		for step in data.get("steps") or []
+		for field in step.get("fields") or []
+	]
+
+
 def _with_submit_endpoint(data: dict) -> dict:
-	"""Turn the wizard's `submit_method` into a path this transport publishes.
+	"""Where the answers go, and which of them the target will actually take.
 
 	THE TOOL DOES NOT KNOW WHAT A URL IS AND IS NOT BEING TAUGHT. `submit_method`
 	is a tool name — `create_accident_report` — and it means the same thing to an
-	MCP client, which has no sidecar and no prefix. The translation to
-	`farmops/api/mobile/create_accident_report` belongs where the prefix is known,
-	which is here, so the MCP tool's shape is unchanged by this.
+	MCP client, which has no sidecar and no prefix. The translation belongs where
+	the prefix is known, which is here, so the MCP tool's shape is unchanged.
+
+	THE PATH IS THE WRAPPER'S AND NOT THE TARGET'S, WHICH IS THE v0.91.0 CHANGE.
+	The app posts `{"wizard": …, "answers": {…}}`, and `create_accident_report`
+	declares neither of those names, so `routes.bind` — which keeps the body keys
+	that match the handler's signature and drops the rest — delivered an empty
+	call. Every answer a worker gave went in the bin at the door and the endpoint
+	answered as though it had been asked for nothing. `submit_wizard_via_mobile`
+	is the one method that speaks that envelope; it unpacks the answers and calls
+	the target through the SAME route table and the SAME argument filter, so
+	nothing is reachable through it that was not reachable before.
 
 	A METHOD WITH NO ROUTE PRODUCES NO ENDPOINT, DELIBERATELY. The app treats a
 	spec with an empty `submit_endpoint` as unrenderable and refuses to draw it,
@@ -7820,6 +7901,18 @@ def _with_submit_endpoint(data: dict) -> dict:
 	post 404s has lost the thing this whole surface exists to collect. The reason
 	travels in `submit_unavailable` so the screen can say which flow is down
 	rather than showing an empty state that reads as "nothing to do".
+
+	`submit_unmapped` NAMES THE ANSWERS THE TARGET CANNOT TAKE, and it is here
+	rather than only in the submit response because that is the moment somebody
+	can still do something about it. Three of the five shipped wizards ask for
+	something their endpoint has no parameter for — `progressive_discipline` asks
+	for two signatures, `inspection_session` for findings and photographs,
+	`employee_onboarding` for the language the worker reads — and those answers
+	are dropped by the argument filter today exactly as they were dropped before.
+	Filing the rest is strictly better than filing nothing, which is what
+	happened until now, so this REPORTS rather than refuses; the fix is a
+	parameter on the target or a field the wizard stops asking for, and both are
+	somebody's decision rather than this function's.
 
 	`submit_context` is EMPTY and is sent anyway. Wizard Definition has no field
 	for it — the doctype carries `submit_method` and nothing else about
@@ -7831,6 +7924,7 @@ def _with_submit_endpoint(data: dict) -> dict:
 
 	method = str(data.get("submit_method") or "").strip()
 	data["submit_context"] = {}
+	data["submit_unmapped"] = []
 	if not method:
 		data["submit_endpoint"] = ""
 		data["submit_unavailable"] = (
@@ -7839,8 +7933,8 @@ def _with_submit_endpoint(data: dict) -> dict:
 		)
 		return data
 
-	published = {route.path.rsplit("/", 1)[-1] for route in route_table.ROUTES}
-	if method not in published:
+	route = wizard_submit_route(method)
+	if route is None:
 		data["submit_endpoint"] = ""
 		data["submit_unavailable"] = (
 			f"wizard {data.get('wizard_key')!r} submits to {method!r}, which this app does not "
@@ -7848,7 +7942,9 @@ def _with_submit_endpoint(data: dict) -> dict:
 		)
 		return data
 
-	data["submit_endpoint"] = f"farmops/api/mobile/{method}"
+	accepted = route_table.accepted_arguments(route.handler)
+	data["submit_endpoint"] = f"farmops/api/mobile/{SUBMIT_WIZARD}"
+	data["submit_unmapped"] = sorted({key for key in _wizard_answer_keys(data) if key not in accepted})
 	return data
 
 
@@ -7890,6 +7986,98 @@ def list_wizard_definitions(user: str, category=None, language=None) -> dict:
 	if language:
 		inner["language"] = str(language).strip()
 	return wizard_tools.list_wizard_definitions(inner).data
+
+
+# ── 92b. submit_wizard_via_mobile ────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint(SUBMIT_WIZARD, mutating=True, limit=guard.WRITE_LIMIT)
+def submit_wizard_via_mobile(user: str, wizard=None, wizard_key=None, answers=None) -> dict:
+	"""File a finished wizard: unpack its answers and call the target it names.
+
+	THE PAYLOAD HAD NOWHERE TO LAND. The app posts one envelope for every
+	wizard — `{"wizard": "accident_investigation", "answers": {…}}` — because it
+	does not and must not know what an accident report's parameters are called.
+	`routes.bind` keeps the body keys that MATCH THE HANDLER'S SIGNATURE and
+	drops the rest, and `create_accident_report` declares neither `wizard` nor
+	`answers`, so the whole envelope was dropped at the door and the target was
+	called with nothing at all. Not a 404 and not a refusal: a successful call
+	that filed an empty record. This method is the one that speaks the envelope.
+
+	IT IS NOT THE DISPATCHER `routes.py` REFUSES, AND THE DIFFERENCE IS THE POINT.
+	The objection to a `submit_wizard` was that it puts the permission decision in
+	the wrong place — a Housing Inspection and a Discipline Record have different
+	guards, and one route in front of both would decide for both. Nothing here
+	decides anything:
+
+	  * THE TARGET IS NOT NAMED BY THE CALLER. It is read off the Wizard
+	    Definition's `submit_method`, which only an operator with Desk access
+	    sets. A body naming its own destination would be the dispatcher.
+	  * THE TARGET MUST BE ON THE ROUTE TABLE. `wizard_submit_route` walks the
+	    same closed list `app.py` resolves paths against, so the reachable set is
+	    exactly the methods a phone could already post to directly — this adds
+	    no path to that surface and cannot.
+	  * THE TARGET'S OWN GUARD STILL RUNS. `route.handler` is the
+	    `@guard.endpoint`-wrapped function, gates and all: its role check, its
+	    scope check, its rate limit, its audit row, and the authenticated caller
+	    injected as `user` by its own decorator rather than by this one.
+	  * THE TARGET'S OWN ARGUMENT FILTER STILL RUNS. The answers are reduced by
+	    `routes.accepted_arguments(route.handler)` — the identical filter
+	    `routes.bind` would have applied — so `worker`, `foreman`, `record_data`
+	    and a W-4's `status` stay exactly as unreachable from a phone as they
+	    were.
+
+	What is left over is reported rather than filed. `ignored` names every answer
+	the target has no parameter for, and there are real ones: `progressive_discipline`
+	collects two signatures `create_discipline_record` cannot take, and
+	`inspection_session` collects findings and photographs `start_inspection`
+	cannot. Those answers were being dropped before this method existed too — the
+	difference is that the response now says which, and `get_wizard_definition`
+	says so before a worker fills anything in. FILING THE REST IS RIGHT: the
+	alternative is refusing three of the five shipped flows outright, and a
+	discipline record with no signature attached is worth more than no discipline
+	record and a worker who typed it twice.
+	"""
+	from ..farmops_api import routes as route_table
+
+	guard.require_scope(user)
+	key = str(wizard or wizard_key or "").strip()
+	if not key:
+		raise ToolError(
+			"submit_wizard_via_mobile needs a wizard — send `wizard` (or `wizard_key`) naming the "
+			"Wizard Definition these answers were collected against."
+		)
+
+	# THE SPEC IS THE AUTHORITY ON WHERE THIS GOES, and reading it through the
+	# tool is what makes an unknown or withdrawn wizard refuse here in exactly
+	# the sentence the read refuses in. A worker whose form was withdrawn between
+	# opening it and finishing it should be told that and not have it filed.
+	spec = wizard_tools.get_wizard_definition({"wizard": key, "employee": _employee(user), "user": user}).data
+	method = str(spec.get("submit_method") or "").strip()
+	route = wizard_submit_route(method)
+	if route is None:
+		raise ToolError(
+			f"wizard {key!r} submits to {method or '<nothing>'!r}, which this app does not publish "
+			f"to handsets, so there is nowhere to file it. Nothing was written. An operator sets "
+			f"`submit_method` on the Wizard Definition to a method that is routed."
+		)
+
+	given = _wizard_answers(answers)
+	accepted = route_table.accepted_arguments(route.handler)
+	unpacked = {name: value for name, value in given.items() if name in accepted}
+	ignored = sorted(set(given) - set(unpacked))
+
+	result = route.handler(**unpacked)
+	return {
+		"wizard": key,
+		"submit_method": method,
+		"filed": True,
+		# NAMED, NOT COUNTED. "3 answers were ignored" sends whoever reads it
+		# back to the wizard to work out which three; the names are what an
+		# operator needs to add the parameter or drop the question.
+		"ignored": ignored,
+		"accepted_count": len(unpacked),
+		"result": result if isinstance(result, dict) else {"value": result},
+	}
 
 
 # ── 93. list_shipments ───────────────────────────────────────────────────────

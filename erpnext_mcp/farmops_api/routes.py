@@ -584,11 +584,26 @@ ROUTES = (
 	# `create_discipline_record`. `inspection_session` named `start_inspection`,
 	# which existed nowhere, so that form loaded and could not be filed.
 	#
-	# THERE IS STILL NO `submit_wizard` AND THERE MUST NOT BE. One route that
-	# looked up a spec's submit method and forwarded to it is the dispatcher this
-	# file opens by refusing: the permission decision belongs per route, where
-	# `guard.endpoint` and this table's argument filter can both see it.
 	Route("/mobile", mobile_api.start_inspection),
+	# v0.91.0. THE ENVELOPE, AND WHY IT IS NOT THE DISPATCHER THIS FILE REFUSES.
+	# `12f4e6f` said there must never be a `submit_wizard`, and there is not one:
+	# nothing on this table takes a method name from a caller and forwards to it.
+	# What the app posts is one envelope for every wizard — `{"wizard": …,
+	# "answers": {…}}` — because it cannot know what an accident report's
+	# parameters are called, and the argument filter below dropped both keys on
+	# the floor, so `create_accident_report` was called with NOTHING and filed an
+	# empty record without complaining. `submit_wizard_via_mobile` is the one
+	# method that speaks that envelope.
+	#
+	# THE OBJECTION WAS THAT A DISPATCHER PUTS THE PERMISSION DECISION IN THE
+	# WRONG PLACE, and it still stands — so this makes no decision. The target is
+	# read off the Wizard Definition's `submit_method`, which only Desk access
+	# sets; it is resolved against THIS TABLE, so the reachable set is exactly
+	# what a phone could already post to directly; the target runs its OWN
+	# `guard.endpoint` and its own `accepted_arguments` filter. A Housing
+	# Inspection and a Discipline Record are still guarded by their own routes,
+	# because they are still reached through their own routes.
+	Route("/mobile", mobile_api.submit_wizard_via_mobile),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

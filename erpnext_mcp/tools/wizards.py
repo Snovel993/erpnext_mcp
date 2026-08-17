@@ -57,7 +57,35 @@ from ..result import ToolResult
 from . import translations
 
 WIZARD = "Wizard Definition"
+STEP = "Wizard Step"
+FIELD = "Wizard Field"
 EMPLOYEE = "Employee"
+
+#: Every column `_field` reads off a Wizard Field row. Named once because the
+#: rows are now FETCHED rather than read off a document somebody loaded, and a
+#: query that forgot a column would serve a field with no help text and no
+#: validation and look exactly like a wizard nobody finished writing.
+FIELD_COLUMNS = (
+	"name",
+	"idx",
+	"fieldname",
+	"field_type",
+	"label_en",
+	"label_es",
+	"placeholder_en",
+	"placeholder_es",
+	"help_en",
+	"help_es",
+	"required",
+	"options",
+	"default_value",
+	"min_value",
+	"max_value",
+	"max_length",
+	"pattern",
+	"visible_if",
+	"target_field",
+)
 
 #: The languages this app ships strings in. NOT a restriction on what may be
 #: stored or asked for — an unknown code falls back to English and says so — but
@@ -71,6 +99,12 @@ DEFAULT_LANGUAGE = "en"
 TRANSLATABLE = ("label", "title", "description", "placeholder", "help")
 
 REGISTER_CAP = 100
+
+#: The most fields one step may serve. A cap rather than no cap because this is
+#: now a query per step and an unbounded one on a table an operator writes is
+#: how a read tool becomes a way to make the site slow. Twelve is the widest
+#: shipped step; a hundred is a number no honest wizard reaches.
+FIELD_CAP = 100
 
 
 def _require() -> None:
@@ -234,6 +268,51 @@ def _field(row: dict, language: str, missing: list, step_key: str) -> dict:
 	}
 
 
+def fields_of(step) -> list:
+	"""One step's Wizard Field rows, FETCHED — not read off the step in hand.
+
+	THIS IS THE WHOLE OF THE v0.91.0 "nothing to fill" BUG. `Wizard Field` is a
+	child table of `Wizard Step`, which is itself a child table of
+	`Wizard Definition` — a grandchild, and Frappe traverses exactly one level in
+	both directions. `Document.load_from_db` fills the definition's `steps` and
+	stops, so `step.get("fields")` on a loaded document is EMPTY on every site,
+	for every wizard, always. `describe()` read it anyway and answered
+	`fields: []` five times over; the handset refused to draw a form with nothing
+	on it, which was the correct call about an incorrect payload.
+
+	So the rows are asked for by `parent`, which is the step row's own docname.
+	`parenttype` and `parentfield` are filtered on as well as `parent` because a
+	child docname is a hash from a shared pool — a `Wizard Field` and some other
+	doctype's row cannot collide today, but filtering on the pointer's three
+	halves is what makes that a property rather than a coincidence.
+
+	THE IN-MEMORY ROWS ARE THE FALLBACK, AND ONLY FOR AN UNSAVED DOCUMENT. A
+	definition being validated has its fields appended and no docnames yet, and
+	that document is the one `WizardDefinition.validate` walks. Once it is
+	saved, the fetch is the answer — including when the fetch finds nothing,
+	which is a step whose fields were never written and is worth seeing as the
+	empty step it is rather than papering over with whatever the caller happened
+	to have in hand.
+	"""
+	parent = str(step.get("name") or "")
+	if not parent:
+		return [dict(row) for row in (step.get("fields") or [])]
+	try:
+		rows = (
+			frappe.db.get_all(
+				FIELD,
+				filters={"parent": parent, "parenttype": STEP, "parentfield": "fields"},
+				fields=compat.existing_fields(FIELD, FIELD_COLUMNS),
+				order_by="idx asc",
+				limit=FIELD_CAP,
+			)
+			or []
+		)
+	except Exception:  # pragma: no cover - a bench mid-migrate with no table yet
+		rows = []
+	return [dict(row) for row in rows]
+
+
 def describe(doc, language: str) -> dict:
 	"""One wizard, resolved into the language asked for."""
 	missing: list = []
@@ -250,9 +329,7 @@ def describe(doc, language: str) -> dict:
 				"optional": bool(frappe.utils.cint(step.get("optional"))),
 				"visible_if": _condition(step.get("visible_if")),
 				"next_step": step.get("next_step") or None,
-				"fields": [
-					_field(dict(field), language, missing, key) for field in (step.get("fields") or [])
-				],
+				"fields": [_field(dict(field), language, missing, key) for field in fields_of(step)],
 			}
 		)
 
@@ -1011,6 +1088,152 @@ SHIPPED_WIZARDS = (
 )
 
 
+def _step_names(wizard: str) -> list:
+	"""The docnames of one wizard's step rows, which is what a field points at."""
+	try:
+		return [
+			str(row["name"])
+			for row in frappe.db.get_all(
+				STEP,
+				filters={"parent": wizard, "parenttype": WIZARD, "parentfield": "steps"},
+				fields=["name"],
+				order_by="idx asc",
+				limit=REGISTER_CAP,
+			)
+			or []
+		]
+	except Exception:  # pragma: no cover - a bench with no table yet
+		return []
+
+
+def _clear_fields(step_names: list) -> None:
+	"""Delete every Wizard Field hanging off these steps. Never raises."""
+	for parent in step_names:
+		try:
+			for row in (
+				frappe.db.get_all(
+					FIELD,
+					filters={"parent": parent, "parenttype": STEP, "parentfield": "fields"},
+					pluck="name",
+					limit=FIELD_CAP,
+				)
+				or []
+			):
+				frappe.delete_doc(FIELD, row, force=True, ignore_permissions=True)
+		except Exception:  # pragma: no cover - reported by the caller, never raised
+			continue
+
+
+def _write_fields(parent: str, fields: list) -> int:
+	"""Insert one step's fields as `Wizard Field` DOCUMENTS OF THEIR OWN.
+
+	FRAPPE WRITES ONE LEVEL OF CHILDREN AND THIS IS TWO. `Document.insert` walks
+	`get_all_children()`, which reads the table fields off the PARENT's meta, and
+	`db_insert` builds its row from `get_valid_dict()`, which has no column for a
+	Table field. A `Wizard Field` appended onto a `Wizard Step` row therefore
+	reaches no table at all: it is validated, it is never stored, and the next
+	read of that wizard answers `fields: []`. That is what shipped, and it is why
+	five seeded forms loaded on a handset with nothing on them.
+
+	So each row is inserted directly, with the three columns that make it a child
+	of its step set by hand — which is exactly what Frappe would have written if
+	it traversed this far. `idx` is set from the spec's order because it IS the
+	order the questions are asked in, and a step whose fields came back sorted by
+	docname would ask for a signature before the incident.
+	"""
+	written = 0
+	for index, field in enumerate(fields, start=1):
+		row = frappe.new_doc(FIELD)
+		for column, value in dict(field).items():
+			row.set(column, value)
+		row.parent = parent
+		row.parenttype = STEP
+		row.parentfield = "fields"
+		row.idx = index
+		row.insert(ignore_permissions=True)
+		written += 1
+	return written
+
+
+def write_wizard_fields(doc) -> int:
+	"""Persist the fields appended onto a saved definition's steps. PUBLIC.
+
+	CALL THIS AFTER EVERY `insert()` OR `save()` OF A WIZARD DEFINITION YOU BUILT
+	IN MEMORY, because `doc.insert()` alone does not store them and gives no sign
+	that it has not — see `_write_fields`. Anything that appends a field onto a
+	step row and stops there produces a wizard the handset reads as "nothing to
+	fill", which is the shape five shipped forms had on Tim's site.
+
+	Reads the rows off the DOCUMENT rather than off whatever spec produced it, so
+	the step a field belongs to is the step it was appended to and no zip has to
+	stay in step with anything. A step with no fields in hand is skipped rather
+	than emptied: this function only ever writes, and a caller that means to
+	replace a step's questions calls `_clear_fields` first and says so.
+	"""
+	written = 0
+	for row in doc.get("steps") or []:
+		parent = str(row.get("name") or "")
+		fields = [dict(field) for field in (row.get("fields") or [])]
+		if not parent or not fields:
+			continue
+		written += _write_fields(parent, fields)
+	return written
+
+
+def _repair_fields(key: str, spec: dict) -> int:
+	"""Put the fields back on a shipped wizard that was stored without them.
+
+	THE SEEDER WOULD NOT HAVE FIXED THIS ON ITS OWN, and that is the point of the
+	pass. Every site that migrated a release before this one has five Wizard
+	Definitions with their steps intact and not one field anywhere, and the
+	promise `install_wizard_definitions` makes — never overwrite an existing
+	wizard — means the next migration would leave them exactly as broken as it
+	found them. An operator would have to know to pass `overwrite=True`, which
+	would also throw away every edit they had made.
+
+	SO THE REPAIR IS ADDITIVE AND CANNOT LOSE ANYTHING. A step that already has
+	one field is left completely alone — an operator adding, removing or
+	rewording questions is the whole point of the doctype, and a "repair" that
+	restored the shipped set over the top of that would be the reset this
+	function exists to avoid. Only a step with NOTHING on it is written to, and a
+	step with nothing on it is not a decision anybody made: `WizardDefinition`
+	refuses to save a field with no fieldname or no English label, but it has
+	never required a step to have any fields, so an empty one is what the lost
+	write left behind.
+
+	MATCHED ON `step_key`, not on position. An operator who added their state's
+	extra step in the middle has shifted every index after it, and repairing by
+	position would put the accident wizard's injury questions on the step that
+	asks who saw it.
+	"""
+	shipped = {
+		str(step.get("step_key") or ""): [dict(field) for field in (step.get("fields") or [])]
+		for step in spec["steps"]
+	}
+	written = 0
+	try:
+		rows = (
+			frappe.db.get_all(
+				STEP,
+				filters={"parent": key, "parenttype": WIZARD, "parentfield": "steps"},
+				fields=["name", "step_key"],
+				order_by="idx asc",
+				limit=REGISTER_CAP,
+			)
+			or []
+		)
+	except Exception:  # pragma: no cover - a bench with no table yet
+		return 0
+	for row in rows:
+		fields = shipped.get(str(row.get("step_key") or ""))
+		if not fields:
+			continue
+		if fields_of({"name": row.get("name")}):
+			continue
+		written += _write_fields(str(row.get("name")), fields)
+	return written
+
+
 def install_wizard_definitions(overwrite: bool = False) -> dict:
 	"""Seed the shipped wizards. Idempotent, and NEVER raises.
 
@@ -1024,7 +1247,17 @@ def install_wizard_definitions(overwrite: bool = False) -> dict:
 	from `after_migrate`, and an exception there takes somebody's whole migration
 	down.
 	"""
-	report = {"created": [], "existing": [], "failed": [], "overwritten": []}
+	report = {
+		"created": [],
+		"existing": [],
+		"failed": [],
+		"overwritten": [],
+		# The wizards that HAD their fields put back — see `_repair_fields`. A
+		# migration that repairs five is a migration that found five broken, and
+		# an operator reading the report should see that rather than "existing".
+		"repaired": [],
+		"fields_written": 0,
+	}
 	if not compat.doctype_exists(WIZARD):
 		return report
 
@@ -1034,8 +1267,19 @@ def install_wizard_definitions(overwrite: bool = False) -> dict:
 			exists = frappe.db.exists(WIZARD, key)
 			if exists and not overwrite:
 				report["existing"].append(key)
+				written = _repair_fields(key, spec)
+				if written:
+					report["repaired"].append(key)
+					report["fields_written"] += written
 				continue
 			if exists:
+				# THE FIELD ROWS ARE NOT THE DEFINITION'S CHILDREN AND WILL NOT GO
+				# WITH IT. `delete_doc` takes the `Wizard Step` rows because they are
+				# the definition's own table; a `Wizard Field` points at a STEP, which
+				# the cascade never looks at. Left alone they would outlive every
+				# wizard that ever named them, and an overwrite would grow the table
+				# by one wizard every time it ran.
+				_clear_fields(_step_names(key))
 				frappe.delete_doc(WIZARD, key, force=True, ignore_permissions=True)
 				report["overwritten"].append(key)
 
@@ -1058,18 +1302,22 @@ def install_wizard_definitions(overwrite: bool = False) -> dict:
 			doc.version = 1
 			doc.shipped_default = 1
 			for step in spec["steps"]:
-				fields = step.pop("fields", []) if isinstance(step, dict) else []
+				fields = [dict(field) for field in (step.get("fields") or [])]
 				row = doc.append("steps", {k: v for k, v in step.items() if k != "fields"})
-				step["fields"] = fields
-				for field in fields:
-					# The child-of-a-child is appended onto the step row, which
-					# Frappe supports and this app already relies on for the
-					# inspection templates.
-					if hasattr(row, "append"):
+				# APPENDED FOR `WizardDefinition.validate` AND FOR NOTHING ELSE. The
+				# controller walks these looking for a field with no fieldname, two on
+				# one step under one name, options that will not parse — checks worth
+				# keeping, and they run against the document in memory. They are NOT
+				# how the rows get stored: Frappe writes one level of children and a
+				# grandchild appended here reaches no table at all. `_write_fields`
+				# below is what actually persists them.
+				if hasattr(row, "append"):
+					for field in fields:
 						row.append("fields", dict(field))
-					else:  # pragma: no cover - a mapping-shaped row
-						row.setdefault("fields", []).append(dict(field))
+				else:  # pragma: no cover - a mapping-shaped row
+					row.setdefault("fields", []).extend(dict(field) for field in fields)
 			doc.insert(ignore_permissions=True)
+			report["fields_written"] += write_wizard_fields(doc)
 			report["created"].append(key)
 		except Exception as exc:  # pragma: no cover - reported, never raised
 			report["failed"].append({"wizard": key, "reason": f"{type(exc).__name__}: {exc}"})

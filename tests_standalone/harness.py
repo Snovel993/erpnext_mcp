@@ -3815,12 +3815,12 @@ class Store:
 	def put(self, doc: Document):
 		self._extract_passwords(doc)
 		if META.get(doc.doctype) and META[doc.doctype].issingle:
-			self.singles[doc.doctype] = _plain(doc)
+			self.singles[doc.doctype] = _drop_grandchildren(_plain(doc), doc.doctype)
 			return
 		table = self.tables.setdefault(doc.doctype, {})
 		is_new = doc.name not in table
 		self.snapshot(doc.doctype, doc.name)
-		table[doc.name] = _plain(doc)
+		table[doc.name] = _drop_grandchildren(_plain(doc), doc.doctype)
 		if is_new:
 			self.pending.append((doc.doctype, doc.name))
 
@@ -3924,6 +3924,63 @@ def _plain(doc) -> dict:
 		else:
 			out[key] = value
 	return out
+
+
+def _nested_table_fields(child_doctype: str) -> tuple:
+	"""The Table fieldnames declared ON a child doctype — a GRANDCHILD table.
+
+	Only one doctype in this app has any: `Wizard Step.fields` → `Wizard Field`.
+	Read off the meta rather than listed, so a second one added later is covered
+	by the rule below without anybody remembering this function exists.
+	"""
+	meta = META.get(child_doctype)
+	if meta is None:
+		return ()
+	return tuple(
+		str(field.get("fieldname"))
+		for field in meta.fields
+		if field.get("fieldtype") == "Table" and field.get("fieldname")
+	)
+
+
+def _drop_grandchildren(row: dict, doctype: str) -> dict:
+	"""A child row is written as its own columns and NOTHING ELSE, as Frappe does.
+
+	THIS IS THE v0.91.0 GAP AND IT COST TWO RELEASES. `Document.insert()` writes
+	the parent, then walks `get_all_children()` — which reads `meta.get_table_fields()`
+	on the PARENT and so goes exactly one level down — and `db_insert`s each row
+	from `get_valid_dict()`, which has no place for a Table field. A grandchild
+	appended onto a child row is therefore never written, and it is never read
+	back either: `load_from_db` fills the parent's tables and stops.
+
+	The double stored documents whole, so `wizard_key → steps → fields` survived
+	a save here and came back nested on the next read. `install_wizard_definitions`
+	appended fields onto step rows, `describe()` read them off the step it was
+	handed, 9,859 tests agreed, and on Tim's site every one of the five shipped
+	wizards answered `fields: []` — a form the handset correctly refuses to draw
+	as "nothing to fill". A test asserting the seeder's own nesting could not
+	have caught it, because the nesting was real in the double and fiction in
+	MariaDB.
+
+	So the double drops them, which makes the grandchild pattern fail here the
+	way it fails on a bench: a wizard field only exists if something wrote it as
+	a `Wizard Field` document of its own, with `parent` pointing at the step row.
+	The in-memory document keeps its nested rows — that is faithful too, and it
+	is what `WizardDefinition.validate` walks — so only the STORED copy is
+	stripped.
+	"""
+	for (parent, fieldname), child_doctype in CHILD_TABLES.items():
+		if parent != doctype:
+			continue
+		nested = _nested_table_fields(child_doctype)
+		if not nested:
+			continue
+		for child in row.get(fieldname) or []:
+			if not isinstance(child, dict):  # pragma: no cover - rows are always dicts
+				continue
+			for column in nested:
+				child.pop(column, None)
+	return row
 
 
 STORE = Store()
@@ -4169,6 +4226,14 @@ class FakeDB:
 #: that reads as "no photographs were filed".
 CHILD_TABLE_SOURCES = {
 	"Journal Entry Account": (("Journal Entry", "accounts"),),
+	# v0.91.0. The wizard's steps, read by `parent` rather than off the
+	# definition in hand — which is how `wizards._step_names` finds the rows a
+	# `Wizard Field` points at, and how an overwrite finds the ones it has to
+	# delete before the definition goes. `Wizard Field` is DELIBERATELY ABSENT
+	# from this table: it is a grandchild, it is written as a document of its
+	# own (see `_drop_grandchildren`), and it lives in `tabWizard Field` like
+	# any other row rather than nested inside anything.
+	"Wizard Step": (("Wizard Definition", "steps"),),
 	"Parcel Conveyance Event": (("Parcel", "conveyance_events"),),
 	"Bank Transaction Payments": (("Bank Transaction", "payment_entries"),),
 	"Statement Anchor Line": (("Statement Anchor", "statement_lines"),),
