@@ -15404,10 +15404,15 @@ it looks like: the itemised statement of earnings ORS 652.610 and RCW 49.46.020
 require an employer to give a worker, drawn from the slip that was actually paid.
 It carries its own header and footer and no draft stamp.
 
-**The earnings itemise and then balance.** Hours at the rate, overtime at 1.5x
-and units at the piece rate are printed; whatever gross that does not account for
-— break pay, the FLSA §778.111 half-time premium — is a named balancing line, so
-the lines always add up to the gross beneath them. A negative balance is drawn
+**The earnings itemise and then balance.** Units at the piece rate, or hours at
+the rate and overtime at 1.5x — **never both on one stub.** A piece-rate worker's
+hours *are* the hours they picked in, and a salary structure may carry an
+`hourly_rate` beside a piece `base_rate` for the mixed worker whose split the
+record cannot state; pricing both would bill the picking twice. A piece stub
+shows its hours unpriced, as the count the minimum wage floor was tested against.
+Whatever the gross that leaves unaccounted for — break pay, the hourly half, the
+FLSA §778.111 half-time premium — is a named balancing line, so the priced lines
+always add up to the gross beneath them. A negative balance is drawn
 rather than clamped: it means the rate the page was given is not the rate the
 slip was computed at.
 

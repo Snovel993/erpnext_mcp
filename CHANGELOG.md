@@ -395,8 +395,14 @@ slip stores hours, units, the piece rate and the gross; it does not store what
 each component of gross came to, because the engine computes gross in one pass —
 piece earnings, break pay at the average piece-rate hourly, and the FLSA §778.111
 half-time premium are not three columns, they are one number with a method behind
-it. So hours at the rate, overtime at 1.5x and units at the piece rate are
-printed, and whatever that itemisation does not account for is drawn as a named
+it. So the units are priced at the piece rate, or the hours at the hourly rate
+and overtime at 1.5x — **never both on one stub**, because a piece-rate worker's
+hours ARE the hours they picked in, and a structure that carries an `hourly_rate`
+beside a piece `base_rate` is the mixed worker whose split the record cannot
+state. Pricing both would bill the picking twice and print a gross nobody was
+paid. A piece stub shows its hours unpriced instead, because that count is what
+the minimum wage floor was tested against and a worker needs it to check the
+test. Whatever the itemisation does not account for is drawn as a named
 balancing line. The alternative was three lines that do not add up to the gross
 beneath them, which on a wage statement is what starts a claim rather than
 answers one. **A negative balance is drawn too**, not clamped: it means the rate

@@ -228,7 +228,13 @@ def _table_head(sheet: _Sheet, first_column: str, quantity: str, rate: str) -> N
 
 
 def _row(sheet: _Sheet, label: str, quantity: str, rate: str, amount, bold: bool = False) -> None:
-	"""One line of a table. `amount` is a figure; the other three are text."""
+	"""One line of a table. `amount` is a figure; the other three are text.
+
+	`amount=None` draws NO figure at all, which is not the same as drawing zero.
+	It is the informational hours row on a piece-rate stub: a count that was not
+	paid at a rate, and a `0.00` beside it would read as an hour worked for
+	nothing.
+	"""
 	sheet.room_for(ROW_HEIGHT)
 	top = sheet.top
 	baseline = top + SIZE_VALUE
@@ -239,7 +245,8 @@ def _row(sheet: _Sheet, label: str, quantity: str, rate: str, amount, bold: bool
 		sheet.text(_QTY_X, baseline, quantity, FONT_PLAIN, SIZE_SUBTITLE, align="right")
 	if rate:
 		sheet.text(_RATE_X, baseline, rate, FONT_PLAIN, SIZE_SUBTITLE, align="right")
-	sheet.text(_AMOUNT_X, baseline, _money(amount), value_font, SIZE_VALUE, align="right")
+	if amount is not None:
+		sheet.text(_AMOUNT_X, baseline, _money(amount), value_font, SIZE_VALUE, align="right")
 	sheet.top = top + ROW_HEIGHT
 
 
@@ -322,52 +329,83 @@ def earnings_lines(stub: dict) -> list[dict]:
 
 	The last line is ALWAYS the balance and is ALWAYS present when it is not
 	zero, including when it is negative. See the module docstring.
+
+	PIECED WORK AND HOURLY WORK ARE NEVER BOTH PRICED ON ONE STUB, and that is
+	the rule the whole function turns on. A piece-rate worker's hours ARE the
+	hours they picked in: the slip records them for the minimum wage check, not
+	because they were paid by the hour. A salary structure may carry an
+	`hourly_rate` beside a piece `base_rate` — that is the mixed worker, six
+	hours picking and two on a tractor — and pricing the units AND all the hours
+	would bill the picking twice and print a gross nobody was paid.
+
+	The record cannot say how the hours split, so the honest page prices the
+	units, states the hours WITHOUT a rate, and lets the balancing line carry the
+	hourly half under a label that names it. That also keeps the overtime line
+	off a piece stub, where the premium is the §778.111 HALF-time one rather
+	than the 1.5x this module knows how to print.
 	"""
 	regular_hours = _num(stub.get("regular_hours"))
 	overtime_hours = _num(stub.get("overtime_hours"))
+	total_hours = _num(stub.get("total_hours"), regular_hours + overtime_hours)
 	piece_units = _num(stub.get("piece_units"))
 	piece_rate = _num(stub.get("piece_rate"))
 	hourly_rate = _num(stub.get("hourly_rate"))
 	earned_gross = _num(stub.get("earned_gross"), _num(stub.get("gross_pay")))
 
 	lines = []
-	if piece_units and piece_rate:
+	pieced = bool(piece_units and piece_rate)
+	if pieced:
 		lines.append({
 			"label": "Piece work",
 			"quantity": _units(piece_units),
 			"rate": _rate(piece_rate),
 			"amount": piece_units * piece_rate,
 		})
-	if regular_hours and hourly_rate:
-		lines.append({
-			"label": "Regular hours",
-			"quantity": _hours(regular_hours),
-			"rate": _rate(hourly_rate),
-			"amount": regular_hours * hourly_rate,
-		})
-	if overtime_hours and hourly_rate:
-		lines.append({
-			"label": f"Overtime hours at {OT_MULTIPLIER:g}x",
-			"quantity": _hours(overtime_hours),
-			"rate": _rate(hourly_rate * OT_MULTIPLIER),
-			"amount": overtime_hours * hourly_rate * OT_MULTIPLIER,
-		})
+		if total_hours:
+			# INFORMATION, NOT AN EARNING: no rate, no amount, and nothing added
+			# to the running total. It is the count the minimum wage floor was
+			# tested against, and a stub that showed piece units and no hours
+			# gives a worker no way to check that test themselves.
+			lines.append({
+				"label": "Hours worked (paid by the piece, not by the hour)",
+				"quantity": _hours(total_hours),
+				"rate": "",
+				"amount": None,
+			})
+	else:
+		if regular_hours and hourly_rate:
+			lines.append({
+				"label": "Regular hours",
+				"quantity": _hours(regular_hours),
+				"rate": _rate(hourly_rate),
+				"amount": regular_hours * hourly_rate,
+			})
+		if overtime_hours and hourly_rate:
+			lines.append({
+				"label": f"Overtime hours at {OT_MULTIPLIER:g}x",
+				"quantity": _hours(overtime_hours),
+				"rate": _rate(hourly_rate * OT_MULTIPLIER),
+				"amount": overtime_hours * hourly_rate * OT_MULTIPLIER,
+			})
 
-	balance = earned_gross - sum(line["amount"] for line in lines)
+	priced = [line for line in lines if line["amount"] is not None]
+	balance = earned_gross - sum(line["amount"] for line in priced)
 	if abs(balance) >= 0.005:
-		lines.append({
-			"label": "Other earnings (break pay, overtime premium)" if lines else "Earnings",
-			"quantity": "",
-			"rate": "",
-			"amount": balance,
-		})
+		if pieced:
+			label = "Other earnings (hourly work, break pay, overtime premium)"
+		elif priced:
+			label = "Other earnings (break pay, overtime premium)"
+		else:
+			label = "Earnings"
+		lines.append({"label": label, "quantity": "", "rate": "", "amount": balance})
 	return lines
 
 
 def _earnings(sheet: _Sheet, stub: dict) -> None:
 	sheet.heading("Earnings")
 	_table_head(sheet, "Description", "Hours / units", "Rate")
-	for line in earnings_lines(stub):
+	lines = earnings_lines(stub)
+	for line in lines:
 		_row(sheet, line["label"], line["quantity"], line["rate"], line["amount"])
 
 	makeup = _num(stub.get("minimum_wage_makeup"))
@@ -376,13 +414,14 @@ def _earnings(sheet: _Sheet, stub: dict) -> None:
 		_row(sheet, "Minimum wage adjustment", "", "", makeup)
 	_total_row(sheet, "GROSS PAY", _num(stub.get("gross_pay")))
 
+	# Only where the table did not already carry the hours. On a piece-rate stub
+	# it did, as its own unpriced row, and repeating it beneath would read as a
+	# second count of something.
 	total_hours = _num(stub.get("total_hours"))
-	if total_hours:
+	if total_hours and not any(line["amount"] is None for line in lines):
 		sheet.spacer(2)
 		sheet.paragraph(
-			f"Total hours worked this period: {_hours(total_hours)}"
-			+ (f"   Units: {_units(stub.get('piece_units'))}" if _num(stub.get("piece_units")) else ""),
-			size=SIZE_SMALL,
+			f"Total hours worked this period: {_hours(total_hours)}", size=SIZE_SMALL,
 		)
 	if makeup:
 		sheet.paragraph(

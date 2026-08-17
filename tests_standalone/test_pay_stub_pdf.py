@@ -180,7 +180,19 @@ class EarningsBalance(unittest.TestCase):
 	"""The lines add up to earned gross. Every time, including the awkward times."""
 
 	def total(self, stub) -> float:
-		return round(sum(line["amount"] for line in pay_stub_pdf.earnings_lines(stub)), 2)
+		"""What the PRICED lines come to. A line with `amount` None is not one.
+
+		The informational hours row on a piece-rate stub carries a count and no
+		figure, and summing it as zero would be the same mistake as printing it
+		as zero — see `_row`."""
+		return round(
+			sum(
+				line["amount"]
+				for line in pay_stub_pdf.earnings_lines(stub)
+				if line["amount"] is not None
+			),
+			2,
+		)
 
 	def test_the_lines_sum_to_earned_gross(self):
 		stub = a_stub()
@@ -214,12 +226,61 @@ class EarningsBalance(unittest.TestCase):
 	def test_piece_work_itemises_units_at_the_piece_rate(self):
 		stub = a_stub(
 			pay_type="Piece Rate", hourly_rate=0.0, regular_hours=0.0, overtime_hours=0.0,
-			piece_units=400.0, piece_rate=3.0, earned_gross=1200.0, gross_pay=1200.0,
+			total_hours=0.0, piece_units=400.0, piece_rate=3.0,
+			earned_gross=1200.0, gross_pay=1200.0,
 		)
 		lines = pay_stub_pdf.earnings_lines(stub)
 		self.assertEqual(lines[0]["label"], "Piece work")
 		self.assertEqual(lines[0]["amount"], 1200.0)
 		self.assertEqual(self.total(stub), 1200.0)
+
+	def test_a_piece_workers_hours_are_shown_and_are_not_an_earning(self):
+		"""They are the count the minimum wage floor was tested against, and a
+		stub showing units and no hours gives a worker no way to check it. A
+		figure beside them would be an hour worked for nothing."""
+		stub = a_stub(
+			pay_type="Piece Rate", hourly_rate=0.0, regular_hours=80.0, overtime_hours=0.0,
+			total_hours=80.0, piece_units=400.0, piece_rate=3.0,
+			earned_gross=1200.0, gross_pay=1200.0,
+		)
+		hours_row = pay_stub_pdf.earnings_lines(stub)[1]
+		self.assertIn("Hours worked", hours_row["label"])
+		self.assertEqual(hours_row["quantity"], "80.00")
+		self.assertIsNone(hours_row["amount"])
+		self.assertEqual(self.total(stub), 1200.0)
+
+	def test_a_mixed_workers_hours_are_never_priced_beside_their_units(self):
+		"""THE DEFECT THIS RULE EXISTS FOR. A piece-rate structure may carry an
+		`hourly_rate` for the tractor half of a mixed worker's week, and
+		`_stub_hourly_rate` hands it over. Pricing the units AND all the hours
+		bills the picking twice and prints a gross nobody was paid — on the
+		fixture below, three priced lines totalling 2,846 against an earned gross
+		of 1,462.75, and a balancing line of -1,383 to absorb it.
+
+		The record cannot say how the hours split, so the hourly half rides the
+		balancing line under a label that names it."""
+		stub = a_stub(
+			pay_type="Piece Rate", hourly_rate=18.50,
+			regular_hours=72.0, overtime_hours=8.0, total_hours=80.0,
+			piece_units=386.0, piece_rate=3.25,
+			earned_gross=1462.75, gross_pay=1462.75,
+		)
+		lines = pay_stub_pdf.earnings_lines(stub)
+		self.assertEqual([line["label"] for line in lines[:2]][0], "Piece work")
+		self.assertNotIn("Regular hours", [line["label"] for line in lines])
+		self.assertNotIn("Overtime hours at 1.5x", [line["label"] for line in lines])
+		self.assertEqual(lines[-1]["label"], "Other earnings (hourly work, break pay, overtime premium)")
+		self.assertEqual(self.total(stub), 1462.75)
+
+	def test_the_overtime_premium_line_stays_off_a_piece_stub(self):
+		"""On piece work the premium is the §778.111 HALF-time one, not the 1.5x
+		this module knows how to print, so a 1.5x line there would be wrong twice
+		over — wrong rate and double-counted."""
+		lines = pay_stub_pdf.earnings_lines(a_stub(
+			pay_type="Piece Rate", hourly_rate=18.50, overtime_hours=8.0,
+			piece_units=386.0, piece_rate=3.25, earned_gross=1462.75,
+		))
+		self.assertFalse([line for line in lines if "1.5x" in line["label"]])
 
 	def test_with_no_rate_at_all_everything_lands_on_one_unnamed_earnings_line(self):
 		"""A line that cannot be priced from the record is better absent than
