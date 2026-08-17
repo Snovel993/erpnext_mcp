@@ -242,7 +242,6 @@ def _agricultural_masters() -> None:
 		print(f"erpnext_mcp: skipped {skipped.get('name')} — {skipped.get('reason')}")
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed {failure.get('name')} — {failure.get('reason')}")
-	_breakeven_account_fields()
 
 
 def _translations() -> None:
