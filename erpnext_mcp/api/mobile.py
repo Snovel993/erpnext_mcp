@@ -121,6 +121,7 @@ from ..tools import training as training_tools
 from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
+from ..tools import payroll as payroll_tools
 from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
 from ..tools import stock_inventory as stock_tools
@@ -129,6 +130,7 @@ from ..tools import valves as valve_tools
 from ..tools import shipments as shipment_tools
 from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
+from ..tools import spray as spray_tools
 from . import fallback_auth, guard, rectify, shape
 
 ALERT = "Compliance Alert"
@@ -9041,3 +9043,136 @@ def start_inspection(
 			inner[key] = str(value).strip()
 
 	return session_tools.start_inspection_session(inner).data
+
+
+# ── 113. get_payroll_register ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_payroll_register", limit=guard.READ_LIMIT)
+def get_payroll_register(
+	user: str,
+	company=None,
+	pay_period=None,
+	date_from=None,
+	date_to=None,
+	include_drafts=None,
+) -> dict:
+	"""The period's payroll register, for the person who signs the cheques.
+
+	THE HR ROLE IS REQUIRED AND IT IS THE WHOLE GATE ON THIS ONE. Every other
+	read on this surface is either the caller's own work or a board a foreman
+	needs to do their job; this is what everybody on the farm was paid, name by
+	name, and there is no version of it that is a picker's to see. `HR_ROLES` is
+	Farm Manager, HR Manager, HR User and System Manager — deliberately NOT
+	`DISPATCH_ROLES`, which would put a crew's wages in front of every foreman on
+	the site. The seven gates in `guard.endpoint` have already run; this is the
+	eighth and it is the one that matters here.
+
+	THE COMPANY SCOPE IS THE CALLER'S OWN. `guard.require_company` refuses an
+	entity this account cannot reach, and a register is exactly the read where
+	that matters: the holding company's payroll is not readable by naming it.
+
+	`include_drafts` IS FORWARDED because it is a fact about what the caller is
+	reconciling — a run that has not been paid belongs in a review and not in a
+	bank reconciliation — and the result says which statuses it counted either
+	way. Nothing else is: the tool takes no employee filter and neither does
+	this, because a register IS the whole crew and a one-person view of it is
+	`get_payroll_entry`.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+	personnel.require_hr_role()
+
+	inner: dict = {"company": entity}
+	for key, value in (
+		("pay_period", pay_period),
+		("date_from", date_from),
+		("date_to", date_to),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	if include_drafts is not None:
+		inner["include_drafts"] = include_drafts
+
+	data = payroll_tools.get_payroll_register(inner).data
+	return {
+		"company": data.get("company"),
+		"date_from": data.get("date_from"),
+		"date_to": data.get("date_to"),
+		"pay_period": data.get("pay_period"),
+		"statuses_counted": data.get("statuses_counted") or [],
+		"payroll_entries": data.get("payroll_entries") or [],
+		"payroll_entry_count": data.get("payroll_entry_count"),
+		"employees": data.get("employees") or [],
+		"totals": data.get("totals") or {},
+		"employer_costs": data.get("employer_costs") or {},
+		"grand_total_labor_cost": data.get("grand_total_labor_cost"),
+		"total_cost_of_employment": data.get("total_cost_of_employment"),
+		"total_employee_withholding": data.get("total_employee_withholding"),
+	}
+
+
+# ── 114. render_pay_stub ─────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("render_pay_stub", mutating=True, limit=guard.WRITE_LIMIT)
+def render_pay_stub(
+	user: str,
+	payroll_entry=None,
+	employee=None,
+	company_address=None,
+	overwrite=None,
+) -> dict:
+	"""Draw one worker's pay stub and hand the phone a URL for it.
+
+	THE SAME SHAPE AS `generate_w4_pdf` AND FOR THE SAME REASON: the app cannot
+	render a PDF and should not try, so the server draws it, attaches it
+	privately, and returns `file_url` — which is what the handset opens, prints
+	and hands over at the end of a period. A stub given out in the field the
+	afternoon it is generated is the one a worker actually reads; one that waits
+	for somebody to be at a Desk is one they get a fortnight late, if at all.
+
+	THE HR ROLE IS REQUIRED. A pay stub names somebody's wages and every
+	deduction taken from them.
+
+	THE EMPLOYEE MUST BE ON THE CALLER'S OWN CREW. `_employee_argument` is what
+	scopes it, exactly as it does on the pause pair and on `log_shift_location`
+	— an account that can name anybody on the site in a request body could walk
+	the payroll one docname at a time, and this is the read where doing so is
+	worth the most to whoever tried.
+
+	`show_employer_contributions` IS NOT FORWARDED. Whether a farm shows its own
+	FICA and unemployment on a worker's statement is an operator's policy for the
+	whole operation, not a checkbox on the handset of whoever happened to print
+	it — two workers on one crew getting differently-shaped stubs on the same
+	afternoon is a wage-claim exhibit. The MCP surface keeps the argument.
+
+	EVERY REFUSAL IS THE TOOL'S: that the site needs reportlab, that this person
+	is not on that run, that a stub is already attached and `overwrite` was not
+	passed. None of it is restated here.
+	"""
+	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
+	person = _employee_argument(employee, allowed)
+	run = guard.require_scoped_doc("Farm Payroll Entry", payroll_entry, "payroll_entry", allowed)
+
+	inner: dict = {"payroll_entry": run, "employee": person}
+	if company_address not in (None, ""):
+		inner["company_address"] = str(company_address).strip()
+	if overwrite is not None:
+		inner["overwrite"] = overwrite
+
+	data = payroll_tools.render_pay_stub(inner).data
+	return {
+		"payroll_entry": data.get("payroll_entry"),
+		"employee": data.get("employee"),
+		"employee_name": data.get("employee_name"),
+		"pay_period_start": data.get("pay_period_start"),
+		"pay_period_end": data.get("pay_period_end"),
+		"gross_pay": data.get("gross_pay"),
+		"total_deductions": data.get("total_deductions"),
+		"net_pay": data.get("net_pay"),
+		"ytd": data.get("ytd"),
+		"file_url": data.get("file_url"),
+		"file_name": data.get("file_name"),
+		"replaced": data.get("replaced"),
+		"note": data.get("note"),
+	}

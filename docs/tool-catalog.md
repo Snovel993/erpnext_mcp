@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 693 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 695 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 344 read tools are **on** by default and can be switched off individually. A
+All 345 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -15210,3 +15210,125 @@ them. `is_meaningful_as_profit_and_loss` is the flag and `verdict` says why.
 pay back cannot be judged on one of them — and a general ledger can only ever
 show you one of them, because the ledger's period is the fiscal year and the
 block's period is fifteen of them.
+
+---
+
+## v0.91.0 — the payroll register and the pay stub
+
+v0.30.0 built the payroll engine and every figure it computes has been stored on
+a Farm Payroll Slip since. What was missing was the two ways a person reads them:
+the **register** an operator reconciles a period against, and the **stub** a
+worker is handed with their pay.
+
+**Neither recomputes anything.** Both read stored slips, so neither can disagree
+with the run it claims to be a view of — the same judgement `render_tax_form_pdf`
+makes about `form_data_json`, and on wages a disagreement is a claim.
+
+### `get_payroll_register`
+
+**READ (default ON).** One row per employee for a period, a totals row, and the
+employer taxes beside them.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `company` | yes | Company docname or abbreviation |
+| `pay_period` | | A Farm Payroll Entry docname — its own period becomes the window (`payroll_entry` is an alias) |
+| `date_from`, `date_to` | | `YYYY-MM-DD`. Required unless `pay_period` is given (`from_date`/`to_date` and `pay_period_start`/`pay_period_end` are aliases) |
+| `include_drafts` | | Count Draft runs as well. Off by default |
+
+Each employee row carries `employee_id`, `employee_name`, `gross_pay`,
+`federal_tax`, `state_tax`, `ss_employee`, `medicare_employee`,
+`other_deductions`, `total_deductions`, `net_pay`, `hours_worked`, `piece_units`
+and `periods`. `totals` sums every one of them. `employer_costs` carries
+`ss_employer`, `medicare_employer`, `futa`, `suta` and `state_employer_other`
+with their own total.
+
+```bash
+curl -sS -X POST https://erp.example.com/api/method/erpnext_mcp.mcp.handle \
+  -H 'Content-Type: application/json' -H "X-MCP-Token: $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+       "name":"get_payroll_register",
+       "arguments":{"company":"Example Trading Co",
+                    "date_from":"2026-06-01","date_to":"2026-06-30"}}}'
+```
+
+**`other_deductions` is derived, not read** — `total_deductions` less the four
+named taxes. Nothing on the slip names a garnishment, so a column that read a
+*field* would report zero for one. Deriving it means a deduction column a later
+release adds is counted the day it lands.
+
+**The window is on `pay_period_end` and a run is counted whole.** A run that
+ended outside the window is out even where some of its days fall inside;
+splitting one would produce withholding totals that reconcile against no deposit
+anybody ever made. `window_rule` says so in the result.
+
+**Draft and Cancelled are out by default** and `statuses_counted` always says
+which were counted. Naming one run in `pay_period` reads that run whatever its
+status — the caller asked for that run, not for a window.
+
+**A selection over 200 runs is refused, not truncated.** A register that quietly
+stopped short would look like it had covered the period.
+
+#### Two cost totals, and they are different numbers
+
+`grand_total_labor_cost` is **net pay plus every employer tax**.
+`total_cost_of_employment` is **gross pay plus every employer tax** — the money
+that actually leaves the farm, because the withheld income tax and the employee's
+FICA are the employer's to remit. They differ by exactly
+`total_employee_withholding`, reported beside them so the arithmetic can be
+checked on the face of the result.
+
+### `render_pay_stub`
+
+**MUTATING (default OFF).** Draws one employee's stub for one run and attaches
+the PDF privately to the Farm Payroll Entry.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `payroll_entry` | yes | Farm Payroll Entry docname (`name` is an alias) |
+| `employee` | yes | Employee docname, or the name as the slip prints it |
+| `show_employer_contributions` | | Draw the employer FICA/FUTA/SUTA section. Off by default |
+| `company_address` | | The employer address to print — ERPNext keeps none on Company |
+| `overwrite` | | Render again though a stub for this person on this run is attached |
+
+Returns `file_url` for the attached PDF, plus the period's gross, deductions,
+net, the resolved `hourly_rate` and the `ytd` block.
+
+**This is not a working copy.** Unlike the tax form pages, a stub is the record
+it looks like: the itemised statement of earnings ORS 652.610 and RCW 49.46.020
+require an employer to give a worker, drawn from the slip that was actually paid.
+It carries its own header and footer and no draft stamp.
+
+**The earnings itemise and then balance.** Hours at the rate, overtime at 1.5x
+and units at the piece rate are printed; whatever gross that does not account for
+— break pay, the FLSA §778.111 half-time premium — is a named balancing line, so
+the lines always add up to the gross beneath them. A negative balance is drawn
+rather than clamped: it means the rate the page was given is not the rate the
+slip was computed at.
+
+**Year to date is the calendar year**, this period included, and the heading says
+so — a withholding year is a calendar year and this site's fiscal year may not
+be. Omitted entirely rather than drawn as zeros where nothing could be summed.
+
+**No Social Security number**, not even the last four. Neither statute asks for
+one and the employee ID identifies the row.
+
+**Attached to the record, not to a field.** A run carries one stub per employee.
+A second render of the same stub is refused unless `overwrite` is passed, and the
+File that was there stays attached either way.
+
+**`reportlab` draws the page**, imported defensively like the tax form
+renderers': a bench without it loses this one tool by name, and every payroll
+figure stays readable through `get_payroll_entry` and `get_payroll_register`.
+
+### Both are on the mobile surface, and both are HR-only
+
+`/farmops/api/mobile/get_payroll_register` and
+`/farmops/api/mobile/render_pay_stub` are the only routes there that reach wages,
+so both wrappers require an HR role in their own bodies rather than the field
+roles the surface is built for — a Foreman is refused. The register is
+company-scoped and declares no `employee` argument; the stub is also
+employee-scoped, so a docname outside the caller's own crew reads as not found.
+`show_employer_contributions` is not on the mobile signature: whether a farm
+shows its own FICA on a worker's statement is one operator policy, not a checkbox
+on the handset of whoever printed it.

@@ -1066,9 +1066,9 @@ class Catalogue(SeededTestCase):
 		rather than spread evenly across blocks, because an even spread is
 		indistinguishable in the output from a measured one.
 		"""
-		self.assertEqual(len(registry.TOOLS), 693)
-		self.assertEqual(len(registry.READ_TOOLS), 344)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 349)
+		self.assertEqual(len(registry.TOOLS), 695)
+		self.assertEqual(len(registry.READ_TOOLS), 345)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 350)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

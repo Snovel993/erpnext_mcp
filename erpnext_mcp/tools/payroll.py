@@ -34,7 +34,7 @@ import frappe
 from frappe.utils import today
 
 from .. import breaks as breaks_mod
-from .. import bucket_bridge, compat, payroll_integration, wage_defaults
+from .. import bucket_bridge, compat, pay_stub_pdf, payroll_integration, wage_defaults
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
@@ -46,7 +46,7 @@ from ..payroll_calc import (
 from ..result import ToolResult
 from ..state_withholding import SUPPORTED_STATES
 from ..withholding import FILING_STATUS_MAP, PERIODS_PER_YEAR
-from . import wagedefaults
+from . import artifacts, wagedefaults
 
 SALARY_STRUCTURE = "Farm Salary Structure"
 PAYROLL_ENTRY = "Farm Payroll Entry"
@@ -1621,6 +1621,546 @@ def _slip_row(slip: dict) -> dict:
 		"state_unemployment": slip.get("state_unemployment") or 0,
 		"state_employer_other": slip.get("state_employer_other") or 0,
 		"total_employer_taxes": slip.get("total_employer_taxes") or 0,
+	}
+
+
+# ── v0.91.0: the two outputs a payroll run never had ──────────────────────
+#
+# THE ARITHMETIC HAS BEEN RIGHT SINCE v0.30.0 AND NOBODY COULD READ IT OUT.
+# `get_payroll_entry` answers "what did this one run come to" and nothing
+# answered the two questions an operator actually asks on payday: what did the
+# whole period cost across everybody, and what does one worker get handed with
+# their pay. `get_payroll_register` is the first and `render_pay_stub` is the
+# second; both read STORED slips and neither recomputes anything, for the reason
+# `taxforms.py` gives at length — a page that recomputed would disagree with the
+# record it claims to be a view of, and on wages that disagreement is a claim.
+
+
+#: Statuses a register counts by default. THE SAME RULE `_load_ytd` AND
+#: `tools/taxforms._load_slips` APPLY, and for the same reason: a Draft payroll
+#: has not been paid and a Cancelled one was not, so neither belongs in a total
+#: somebody reconciles a bank account against. `include_drafts` adds Draft back
+#: and the result always names which statuses it counted.
+REGISTER_STATUSES = ("Calculated", "Submitted")
+
+#: Most payroll runs one register will read. A year of weekly runs is 52 and a
+#: year of biweekly is 26; two hundred is a date range somebody typed wrong.
+#: REFUSED RATHER THAN TRUNCATED, the posture `bulk_render_tax_form_pdfs` takes
+#: — a register that silently stopped short would look like it had covered the
+#: period, and its totals would be wrong in the direction nobody checks.
+REGISTER_ENTRY_CAP = 200
+
+#: The per-employee columns, in the order a register is read, and where each one
+#: comes off a Farm Payroll Slip. `other_deductions` is absent on purpose: it is
+#: DERIVED below rather than read, which is what makes this table survive a
+#: release that adds a deduction column this one has never heard of.
+_REGISTER_COLUMNS = (
+	("gross_pay", "gross_pay"),
+	("federal_tax", "federal_withholding"),
+	("state_tax", "state_withholding"),
+	("ss_employee", "social_security"),
+	("medicare_employee", "medicare"),
+	("total_deductions", "total_deductions"),
+	("net_pay", "net_pay"),
+	("hours_worked", "total_hours"),
+	("piece_units", "piece_units"),
+)
+
+#: The employer half. Not deducted from anybody, not in any employee's net, and
+#: reported as its own block for exactly that reason.
+_EMPLOYER_COLUMNS = (
+	("ss_employer", "social_security_employer"),
+	("medicare_employer", "medicare_employer"),
+	("futa", "futa"),
+	("suta", "state_unemployment"),
+	("state_employer_other", "state_employer_other"),
+)
+
+
+def _slip_get(row):
+	"""One accessor for a slip whichever shape it arrives in.
+
+	A child row read back through `frappe.get_doc` is a Document on a bench and a
+	plain dict in the standalone double, and every reader in this module has had
+	to say so. See `get_payroll_entry`, which does the same thing inline.
+	"""
+	if isinstance(row, dict):
+		return row.get
+	return lambda key, default=None: getattr(row, key, default)
+
+
+def _register_window(args: dict, company: str) -> tuple[str, str, str]:
+	"""`(date_from, date_to, pay_period)` from either way of asking.
+
+	`pay_period` NAMES A FARM PAYROLL ENTRY and its own start and end become the
+	window, so "the register for this run" is one argument rather than two dates
+	somebody copies off the record and gets wrong by a day. The dates are the
+	other way, and one of the two is required — a register with no window is the
+	whole site's payroll, which is not a default this offers.
+	"""
+	pay_period = as_str(args, "pay_period") or as_str(args, "payroll_entry")
+	if pay_period:
+		if not frappe.db.exists(PAYROLL_ENTRY, pay_period):
+			raise ToolError(
+				f"no Farm Payroll Entry called {pay_period!r}. `pay_period` names one payroll "
+				f"run and takes its period from it; pass date_from and date_to instead to "
+				f"cover a range of runs. List them with list_payroll_entries."
+			)
+		row = frappe.db.get_value(
+			PAYROLL_ENTRY, pay_period,
+			["company", "pay_period_start", "pay_period_end"], as_dict=True,
+		) or {}
+		if str(row.get("company") or "") != company:
+			raise ToolError(
+				f"payroll entry {pay_period} belongs to {row.get('company')!r}, not to "
+				f"{company!r}. Nothing was read."
+			)
+		return str(row.get("pay_period_start") or ""), str(row.get("pay_period_end") or ""), pay_period
+
+	date_from = as_date(args, "date_from") or as_date(args, "from_date") or as_date(args, "pay_period_start")
+	date_to = as_date(args, "date_to") or as_date(args, "to_date") or as_date(args, "pay_period_end")
+	if not (date_from and date_to):
+		raise ToolError(
+			"a period is required: either pay_period (a Farm Payroll Entry docname) or both "
+			"date_from and date_to as YYYY-MM-DD. A register with no window would be every "
+			"payroll run on the site, which is not a total anybody asked for."
+		)
+	if date_from > date_to:
+		raise ToolError(f"date_from {date_from} is after date_to {date_to}. Nothing was read.")
+	return date_from, date_to, ""
+
+
+def get_payroll_register(args: dict) -> ToolResult:
+	"""The payroll register for a period: every employee, every column, and the totals.
+
+	WHAT A REGISTER IS FOR is reconciliation — the sheet somebody puts beside a
+	bank statement and a general ledger and checks that three numbers agree. So
+	every figure here is READ off stored Farm Payroll Slips and none of it is
+	recomputed, and the result names the payroll runs it added up so a
+	disagreement can be traced to a run rather than argued about.
+
+	THE WINDOW IS ON `pay_period_end`, NOT ON OVERLAP. A run whose period ended
+	inside the window is counted whole; one that ended outside it is not counted
+	at all, even if some of its days fall in the window. That is how a payroll
+	register is read everywhere — the unit is the RUN, because the taxes on it
+	were computed for that run's period and cannot be split across a date
+	somebody chose afterwards — and splitting one would produce a register whose
+	withholding totals reconcile against no deposit that was ever made.
+
+	`other_deductions` IS DERIVED, NOT READ: `total_deductions` less federal,
+	state, Social Security and Medicare. Deriving it is what makes this tool
+	survive a release that adds a deduction the slip has never carried — a
+	garnishment or a 401(k) row lands in `total_deductions` and appears here the
+	day it lands, rather than going silently missing from a column that reads a
+	field list written before it existed.
+
+	TWO TOTALS OF COST ARE REPORTED AND THEY ARE DIFFERENT NUMBERS.
+	`grand_total_labor_cost` is net pay plus every employer tax, which is the
+	figure the brief for this tool asked for and the one to use when the question
+	is "what did the cheques and the employer's own taxes come to".
+	`total_cost_of_employment` is GROSS pay plus every employer tax, and it is
+	the money that actually leaves the farm — the withheld income tax and the
+	employee's FICA are the employer's to remit, so they leave too, they are just
+	not in anybody's net. The two differ by exactly the employees' withholding,
+	which is reported beside them as `total_employee_withholding` so the
+	arithmetic can be checked on the face of the result rather than taken on
+	trust.
+	"""
+	company = resolve_company(as_str(args, "company"), required=True)
+	date_from, date_to, pay_period = _register_window(args, company)
+
+	statuses = list(REGISTER_STATUSES)
+	if args.get("include_drafts") in (1, "1", True, "true", "True"):
+		statuses.append("Draft")
+
+	filters = {
+		"company": company,
+		"status": ("in", tuple(statuses)),
+		"pay_period_end": ("between", (date_from, date_to)),
+	}
+	if pay_period:
+		# A run named EXPLICITLY is read whatever its status: the caller asked for
+		# that run and not for a window, and refusing to show them a Draft they
+		# named by docname would be answering a question they did not ask.
+		# `statuses_counted` is corrected from what actually came back, below.
+		filters = {"name": pay_period}
+
+	entries = frappe.db.get_all(
+		PAYROLL_ENTRY,
+		filters=filters,
+		fields=["name", "pay_period_start", "pay_period_end", "pay_frequency", "status"],
+		order_by="pay_period_end asc",
+		limit_page_length=0,
+	)
+	if len(entries) > REGISTER_ENTRY_CAP:
+		raise ToolError(
+			f"{len(entries)} payroll runs end between {date_from} and {date_to}, and this tool "
+			f"reads at most {REGISTER_ENTRY_CAP} — a register that quietly stopped short would "
+			f"look like it had covered the period. Narrow the dates. Nothing was read."
+		)
+
+	by_employee: dict[str, dict] = {}
+	employer: dict[str, float] = {key: 0.0 for key, _field in _EMPLOYER_COLUMNS}
+	counted = []
+
+	for entry in entries:
+		try:
+			doc = frappe.get_doc(PAYROLL_ENTRY, entry["name"])
+		except Exception:  # pragma: no cover - a row that vanished between two reads
+			continue
+		slip_count = 0
+		for slip in doc.get("slips") or []:
+			get = _slip_get(slip)
+			employee = str(get("employee") or "")
+			if not employee:
+				continue
+			slip_count += 1
+			row = by_employee.setdefault(employee, {
+				"employee_id": employee,
+				"employee_name": get("employee_name") or employee,
+				"periods": 0,
+				**{key: 0.0 for key, _field in _REGISTER_COLUMNS},
+				"other_deductions": 0.0,
+			})
+			row["periods"] += 1
+			if not row.get("employee_name"):
+				row["employee_name"] = get("employee_name") or employee
+			for key, field in _REGISTER_COLUMNS:
+				row[key] += _num(get(field))
+			row["other_deductions"] += _num(get("total_deductions")) - (
+				_num(get("federal_withholding"))
+				+ _num(get("state_withholding"))
+				+ _num(get("social_security"))
+				+ _num(get("medicare"))
+			)
+			for key, field in _EMPLOYER_COLUMNS:
+				employer[key] += _num(get(field))
+		counted.append({
+			"name": entry["name"],
+			"pay_period_start": str(entry.get("pay_period_start") or ""),
+			"pay_period_end": str(entry.get("pay_period_end") or ""),
+			"pay_frequency": entry.get("pay_frequency"),
+			"status": entry.get("status"),
+			"slips": slip_count,
+		})
+
+	employees = sorted(
+		(
+			{key: (round(value, 2) if isinstance(value, float) else value) for key, value in row.items()}
+			for row in by_employee.values()
+		),
+		key=lambda row: (str(row.get("employee_name") or ""), str(row.get("employee_id") or "")),
+	)
+
+	totals = {"employees": len(employees), "periods": sum(row["periods"] for row in employees)}
+	for key in [name for name, _field in _REGISTER_COLUMNS] + ["other_deductions"]:
+		totals[key] = round(sum(row[key] for row in employees), 2)
+
+	employer = {key: round(value, 2) for key, value in employer.items()}
+	employer_total = round(sum(employer.values()), 2)
+	withheld = round(totals["gross_pay"] - totals["net_pay"], 2)
+
+	data = {
+		"company": company,
+		"date_from": date_from,
+		"date_to": date_to,
+		"pay_period": pay_period or None,
+		"statuses_counted": (
+			sorted({str(row["status"]) for row in counted}) if pay_period else statuses
+		),
+		"payroll_entries": counted,
+		"payroll_entry_count": len(counted),
+		"employees": employees,
+		"totals": totals,
+		"employer_costs": {**employer, "total_employer_taxes": employer_total},
+		# See the docstring: two different questions, two different numbers, and
+		# the difference between them named so it can be checked here.
+		"grand_total_labor_cost": round(totals["net_pay"] + employer_total, 2),
+		"total_cost_of_employment": round(totals["gross_pay"] + employer_total, 2),
+		"total_employee_withholding": withheld,
+		"window_rule": (
+			"payroll runs whose pay_period_end falls between date_from and date_to, counted "
+			"whole. A run is never split across the window."
+		),
+		"other_deductions_rule": (
+			"total_deductions less federal, state, Social Security and Medicare — derived "
+			"rather than read, so a deduction column added by a later release is counted here "
+			"without this tool changing."
+		),
+	}
+	return ToolResult(
+		data=data,
+		summary=f"Payroll register for {company}, {date_from} to {date_to}: {len(employees)} "
+		f"employee(s) over {len(counted)} run(s), gross ${totals['gross_pay']:,.2f}, "
+		f"net ${totals['net_pay']:,.2f}, employer taxes ${employer_total:,.2f}, "
+		f"grand total labor cost ${data['grand_total_labor_cost']:,.2f}",
+	)
+
+
+def _stub_slip(doc, employee: str) -> tuple[dict, str]:
+	"""The one slip on `doc` that is about `employee`, or a refusal naming who is on it.
+
+	An employee is named by docname OR by the name printed on the slip, because
+	the person asking for a stub is holding a piece of paper with a name on it
+	rather than a docname. A miss lists the run's own employees: "not on this
+	run" and "spelled differently" are the two things it can be, and only one of
+	them is the caller's mistake.
+	"""
+	wanted = str(employee or "").strip()
+	on_the_run = []
+	folded = wanted.casefold()
+	match = None
+	for slip in doc.get("slips") or []:
+		get = _slip_get(slip)
+		name = str(get("employee") or "")
+		label = str(get("employee_name") or "")
+		on_the_run.append(f"{name} ({label})" if label else name)
+		if match is None and wanted in (name, label):
+			match = (slip, name)
+		elif match is None and folded and folded in (name.casefold(), label.casefold()):
+			match = (slip, name)
+	if match is None:
+		raise ToolError(
+			f"no slip for {wanted!r} on payroll entry {doc.name}. This run covers: "
+			f"{', '.join(on_the_run) or '<no slips>'}. Nothing was rendered."
+		)
+	slip, name = match
+	get = _slip_get(slip)
+	fields = (
+		"employee", "employee_name", "salary_structure", "pay_type", "work_state",
+		"total_hours", "regular_hours", "overtime_hours", "piece_units", "piece_rate",
+		"gross_pay", "earned_gross", "minimum_wage_makeup",
+		"federal_withholding", "state_withholding", "social_security", "medicare",
+		"total_deductions", "net_pay", "effective_hourly_rate",
+		"social_security_employer", "medicare_employer", "futa", "state_unemployment",
+		"state_employer_other", "total_employer_taxes",
+	)
+	payload = {field: get(field) for field in fields}
+	payload["earned_gross"] = payload.get("earned_gross") or payload.get("gross_pay")
+	return payload, name
+
+
+def _stub_hourly_rate(salary_structure: str, pay_type: str) -> float:
+	"""What one hour of this worker's HOURLY work pays, for the earnings lines.
+
+	NOT `effective_hourly_rate`, which is a piece-rate worker's earnings divided
+	by their hours — a derived figure that is right for the minimum wage check
+	and wrong on a printed line reading "Regular hours at ...". Pricing piece
+	work at it and then also printing the units at the piece rate would state the
+	same earnings twice.
+
+	A structure that names no hourly rate returns 0.0 and the stub prints the
+	hours WITHOUT a rate or an amount, with everything landing on the balancing
+	line. See `pay_stub_pdf.earnings_lines`: a line that cannot be priced from
+	the record is better absent than priced from a guess.
+	"""
+	if not salary_structure:
+		return 0.0
+	row = frappe.db.get_value(
+		SALARY_STRUCTURE, salary_structure, ["pay_type", "base_rate", "hourly_rate"], as_dict=True,
+	) or {}
+	hourly = _num(row.get("hourly_rate"))
+	if hourly:
+		return hourly
+	if str(row.get("pay_type") or pay_type or "") == "Hourly":
+		return _num(row.get("base_rate"))
+	return 0.0
+
+
+def _stub_ytd(company: str, employee: str, period_end: str, entry_name: str) -> dict:
+	"""Every withheld and paid figure for this person so far in the CALENDAR year.
+
+	CALENDAR, NOT THIS SITE'S FISCAL YEAR, and `pay_stub_pdf` says why at length:
+	a withholding year is a calendar year, the W-2 covers January to December,
+	and a stub whose YTD federal withholding cannot be reconciled against the
+	form the IRS will see is worse than one carrying no YTD at all.
+
+	THIS PERIOD IS INCLUDED. "Year to date" on a stub means through today's
+	cheque — a worker adding their stubs up expects the last one to reach the
+	total, not to sit one period behind it.
+
+	Only `Calculated` and `Submitted` runs count, the rule `_load_ytd` applies
+	for the same reason. Returns `{}` where nothing could be summed, and the page
+	then omits the section rather than drawing a column of zeros.
+	"""
+	year = str(period_end)[:4]
+	if not year:
+		return {}
+	entries = frappe.db.get_all(
+		PAYROLL_ENTRY,
+		filters={
+			"company": company,
+			"status": ("in", REGISTER_STATUSES),
+			"pay_period_end": ("<=", str(period_end)),
+		},
+		fields=["name", "pay_period_end"],
+		order_by="pay_period_end asc",
+		limit_page_length=0,
+	)
+	keys = (
+		"gross_pay", "federal_withholding", "state_withholding",
+		"social_security", "medicare", "total_deductions", "net_pay",
+	)
+	totals = {key: 0.0 for key in keys}
+	periods = 0
+	for entry in entries:
+		if str(entry.get("pay_period_end") or "")[:4] != year:
+			continue
+		try:
+			doc = frappe.get_doc(PAYROLL_ENTRY, entry["name"])
+		except Exception:  # pragma: no cover - a row that vanished between two reads
+			continue
+		for slip in doc.get("slips") or []:
+			get = _slip_get(slip)
+			if str(get("employee") or "") != employee:
+				continue
+			periods += 1
+			for key in keys:
+				totals[key] += _num(get(key))
+	if not periods:
+		return {}
+	# The run being rendered may itself be a Draft, in which case the loop above
+	# skipped it and the stub in the reader's hand would be missing from its own
+	# year to date. Naming the count rather than the entries is enough for the
+	# page; `get_payroll_register` is where a run-by-run breakdown belongs.
+	return {
+		"year": year,
+		"periods": periods,
+		"includes_this_period": any(entry["name"] == entry_name for entry in entries),
+		**{key: round(value, 2) for key, value in totals.items()},
+	}
+
+
+def render_pay_stub(args: dict) -> ToolResult:
+	"""Draw one employee's pay stub for one payroll run and attach it to the run.
+
+	THE STATEMENT ORS 652.610 AND RCW 49.46.020 BOTH REQUIRE, and the one page on
+	this site that is the record it looks like rather than a working copy of one
+	— see `pay_stub_pdf` for why that distinction changes what is printed at the
+	foot of it.
+
+	NOTHING IS RECOMPUTED. Every figure is read off the stored Farm Payroll Slip,
+	so the page cannot disagree with the run it claims to be a statement of. The
+	only things resolved at render time are the hourly rate for the earnings
+	lines (off the salary structure, because the slip stores hours and not a
+	wage) and the year-to-date block.
+
+	THE PDF IS ATTACHED TO THE FARM PAYROLL ENTRY AND NOT TO A FIELD. A run
+	carries one stub per employee and the doctype has one document; a field would
+	hold whichever was rendered last and lose the rest. `overwrite` is what
+	re-renders one — a correction, most often — and the File that was there stays
+	attached to the record either way, because a stub somebody was handed is a
+	statement that was made and deleting it would not unmake it.
+	"""
+	pay_stub_pdf.require()
+
+	entry_name = as_str(args, "payroll_entry") or as_str(args, "name")
+	if not entry_name:
+		raise ToolError("payroll_entry (the Farm Payroll Entry docname) is required.")
+	if not frappe.db.exists(PAYROLL_ENTRY, entry_name):
+		raise ToolError(f"no Farm Payroll Entry called {entry_name!r}.")
+	employee_arg = as_str(args, "employee") or as_str(args, "employee_name")
+	if not employee_arg:
+		raise ToolError(
+			"employee is required — a payroll entry carries one slip per person and a stub is "
+			"one person's. Read the run with get_payroll_entry to see who is on it."
+		)
+
+	doc = frappe.get_doc(PAYROLL_ENTRY, entry_name)
+	slip, employee = _stub_slip(doc, employee_arg)
+
+	stub = {
+		**slip,
+		"payroll_entry": doc.name,
+		"company": doc.company,
+		"pay_period_start": str(doc.pay_period_start),
+		"pay_period_end": str(doc.pay_period_end),
+		"pay_frequency": doc.pay_frequency,
+		"status": doc.status,
+		"hourly_rate": _stub_hourly_rate(slip.get("salary_structure"), slip.get("pay_type")),
+	}
+	stub["ytd"] = _stub_ytd(doc.company, employee, str(doc.pay_period_end), doc.name)
+
+	file_name = pay_stub_pdf.file_name_for(stub)
+	overwrite = bool(args.get("overwrite"))
+	existing = frappe.db.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": PAYROLL_ENTRY,
+			"attached_to_name": doc.name,
+			"file_name": file_name,
+		},
+		fields=["name", "file_url"],
+		limit_page_length=0,
+	)
+	if existing and not overwrite:
+		raise ToolError(
+			f"a pay stub for {employee} on payroll entry {doc.name} is already attached at "
+			f"{existing[0].get('file_url')}. The most likely thing there is the statement this "
+			f"worker was already handed. Pass overwrite=true to render a fresh one; the "
+			f"existing File stays attached to the record either way. Nothing was changed."
+		)
+
+	pdf = pay_stub_pdf.render_pay_stub(
+		stub,
+		_stub_company_info(doc.company, args),
+		show_employer_contributions=bool(args.get("show_employer_contributions")),
+	)
+	attachment = artifacts.attach_bytes(PAYROLL_ENTRY, doc.name, file_name, pdf)
+
+	data = {
+		"payroll_entry": doc.name,
+		"company": doc.company,
+		"employee": employee,
+		"employee_name": slip.get("employee_name"),
+		"pay_period_start": str(doc.pay_period_start),
+		"pay_period_end": str(doc.pay_period_end),
+		"status": doc.status,
+		"gross_pay": _num(slip.get("gross_pay")),
+		"total_deductions": _num(slip.get("total_deductions")),
+		"net_pay": _num(slip.get("net_pay")),
+		"hourly_rate": stub["hourly_rate"] or None,
+		"ytd": stub["ytd"] or None,
+		"employer_contributions_shown": bool(args.get("show_employer_contributions")),
+		"replaced": (existing[0].get("file_url") if existing else None),
+		"file_url": attachment.get("file_url"),
+		"file_name": file_name,
+		"attachment": artifacts.describe_attachment(attachment, pdf),
+		"note": _PAY_STUB_NOTE,
+	}
+	return ToolResult(
+		data=data,
+		summary=f"Pay stub for {slip.get('employee_name') or employee} on {doc.name} "
+		f"({doc.pay_period_start} to {doc.pay_period_end}): net ${_num(slip.get('net_pay')):,.2f}, "
+		f"rendered to {file_name} ({len(pdf):,} bytes) and attached"
+		+ (f", replacing {existing[0].get('file_url')}" if existing else ""),
+	)
+
+
+#: Said on every stub result, because the page looks like a payroll record and
+#: the two things a reader most needs to know about it are that it changed
+#: nothing and that its year-to-date year is not this site's fiscal year.
+_PAY_STUB_NOTE = (
+	"Rendering a stub recomputes nothing and moves no status: every figure is read off the "
+	"stored Farm Payroll Slip, and the run is still whatever it was. Year-to-date figures are "
+	"the CALENDAR year through this period, which is what a W-2 is built from and is not "
+	"necessarily this site's fiscal year."
+)
+
+
+def _stub_company_info(company: str, args: dict) -> dict:
+	"""The employer block on the page: name, address and EIN.
+
+	`company_address` is an argument for the reason `tools/taxforms._company_info`
+	takes one — ERPNext keeps no address on Company, and an employer's address is
+	something a wage statement is expected to carry.
+	"""
+	fields = compat.existing_fields("Company", ("name", "tax_id"))
+	row = frappe.db.get_value("Company", company, fields, as_dict=True) or {}
+	return {
+		"name": company,
+		"ein": str(row.get("tax_id") or "").strip(),
+		"address": as_str(args, "company_address") or as_str(args, "employer_address"),
 	}
 
 

@@ -452,6 +452,23 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# target against this very table, and calls it through the target's own
 		# guard and argument filter. `submit_wizard` is still absent.
 		"/mobile/submit_wizard_via_mobile",
+		# v0.91.0. The two payroll outputs, and the only routes on this table
+		# that reach wages. Both wrappers gate on `HR_ROLES` in their own bodies
+		# rather than on the field roles this surface is built for — a register
+		# is what everybody was paid and a stub is what one person was paid, and
+		# `DISPATCH_ROLES` would have put a crew's wages in front of every
+		# foreman on the site.
+		#
+		# The register is company-scoped through `guard.require_company`; the
+		# stub is ALSO employee-scoped through `_employee_argument`, without
+		# which an HR account could have walked another entity's payroll one
+		# stub at a time. `show_employer_contributions` is deliberately absent
+		# from the stub wrapper's signature, so `bind` drops it: whether a farm
+		# shows its own FICA on a worker's statement is one operator policy for
+		# the whole operation, not a checkbox on the handset of whoever printed
+		# it.
+		"/mobile/get_payroll_register",
+		"/mobile/render_pay_stub",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

@@ -267,9 +267,31 @@ class _Sheet:
 	the page, because that is how a form is described — "box 1 is an inch from
 	the top" — and converting once here beats inverting a coordinate in forty
 	call sites. `self.top` is the cursor the flowing half advances.
+
+	v0.91.0. THE PAGE FURNITURE IS NOW AN ARGUMENT, AND THE DEFAULTS ARE THE SIX
+	TAX FORMS' EXACTLY. `pay_stub_pdf.py` draws on this class because the boxes,
+	the clipping, the wrap and the pagination are the same problem — but a pay
+	stub is NOT a working copy of anything. It is the statement of earnings an
+	employer is required to hand a worker (ORS 652.610, RCW 49.46.020), it is
+	produced from the slip that was actually paid, and stamping "NOT AN OFFICIAL
+	FORM - this is not a filing" across it would be a false statement about the
+	one document on this site that IS the record it looks like.
+
+	So `header_note`, `page_label` and `footer` may be given, and every one of
+	them defaults to what the tax forms have always drawn. A caller that passes
+	none gets a byte-identical page to the one v0.36.0 produced, which is what
+	`Disclaimers` in `test_tax_form_pdfs.py` goes on asserting.
 	"""
 
-	def __init__(self, form_type: str, title: str, subject: str):
+	def __init__(
+		self,
+		form_type: str,
+		title: str,
+		subject: str,
+		header_note: str = "",
+		page_label: str = "",
+		footer: str = "",
+	):
 		self._buffer = io.BytesIO()
 		self._canvas = rl_canvas.Canvas(
 			self._buffer,
@@ -284,6 +306,9 @@ class _Sheet:
 		self._canvas.setCreator(PRODUCER)
 		self._form_type = form_type
 		self._channel = FILING_CHANNEL.get(form_type, "")
+		self._header_note = header_note or HEADER_NOTE
+		self._page_label = page_label or f"{form_type} - working copy"
+		self._footer = footer or DISCLAIMER.format(channel=self._channel)
 		self._page_number = 0
 		self.top = BODY_TOP
 		self._begin_page()
@@ -482,19 +507,19 @@ class _Sheet:
 
 	def _begin_page(self) -> None:
 		self._page_number += 1
-		self.text(MARGIN, HEADER_BASELINE, HEADER_NOTE, FONT_LABEL_BOLD, SIZE_SMALL)
+		self.text(MARGIN, HEADER_BASELINE, self._header_note, FONT_LABEL_BOLD, SIZE_SMALL)
 		self.text(
 			PAGE_WIDTH - MARGIN, HEADER_BASELINE,
-			f"{self._form_type} - working copy - page {self._page_number}",
+			f"{self._page_label} - page {self._page_number}",
 			FONT_LABEL, SIZE_SMALL, align="right",
 		)
 		self.line(MARGIN, HEADER_BASELINE + 4, PAGE_WIDTH - MARGIN, line_width=0.75)
 
 	def _finish_page(self) -> None:
-		"""The disclaimer band. Drawn last on every page, so a page cannot exist
+		"""The footer band. Drawn last on every page, so a page cannot exist
 		without it — including one that only exists because a table overflowed."""
 		self.line(MARGIN, FOOTER_TOP - 6, PAGE_WIDTH - MARGIN, line_width=0.75)
-		body = DISCLAIMER.format(channel=self._channel)
+		body = self._footer
 		top = FOOTER_TOP
 		for line in self.wrap(body, CONTENT_WIDTH, FONT_NOTE, 6.2)[:4]:
 			self.text(MARGIN, top, line, FONT_NOTE, 6.2)

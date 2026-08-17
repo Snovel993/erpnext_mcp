@@ -604,6 +604,26 @@ ROUTES = (
 	# Inspection and a Discipline Record are still guarded by their own routes,
 	# because they are still reached through their own routes.
 	Route("/mobile", mobile_api.submit_wizard_via_mobile),
+	# v0.91.0. The two payroll outputs. THE ONLY ROUTES ON THIS TABLE THAT REACH
+	# WAGES, and the only two whose wrappers gate on `HR_ROLES` rather than on
+	# the field roles the surface is built for — a register is what everybody was
+	# paid and a stub is what one person was paid, and neither is a picker's or a
+	# foreman's to read. `DISPATCH_ROLES` would have been the reflex and would
+	# have put a crew's wages in front of every foreman on the site.
+	#
+	# THE READ IS COMPANY-SCOPED AND THE WRITE IS EMPLOYEE-SCOPED. The register
+	# declares `company` and `guard.require_company` refuses an entity this
+	# account cannot reach; the stub runs its employee through
+	# `_employee_argument`, so a docname from outside the caller's own crew reads
+	# as not found. Without that second check an HR account could have walked the
+	# holding company's payroll one stub at a time.
+	#
+	# `show_employer_contributions` IS NOT ON THE STUB'S SIGNATURE, so this
+	# table's argument filter is what keeps it off the handset — whether a farm
+	# shows its own FICA on a worker's statement is one operator policy, not a
+	# checkbox on the phone of whoever printed it.
+	Route("/mobile", mobile_api.get_payroll_register),
+	Route("/mobile", mobile_api.render_pay_stub),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

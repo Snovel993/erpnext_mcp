@@ -475,6 +475,17 @@ _TAX_FORM_PDF_REQUIRES = (
 )
 
 
+#: v0.91.0. What DRAWING A PAY STUB needs, which is the tax forms' dependency
+#: over a different doctype: `pay_stub_pdf` borrows `form_pdf_renderer`'s sheet,
+#: so a bench without reportlab loses this tool by name and keeps every payroll
+#: figure readable through `get_payroll_entry` and `get_payroll_register`.
+_PAY_STUB_PDF_REQUIRES = (
+	"the Farm Payroll Entry DocType (run `bench migrate`) and the reportlab Python package, "
+	"which this app declares as a dependency — install it into the bench's environment with "
+	"`./env/bin/pip install 'reportlab>=4.0'` and restart"
+)
+
+
 def _pdf_form_ready(*doctypes: str):
 	"""Predicate: this site has the doctype AND can draw a PDF form."""
 	needs_doctype = _needs_doctype(*doctypes)
@@ -12302,6 +12313,68 @@ TOOLS = {
 		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
 		title="List payroll entries",
 	),
+	# ── v0.91.0: the payroll register ───────────────────────────────────────
+	"get_payroll_register": _tool(
+		payroll.get_payroll_register,
+		"The payroll register for a period: one row per employee with gross, "
+		"federal and state withholding, Social Security, Medicare, other "
+		"deductions, net, hours and piece units; a totals row; and the employer "
+		"taxes beside them. Read-only, and NOTHING IS RECOMPUTED — every figure "
+		"is read off stored Farm Payroll Slips, so the register cannot disagree "
+		"with the runs it adds up. It names those runs, so a disagreement with a "
+		"bank statement or the ledger can be traced to one.\n\n"
+		"THE WINDOW IS ON pay_period_end AND A RUN IS COUNTED WHOLE. A payroll "
+		"run whose period ended inside the window is in; one that ended outside "
+		"it is out, even where some of its days fall inside. Splitting a run "
+		"would produce withholding totals that reconcile against no deposit "
+		"anybody ever made.\n\n"
+		"Draft and Cancelled runs are excluded by default — a Draft has not been "
+		"paid and a Cancelled one was not. `include_drafts` adds Draft back, and "
+		"`statuses_counted` always says which were counted. Naming one run in "
+		"`pay_period` reads that run whatever its status.\n\n"
+		"`other_deductions` IS DERIVED — total deductions less the four named "
+		"taxes — so a deduction column a later release adds is counted here "
+		"without this tool changing.\n\n"
+		"TWO COST TOTALS, DELIBERATELY DIFFERENT. `grand_total_labor_cost` is "
+		"net pay plus every employer tax. `total_cost_of_employment` is GROSS "
+		"pay plus every employer tax, which is the money that actually leaves "
+		"the farm — the withheld income tax and employee FICA are the employer's "
+		"to remit. They differ by exactly `total_employee_withholding`, which is "
+		"reported beside them so the arithmetic can be checked on the face of "
+		"the result.",
+		{
+			"company": _COMPANY,
+			"pay_period": _field(
+				_STRING,
+				"A Farm Payroll Entry docname. Its own period becomes the window and the "
+				"register covers that one run, whatever its status. `payroll_entry` is an alias.",
+			),
+			"payroll_entry": _field(_STRING, "Alias for pay_period."),
+			"date_from": _field(
+				_STRING,
+				"Start of the window as YYYY-MM-DD. Required unless pay_period is given. "
+				"`from_date` and `pay_period_start` are aliases.",
+			),
+			"date_to": _field(
+				_STRING,
+				"End of the window as YYYY-MM-DD. Required unless pay_period is given. "
+				"`to_date` and `pay_period_end` are aliases.",
+			),
+			"from_date": _field(_STRING, "Alias for date_from."),
+			"to_date": _field(_STRING, "Alias for date_to."),
+			"pay_period_start": _field(_STRING, "Alias for date_from."),
+			"pay_period_end": _field(_STRING, "Alias for date_to."),
+			"include_drafts": _field(
+				_BOOLEAN,
+				"Count Draft payroll runs as well. Off by default: a Draft has not been paid, "
+				"so including it silently would overstate every total on the register.",
+			),
+		},
+		required=("company",),
+		available=_needs_doctype("Farm Payroll Entry"),
+		requires="the Farm Payroll Entry doctype (run bench migrate after installing v0.30.0)",
+		title="Payroll register",
+	),
 	"create_salary_structure": _tool(
 		payroll.create_salary_structure,
 		"MUTATING (default OFF). Create a salary structure linking an employee "
@@ -19563,6 +19636,70 @@ TOOLS = {
 		title="Bulk render tax form PDFs",
 		available=_pdf_form_ready("Tax Form"),
 		requires=_TAX_FORM_PDF_REQUIRES,
+	),
+	# ── v0.91.0: the pay stub ───────────────────────────────────────────────
+	"render_pay_stub": _tool(
+		payroll.render_pay_stub,
+		"MUTATING (default OFF). Draw one employee's pay stub for one payroll "
+		"run — earnings itemised, every deduction, net pay, year to date, and "
+		"optionally the employer's own contributions — and attach the PDF "
+		"privately to the Farm Payroll Entry.\n\n"
+		"THIS IS NOT A WORKING COPY. Unlike the tax form pages, a pay stub is "
+		"the record it looks like: it is the itemised statement of earnings ORS "
+		"652.610 and RCW 49.46.020 require an employer to give a worker, and it "
+		"is drawn from the slip that was actually paid. It is not stamped as a "
+		"draft of anything, because it is not one.\n\n"
+		"NOTHING IS RECOMPUTED and no status moves. Only two things are "
+		"resolved at render time: the hourly rate for the earnings lines, off "
+		"the salary structure, because the slip stores hours and not a wage; and "
+		"the year-to-date block.\n\n"
+		"EARNINGS ITEMISE AS FAR AS THE RECORD ALLOWS AND THEN BALANCE. Hours at "
+		"the rate, overtime at 1.5x and units at the piece rate are printed, and "
+		"whatever gross that itemisation does not account for — break pay, the "
+		"FLSA half-time premium — is drawn as a named balancing line, so the "
+		"lines always add up to the gross beneath them.\n\n"
+		"YEAR TO DATE IS THE CALENDAR YEAR through this period and the page says "
+		"so, because a withholding year is a calendar year and this site's "
+		"fiscal year may not be. Omitted entirely rather than drawn as zeros "
+		"where nothing could be summed.\n\n"
+		"THE EMPLOYER SECTION IS OFF BY DEFAULT. Employer FICA, FUTA and SUTA "
+		"are paid on top of gross and deducted from nobody; some workers read "
+		"any figure on a stub as something taken off them, so it is a choice "
+		"with the sentence that prevents the misreading printed above it.\n\n"
+		"REFUSES a second render of the same stub unless overwrite is passed — "
+		"the likeliest thing already attached is the statement this worker was "
+		"handed. The existing File stays attached either way.",
+		{
+			"payroll_entry": _field(_STRING, "The Farm Payroll Entry docname. `name` is an alias."),
+			"name": _field(_STRING, "Alias for payroll_entry."),
+			"employee": _field(
+				_STRING,
+				"Which person on that run: the Employee docname, or the name as the slip "
+				"prints it. A miss lists everybody on the run.",
+			),
+			"employee_name": _field(_STRING, "Alias for employee."),
+			"show_employer_contributions": _field(
+				_BOOLEAN,
+				"Draw the employer FICA/FUTA/SUTA section. Off by default — none of it is "
+				"deducted from the worker and none of it changes net pay.",
+			),
+			"company_address": _field(
+				_STRING,
+				"The employer address to print. ERPNext keeps no address on Company, and a "
+				"wage statement is expected to carry one. `employer_address` is an alias.",
+			),
+			"employer_address": _field(_STRING, "Alias for company_address."),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Render even though a stub for this employee on this run is already attached. "
+				"The File that was there stays attached to the record.",
+			),
+		},
+		required=("payroll_entry", "employee"),
+		mutating=True,
+		title="Render pay stub",
+		available=_pdf_form_ready("Farm Payroll Entry"),
+		requires=_PAY_STUB_PDF_REQUIRES,
 	),
 	# ── v0.69.0: Document Intelligence ──────────────────────────────────────
 	#

@@ -341,6 +341,118 @@ that rendered as nothing. `test_every_type_the_doctype_offers_is_accounted_for`
 reads the Select options off Wizard Field, so a fifteenth type added there and
 left untranslated fails at that line rather than on a phone.
 
+### The two payroll outputs a run never had
+
+The arithmetic has been right since v0.30.0 and there was no way to read it out.
+`get_payroll_entry` answers *what did this one run come to*; nothing answered
+the two questions an operator actually asks on payday — **what did the whole
+period cost across everybody**, and **what does one worker get handed with their
+pay**. `get_payroll_register` is the first, `render_pay_stub` is the second, and
+neither recomputes anything: both read stored Farm Payroll Slips, so a page
+cannot disagree with the run it claims to be a view of. On wages that
+disagreement is a claim.
+
+**`other_deductions` is derived, not read** — total deductions less federal,
+state, Social Security and Medicare. Nothing on the slip names a garnishment, so
+a column that read a *field* would report zero for one, which is how a register
+comes to disagree with the cheque that was actually written. Deriving it means a
+deduction column a later release adds is counted the day it lands, in the
+register and on the stub both, with no change to either.
+
+**The window is on `pay_period_end` and a run is counted whole.** A run whose
+period ended inside the window is in; one that ended outside it is out, even
+where some of its days fall inside. Splitting a run would produce withholding
+totals that reconcile against no deposit anybody ever made. Draft and Cancelled
+runs are out by default — a Draft has not been paid and a Cancelled one was not —
+and `statuses_counted` always says which were counted. A selection over 200 runs
+is **refused rather than truncated**: a register that quietly stopped short would
+look like it had covered the period, and its totals would be wrong in the
+direction nobody checks.
+
+**Two cost totals, deliberately different numbers.** `grand_total_labor_cost` is
+net pay plus every employer tax. `total_cost_of_employment` is *gross* pay plus
+every employer tax, which is the money that actually leaves the farm — the
+withheld income tax and the employee's FICA are the employer's to remit, so they
+leave too, they are just not in anybody's net. The two differ by exactly
+`total_employee_withholding`, reported beside them so the arithmetic can be
+checked on the face of the result rather than taken on trust.
+
+### A pay stub is not a working copy
+
+Every page `form_pdf_renderer` draws is stamped **WORKING COPY — NOT AN OFFICIAL
+FORM**, which is exactly right for a W-2 nobody can print on red-ink stock. It
+would be a **false statement** on a pay stub. A stub is not a copy of a filing
+held somewhere else: it is the itemised statement of earnings ORS 652.610 and RCW
+49.46.020 require an employer to hand a worker, and it is drawn from the slip
+that was actually paid. So the sheet's header note, page label and footer became
+arguments — **with the six tax forms' text as the defaults**, so nothing about
+those pages moved — and `pay_stub_pdf.py` passes its own. What the footer says
+instead is what a stub has to carry: where to take a query, and that the payroll
+record is the authority behind every figure above it.
+
+**The earnings lines itemise as far as the record allows and then balance.** The
+slip stores hours, units, the piece rate and the gross; it does not store what
+each component of gross came to, because the engine computes gross in one pass —
+piece earnings, break pay at the average piece-rate hourly, and the FLSA §778.111
+half-time premium are not three columns, they are one number with a method behind
+it. So hours at the rate, overtime at 1.5x and units at the piece rate are
+printed, and whatever that itemisation does not account for is drawn as a named
+balancing line. The alternative was three lines that do not add up to the gross
+beneath them, which on a wage statement is what starts a claim rather than
+answers one. **A negative balance is drawn too**, not clamped: it means the rate
+the page was given is not the rate the slip was computed at, and a line reading
+`-80.00` is a page somebody queries where a zero is a page that looks right and
+is not.
+
+**Year to date is the calendar year, and the heading says so.** Every YTD figure
+on a stub is a *withholding* total, and withholding years are calendar years: the
+W-2 covers January to December and the FICA wage base resets on 1 January. This
+site's Fiscal Year may close after harvest, and using it would produce a stub
+whose YTD federal withholding cannot be reconciled against any form the IRS will
+ever see. This period is included — "year to date" on a stub means through
+today's cheque, not one period behind it — and the block is **omitted entirely
+rather than drawn as zeros** where nothing could be summed, because a column of
+`0.00` next to "Year to date" reads as a year in which nothing was withheld,
+which is a different claim from "not computed".
+
+**No Social Security number, not even the last four.** Neither statute asks for
+one, the employee ID identifies the row, and a wage statement is a piece of paper
+that gets left in a truck.
+
+**The employer section is optional and off by default.** Employer FICA, FUTA and
+SUTA are what the farm owes *on top* of gross; none of it is deducted from
+anybody and none of it changes net pay. Some employers show it and some workers
+read any figure on a stub as something taken off them, so it is a choice with the
+sentence that prevents the misreading printed above it.
+
+**The PDF attaches to the payroll entry and not to a field.** A run carries one
+stub per employee and the doctype has one document; a field would hold whichever
+was rendered last and lose the rest. A second render of the *same* stub is
+refused unless `overwrite` is passed — the likeliest thing already there is the
+statement this worker was handed — and the File that was there stays attached
+either way, because a stub somebody was given is a statement that was made and
+deleting it would not unmake it.
+
+### Both are on the handset, and both are HR-only
+
+The only two routes on the mobile surface that reach wages. Every other read
+there is the caller's own work or a board a foreman needs; a register is what
+everybody on the farm was paid, name by name, and a stub is what one person was
+paid. `DISPATCH_ROLES` would have been the reflex and would have put a crew's
+wages in front of every foreman on the site, so both wrappers gate on `HR_ROLES`
+in their own bodies — the eighth check, alongside `guard.endpoint`'s seven.
+
+The register is company-scoped through `guard.require_company` and **declares no
+`employee` argument**, so `routes.bind` cannot turn it into a one-person view;
+that is `get_payroll_entry`. The stub is *also* employee-scoped through
+`_employee_argument`, without which an HR account could have walked the holding
+company's payroll one stub at a time. `show_employer_contributions` is
+deliberately absent from the stub wrapper's signature: whether a farm shows its
+own FICA on a worker's statement is one operator policy for the whole operation,
+not a checkbox on the handset of whoever printed it, and two workers on one crew
+getting differently-shaped stubs on the same afternoon is a wage-claim exhibit.
+The MCP surface keeps the argument.
+
 ## 0.90.0 — 2026-08-16 — one number past the wave
 
 No feature, no tool, no doctype. Eight parallel branches landed on `main` in one

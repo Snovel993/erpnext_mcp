@@ -388,12 +388,14 @@
   "allow_list_payroll_entries",
   "allow_get_employee_timesheet_summary",
   "allow_preview_payroll_for_period",
+  "allow_get_payroll_register",
   "payroll_col",
   "allow_create_salary_structure",
   "allow_deactivate_salary_structure",
   "allow_calculate_payroll",
   "allow_submit_payroll",
   "allow_run_payroll_for_period",
+  "allow_render_pay_stub",
   "payroll_gl_section",
   "allow_get_payroll_account_mapping",
   "allow_preview_payroll_gl",
@@ -3398,6 +3400,13 @@
    "label": "Preview Payroll For Period"
   },
   {
+   "default": "1",
+   "description": "READ. The payroll register for a period: one row per employee with gross, federal and state withholding, Social Security, Medicare, other deductions, net, hours and piece units, a totals row, and the employer taxes beside them. Recomputes nothing — every figure is read off stored payroll slips, and the runs it added up are named so a disagreement with the bank or the ledger can be traced to one.",
+   "fieldname": "allow_get_payroll_register",
+   "fieldtype": "Check",
+   "label": "Payroll Register"
+  },
+  {
    "fieldname": "payroll_col",
    "fieldtype": "Column Break"
   },
@@ -3435,6 +3444,13 @@
    "fieldname": "allow_run_payroll_for_period",
    "fieldtype": "Check",
    "label": "Run Payroll For Period"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Draw one employee's pay stub for one payroll run — earnings itemised, every deduction, net pay, year to date, optionally the employer's own contributions — and attach the PDF privately to the payroll entry. Recomputes nothing and moves no status. Unlike the tax form pages this is not a working copy: it is the itemised statement of earnings an employer is required to give a worker, drawn from the slip that was actually paid.",
+   "fieldname": "allow_render_pay_stub",
+   "fieldtype": "Check",
+   "label": "Render Pay Stub"
   },
   {
    "fieldname": "payroll_gl_section",

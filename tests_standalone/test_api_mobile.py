@@ -546,6 +546,17 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# "answers"}` — and had it dropped at the door by `routes.bind`; what
 		# changed in v0.91.0 is that a method now declares those two names.
 		"submit_wizard_via_mobile",
+		# v0.91.0. The two payroll outputs. `MobileAPI.swift` does not name
+		# either yet — there is no payroll screen in the app — and they are here
+		# rather than in `PENDING_IOS_INTEGRATION` because they are published on
+		# purpose for the Desk-less operator: an office manager with a phone and
+		# an HR role is the person who runs a register and hands out stubs, and
+		# on this farm that person is not sitting at a Desk on payday.
+		#
+		# BOTH ARE HR-ONLY IN THEIR OWN BODIES, which is the thing to check if
+		# either ever appears in an app build — see `ThePayrollRoutesAreHROnly`.
+		"get_payroll_register",
+		"render_pay_stub",
 	}
 
 	def _whitelisted(self, module):
@@ -4019,3 +4030,136 @@ class TheWizardFilesWhatWasFilledIn(MobileAPITestCase):
 		"""The refusal `12f4e6f` wrote down, and the one `WizardAPI.swift`'s
 		header repeats. Nothing on this table takes a method name from a body."""
 		self.assertNotIn("submit_wizard", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES})
+
+
+# ── v0.91.0: the two payroll outputs ────────────────────────────────────────
+
+
+class ThePayrollRoutesAreHROnly(MobileAPITestCase):
+	"""The only two routes on this surface that reach wages.
+
+	EVERY OTHER READ HERE IS THE CALLER'S OWN WORK OR A BOARD A FOREMAN NEEDS.
+	A register is what everybody on the farm was paid, name by name, and a stub
+	is what one person was paid; neither is a picker's and neither is a
+	foreman's. `DISPATCH_ROLES` would have been the reflex and would have put a
+	crew's wages in front of every foreman on the site, so both wrappers gate on
+	`HR_ROLES` in their own bodies — which is what these tests are for.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.configure(
+			enabled=1,
+			public_url="https://umbrel.tail4a2b.ts.net",
+			**ON,
+			allow_get_payroll_register=1,
+			allow_render_pay_stub=1,
+		)
+		from .test_payroll_register import entry, slip
+
+		STORE.seed("Farm Payroll Entry", [
+			entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
+				slip(WORKER_EMPLOYEE, name="Ana Ramos", gross=1000.0),
+			]),
+			entry("PAY-2026-0090", "2026-06-01", "2026-06-14", [
+				slip(OUTSIDER_EMPLOYEE, name="Ben Ortiz", gross=4000.0),
+			], company=OTHER),
+		])
+
+	def as_hr(self):
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		return self.be()
+
+	# ── the register ────────────────────────────────────────────────────────
+	def test_a_field_worker_cannot_read_the_register(self):
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_payroll_register(date_from="2026-06-01", date_to="2026-06-30")
+		self.assertIn("personnel", str(caught.exception).lower())
+
+	def test_a_foreman_cannot_read_the_register_either(self):
+		"""Foreman is on `DISPATCH_ROLES` and not on `HR_ROLES`, and this is the
+		distinction the whole gate turns on. A foreman runs a crew; a crew's
+		wages are not part of running one."""
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_payroll_register(date_from="2026-06-01", date_to="2026-06-30")
+		self.assertIn("personnel", str(caught.exception).lower())
+
+	def test_an_hr_account_reads_its_own_entity(self):
+		self.as_hr()
+		answer = mobile_api.get_payroll_register(date_from="2026-06-01", date_to="2026-06-30")
+		self.assertEqual(answer["company"], MAIN)
+		self.assertEqual(answer["totals"]["gross_pay"], 1000.0)
+		self.assertEqual(
+			[row["employee_id"] for row in answer["employees"]], [WORKER_EMPLOYEE],
+		)
+
+	def test_naming_another_entity_does_not_reach_its_payroll(self):
+		"""`guard.require_company` is the check, and a register is exactly the
+		read where it matters: the holding company's payroll is not readable by
+		naming it."""
+		self.as_hr()
+		with self.assertRaises(Exception):
+			mobile_api.get_payroll_register(
+				company=OTHER, date_from="2026-06-01", date_to="2026-06-30",
+			)
+
+	def test_the_register_wrapper_declares_no_employee_argument(self):
+		"""A register IS the whole crew. A one-person view of it is
+		`get_payroll_entry`, and an `employee` key that `bind` could deliver
+		would make this two tools wearing one gate."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.get_payroll_register)
+		self.assertNotIn("employee", accepted)
+		self.assertIn("date_from", accepted)
+		self.assertIn("include_drafts", accepted)
+
+	# ── the stub ────────────────────────────────────────────────────────────
+	def test_a_field_worker_cannot_render_a_stub(self):
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.render_pay_stub(
+				payroll_entry="PAY-2026-0001", employee=WORKER_EMPLOYEE,
+			)
+		self.assertIn("personnel", str(caught.exception).lower())
+
+	def test_an_employee_outside_the_callers_crew_reads_as_not_found(self):
+		"""Without this an HR account could have walked the holding company's
+		payroll one stub at a time."""
+		self.as_hr()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.render_pay_stub(
+				payroll_entry="PAY-2026-0090", employee=OUTSIDER_EMPLOYEE,
+			)
+		self.assertIn("not found", str(caught.exception).lower())
+
+	def test_a_run_in_another_entity_reads_as_not_found(self):
+		"""`guard.require_scoped_doc` on the run, for the same reason and worded
+		the same way — a caller cannot map the site's docnames by watching which
+		refusal comes back."""
+		self.as_hr()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.render_pay_stub(
+				payroll_entry="PAY-2026-0090", employee=WORKER_EMPLOYEE,
+			)
+		self.assertIn("not found", str(caught.exception).lower())
+
+	def test_show_employer_contributions_cannot_be_sent_from_a_handset(self):
+		"""Whether a farm shows its own FICA on a worker's statement is one
+		operator policy for the whole operation, not a checkbox on the phone of
+		whoever printed it — two workers on one crew getting differently-shaped
+		stubs on the same afternoon is a wage-claim exhibit."""
+		accepted = farmops_routes.accepted_arguments(mobile_api.render_pay_stub)
+		self.assertNotIn("show_employer_contributions", accepted)
+		self.assertIn("payroll_entry", accepted)
+		self.assertIn("overwrite", accepted)
+
+	def test_the_two_routes_are_mounted_and_only_the_stub_is_mutating(self):
+		by_path = {route.path: route for route in farmops_routes.ROUTES}
+		self.assertIn("/mobile/get_payroll_register", by_path)
+		self.assertIn("/mobile/render_pay_stub", by_path)
+		self.assertFalse(by_path["/mobile/get_payroll_register"].mutating)
+		self.assertTrue(by_path["/mobile/render_pay_stub"].mutating)
