@@ -3,6 +3,63 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.92.1 — 2026-08-17 — a Spanish slot that held English
+
+`get_wizard_definition` sent the handset **the same string in both language
+slots**. v0.91.0's reshape made a server-authored wizard render at all, and did
+it with one resolved string written into `label_en` and `label_es` alike —
+`_ios_bilingual` said so in its own docstring and named the fix as a second pass.
+This is that pass.
+
+### What the duplication actually did
+
+`get_wizard_definition` resolves the language from the Employee record before it
+answers, so the wrapper only ever held one string. Copying it into both slots is
+right on a handset set to the language the server guessed, and wrong on every
+other one — and the app switches on a local setting the server cannot see.
+
+**`WizardLabel.pick` prefers `_es`.** So a picker whose phone was set to Spanish
+read the **English** sentence out of `label_es`, with nothing on screen marking
+it as English. That is worse than the blank the duplication was introduced to
+avoid, because a blank is visible and this is not. It also disagreed with
+`untranslated` — the payload claimed a Spanish string for every field on the
+site while the same response reported the gaps.
+
+### Both languages now, resolved separately
+
+The strings come from two real passes — `describe(doc, "en")` and
+`describe(doc, "es")` — so a `tr:`-prefixed value resolves through
+`Farm Translation` **once per language** instead of being copied across. A raw
+read of the columns would have put `tr:wizard.field.photo` on a worker's screen.
+
+**English is asked for explicitly rather than taken from the caller's answer.**
+For a Spanish-reading picker the tool's own response holds Spanish, and writing
+that into `title_en` is the same lie in the other direction.
+
+**An untranslated string is sent as `null`, not as English.** `describe` falls
+back to English when there is no translation; passing that through would make
+every field look translated. `null` is what the app's own fallback already
+handles, and it is the difference between "nobody wrote this yet" and "somebody
+did".
+
+**The passes are matched by key, not by position.** Two descriptions of one
+document agree on order today, but a zip that silently pairs a Spanish label with
+a different English question is the failure nobody notices — every string is
+present and only the pairing is wrong.
+
+**Nothing about the compliance answer moved.** `language`, `title` and
+`untranslated` still report what *this worker* was determined to read;
+`language=es` changes those and no longer moves which words land in `title_en`.
+The second and third passes read a document the caller was already cleared for by
+the first, and neither can raise — a translation gap must not take down a form
+that renders perfectly well in the other language.
+
+### Tests
+
+**4 new, 3 rewritten.** The three asserted the duplication as intended
+behaviour and now assert that each slot carries its own language; the new one
+authors a field with no Spanish and pins it to `null` rather than to English.
+
 ## 0.92.0 — 2026-08-17 — a return says what was owed; nothing said when it had to be there
 
 `tools/taxforms.py` has generated returns since v0.34.0 — a 941, an OQ, a

@@ -3762,34 +3762,56 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 				self.assertTrue(definition["title_en"])
 
 	# ── the language ────────────────────────────────────────────────────────
-	def test_the_resolved_string_reaches_both_language_slots(self):
-		"""THE SERVER PICKED THE LANGUAGE ALREADY — there is one string to send
-		and the app reads two keys. Sending only `title_en` shows a handset set
-		to Spanish an empty label, because `WizardLabel.pick` prefers `_es` and
-		the fallback only fires when it is missing."""
+	def test_each_language_slot_carries_that_language(self):
+		"""v0.92.1. EACH SLOT MEANS WHAT ITS NAME SAYS.
+
+		Until this release both slots got the ONE string the server had resolved,
+		which was right on a handset set to the language the Employee record
+		named and a lie on every other one. `WizardLabel.pick` prefers `_es`, so
+		a picker whose phone said Spanish read the English sentence out of
+		`label_es` with nothing marking it as English — worse than the blank the
+		duplication was introduced to avoid, because a blank is visible.
+		"""
 		spec = self.a_spec(wizard="mixed_types")
 		self.assertEqual(spec["title_en"], "Mixed Types")
-		self.assertEqual(spec["title_es"], "Mixed Types")
+		self.assertEqual(spec["title_es"], "Tipos Mezclados")
 		step = spec["steps"][0]
 		self.assertEqual(step["title_en"], "Everything")
-		self.assertEqual(step["title_es"], "Everything")
 		self.assertEqual(step["help_en"], "One of each.")
-		self.assertEqual(step["help_es"], "One of each.")
+		self.assertEqual(step["help_es"], "Uno de cada uno.")
 
-	def test_a_spanish_reader_gets_spanish_in_both_slots(self):
-		"""The same call with the language resolved the other way. Neither slot
-		is hardcoded to a language — both carry whatever the server picked."""
-		spec = self.a_spec()
+	def test_the_slots_do_not_move_when_the_caller_reads_spanish(self):
+		"""THE SLOTS ARE THE LANGUAGE, NOT THE READER. `language=es` changes
+		which language the tool RESOLVES for `title`, `language` and
+		`untranslated` — the compliance answer about this worker — and must not
+		change which words land in `title_en`."""
+		english = self.a_spec(wizard="mixed_types")
 		spanish = mobile_api.get_wizard_definition(wizard="mixed_types", language="es")
-		self.assertEqual(spanish["title_en"], "Tipos Mezclados")
-		self.assertEqual(spanish["title_es"], "Tipos Mezclados")
-		self.assertEqual(spanish["steps"][0]["help_en"], "Uno de cada uno.")
-		self.assertNotEqual(spanish["title_en"], spec["title_en"])
 
-	def test_a_field_label_reaches_both_slots(self):
+		self.assertEqual(spanish["title_en"], english["title_en"])
+		self.assertEqual(spanish["title_es"], english["title_es"])
+		# What the caller was determined to read still travels, and still moves.
+		self.assertEqual(spanish["title"], "Tipos Mezclados")
+		self.assertEqual(spanish["language"], "es")
+
+	def test_a_field_label_carries_a_real_translation(self):
 		field = self.fields_by_name(self.a_spec())["plain"]
 		self.assertEqual(field["label_en"], "Plain")
-		self.assertEqual(field["label_es"], "Plain")
+		self.assertEqual(field["label_es"], "Plain ES")
+
+	def test_an_untranslated_string_is_null_rather_than_english(self):
+		"""A SPANISH SLOT HOLDING ENGLISH CLAIMS A TRANSLATION NOBODY WROTE.
+		`describe` falls back to English when there is none, so copying that into
+		`_es` would make every field on the site look translated — and would
+		disagree with `untranslated`, which is how a gap gets found and filled.
+		`null` is what the app's own fallback already handles."""
+		self.a_mixed_wizard(key="half_translated", field_overrides={"plain": {"label_es": ""}})
+		fields = self.fields_by_name(self.a_spec(wizard="half_translated"))
+		self.assertEqual(fields["plain"]["label_en"], "Plain")
+		self.assertIsNone(fields["plain"]["label_es"])
+		# Its neighbour on the same step still carries one, so this is the gap
+		# being reported rather than the Spanish pass having failed wholesale.
+		self.assertEqual(fields["count"]["label_es"], "Count ES")
 
 	# ── the field types ─────────────────────────────────────────────────────
 	def test_the_ten_types_an_ios_control_collects_are_translated(self):

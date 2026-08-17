@@ -7710,27 +7710,70 @@ _IOS_CHECKBOX_OPTIONS = (
 
 
 def _ios_bilingual(row: dict, key: str, en: str, es: str) -> None:
-	"""Write one resolved string into both language slots.
+	"""Write the English and the Spanish into their own slots.
 
-	THE SERVER RESOLVED THE LANGUAGE ALREADY AND THERE IS ONLY ONE STRING TO
-	SEND. `get_wizard_definition` picks the worker's own language off their
-	Employee record before it answers, so what arrives here is already the
-	sentence that person should read — but the app decodes `label_en` and
-	`label_es` and shows the Spanish one when the handset is set to Spanish, so
-	a spec carrying only `label_en` would show a Spanish-speaking picker an
-	empty label. Both slots get the resolved string: whichever the app reaches
-	for, it finds the words the server chose.
+	THIS IS THE SECOND PASS THE FIRST VERSION SAID IT WANTED. Until v0.92.1 both
+	slots got the SAME resolved string, because the wrapper only ever had one:
+	`get_wizard_definition` picks the worker's language off their Employee record
+	and answers in it. That worked on a handset set to the language the server
+	guessed and lied on every other one — a picker whose phone said Spanish got
+	the English sentence out of `label_es` with nothing marking it as English,
+	which is worse than a blank, and `fully_translated` could report a gap the
+	payload had already papered over.
 
-	This is NOT bilingual support, and the honest version is a second pass —
-	`describe(doc, "en")` and `describe(doc, "es")` zipped together — which is a
-	change to make when the app needs to switch language without a round trip.
+	The strings now come from two real passes — `describe(doc, "en")` and
+	`describe(doc, "es")` — so a `tr:` key resolves through `Farm Translation`
+	once per language rather than being copied across.
+
+	A SPANISH THAT IS ONLY ENGLISH IS SENT AS ABSENT. `describe` falls back to
+	English when there is no translation, so an unconditional `_es` would tell
+	the app a Spanish string exists for every field on the site. `null` is what
+	`WizardLabel.pick` already handles — it falls back to English itself — and
+	it is the difference between "nobody wrote this yet" and "somebody did".
 	"""
-	value = str(en or "").strip()
-	row[key + "_en"] = value
-	row[key + "_es"] = str(es or value).strip()
+	english = str(en or "").strip()
+	spanish = str(es or "").strip()
+	row[key + "_en"] = english
+	row[key + "_es"] = spanish if spanish and spanish != english else None
 
 
-def _ios_wizard_field(field: dict) -> dict:
+def _wizard_pass(inner: dict, language: str) -> dict | None:
+	"""The same spec described again in one named language.
+
+	THE SECOND AND THIRD READS OF A DOCUMENT THE CALLER IS ALREADY CLEARED FOR.
+	The gates ran on the first call in `get_wizard_definition`; this asks the
+	same tool for the same wizard with `language` pinned, so there is no
+	widening here — a caller who could not read the spec never reaches this.
+
+	NEVER RAISES. A missing translation, a `Farm Translation` table mid-migrate
+	or anything else that makes one language unreadable must not take down a
+	form that renders perfectly well in the other. `None` means "no strings from
+	this pass", and the callers fall back to what they already had.
+	"""
+	try:
+		return wizard_tools.get_wizard_definition({**inner, "language": language}).data
+	except Exception:  # pragma: no cover - a translation gap is not a broken form
+		return None
+
+
+def _ios_by_key(rows, key: str) -> dict:
+	"""The Spanish pass indexed by the key its English twin is matched on.
+
+	MATCHED BY KEY RATHER THAN BY POSITION. The two passes are the same document
+	described twice, so the orders agree today — but a spec whose steps a
+	translator reordered, or a field a condition dropped from one pass and not
+	the other, would silently pair a Spanish label with a different English
+	question. That is the one failure mode of a zip that nobody notices, because
+	every string is present and only the pairing is wrong.
+	"""
+	out = {}
+	for row in rows or []:
+		if isinstance(row, dict):
+			out[str(row.get(key) or "")] = row
+	return out
+
+
+def _ios_wizard_field(field: dict, spanish: dict | None = None) -> dict:
 	"""One control, in the shape `WizardField` decodes.
 
 	THE KEY IS THE TARGET FIELD, NOT THE FIELDNAME, and they are the same thing
@@ -7750,19 +7793,28 @@ def _ios_wizard_field(field: dict) -> dict:
 	row["server_field_type"] = server_type
 	row["type"] = _IOS_FIELD_TYPES.get(server_type, server_type)
 
+	es = spanish or {}
 	row["key"] = row.get("target_field") or row.get("fieldname") or ""
-	_ios_bilingual(row, "label", row.get("label"), "")
+	_ios_bilingual(row, "label", row.get("label"), es.get("label"))
 	# THE HELP TEXT BECOMES THE PLACEHOLDER WHEN THERE IS NO PLACEHOLDER. The app
 	# has nowhere else to put a field's help, and "In your own words. Be specific"
 	# is the difference between a usable answer and three words.
-	_ios_bilingual(row, "placeholder", row.get("placeholder") or row.get("help") or "", "")
+	_ios_bilingual(
+		row,
+		"placeholder",
+		row.get("placeholder") or row.get("help") or "",
+		es.get("placeholder") or es.get("help") or "",
+	)
 	row["required"] = bool(row.get("required"))
 
+	es_options = _ios_by_key(es.get("options"), "value")
 	options = []
 	for option in row.get("options") or []:
 		label = str(option.get("label") or option.get("value") or "")
-		entry = {"value": option.get("value") or ""}
-		_ios_bilingual(entry, "label", label, "")
+		value = option.get("value") or ""
+		entry = {"value": value}
+		es_option = es_options.get(str(value)) or {}
+		_ios_bilingual(entry, "label", label, es_option.get("label"))
 		options.append(entry)
 	if server_type == "checkbox" and not options:
 		options = [dict(option) for option in _IOS_CHECKBOX_OPTIONS]
@@ -7770,20 +7822,26 @@ def _ios_wizard_field(field: dict) -> dict:
 	return row
 
 
-def _ios_wizard_step(step: dict) -> dict:
+def _ios_wizard_step(step: dict, spanish: dict | None = None) -> dict:
 	"""One page of the form, in the shape `WizardStep` decodes."""
 	row = dict(step)
+	es = spanish or {}
 	row.pop("visible_if", None)
 	row["key"] = row.get("step_key") or ""
-	_ios_bilingual(row, "title", row.get("title"), "")
+	_ios_bilingual(row, "title", row.get("title"), es.get("title"))
 	# The server calls it a description and the app calls it help. Same sentence,
 	# same place on the screen — under the step title.
-	_ios_bilingual(row, "help", row.get("description") or "", "")
-	row["fields"] = [_ios_wizard_field(dict(field)) for field in (row.get("fields") or [])]
+	_ios_bilingual(row, "help", row.get("description") or "", es.get("description") or "")
+
+	es_fields = _ios_by_key(es.get("fields"), "fieldname")
+	row["fields"] = [
+		_ios_wizard_field(dict(field), es_fields.get(str(field.get("fieldname") or "")))
+		for field in (row.get("fields") or [])
+	]
 	return row
 
 
-def _ios_wizard_spec(data: dict) -> dict:
+def _ios_wizard_spec(data: dict, spanish: dict | None = None, english: dict | None = None) -> dict:
 	"""The server's spec, in the shape the handset decodes. v0.91.0.
 
 	NOTHING RENDERED BEFORE THIS. `describe()` answers `wizard_key`, one resolved
@@ -7808,9 +7866,22 @@ def _ios_wizard_spec(data: dict) -> dict:
 	renderer. This is the sidecar's translation, in the sidecar, beside the
 	`submit_method` translation that had the same argument behind it.
 	"""
+	spanish = spanish or {}
+	# THE ENGLISH COMES FROM ITS OWN PASS, NOT FROM `data`. `data` is resolved in
+	# the CALLER'S language, so for a Spanish-reading picker its `title` is
+	# Spanish — writing that into `title_en` would label Spanish as English. The
+	# scalars stay `data`'s (`title`, `language`, `untranslated` describe the
+	# language this worker was determined to read); only the strings the app
+	# renders are taken from the explicit passes.
+	base = english or data
 	data["name"] = data.get("wizard_key") or ""
-	_ios_bilingual(data, "title", data.get("title"), "")
-	data["steps"] = [_ios_wizard_step(dict(step)) for step in (data.get("steps") or [])]
+	_ios_bilingual(data, "title", base.get("title"), spanish.get("title"))
+
+	es_steps = _ios_by_key(spanish.get("steps"), "step_key")
+	data["steps"] = [
+		_ios_wizard_step(dict(step), es_steps.get(str(step.get("step_key") or "")))
+		for step in (base.get("steps") or [])
+	]
 	return data
 
 
@@ -7976,11 +8047,28 @@ def get_wizard_definition(user: str, wizard=None, language=None) -> dict:
 	inner = {"wizard": str(wizard or "").strip(), "employee": employee, "user": user}
 	if language:
 		inner["language"] = str(language).strip()
+
+	data = wizard_tools.get_wizard_definition(inner).data
+	# THE HANDSET GETS BOTH LANGUAGES AND PICKS, WHICH IS NOT WHAT THE TOOL DOES.
+	# v0.92.1: the app decodes `title_en`/`title_es` and switches on a setting
+	# the server cannot see, so one resolved string put the WRONG WORDS in the
+	# other slot rather than leaving it empty — a Spanish-reading picker read
+	# English out of `label_es` with nothing marking it as English.
+	#
+	# ENGLISH IS ASKED FOR EXPLICITLY RATHER THAN TAKEN FROM `data`. For that
+	# same picker `data` holds Spanish, and copying it into `title_en` would
+	# label it English — the same lie in the other direction.
+	#
+	# The caller's own resolution still travels untouched: `language`, `title`
+	# and `untranslated` remain the tool's answer for the language this worker
+	# was determined to read.
+	english = _wizard_pass(inner, "en")
+	spanish = _wizard_pass(inner, "es")
 	# RESHAPED FIRST, ENDPOINT SECOND. `_with_submit_endpoint` reads `wizard_key`
 	# and `submit_method` off the dict, and `_ios_wizard_spec` leaves both where
 	# they were — but the order is the one that survives a later reshape that
 	# does not.
-	return _with_submit_endpoint(_ios_wizard_spec(wizard_tools.get_wizard_definition(inner).data))
+	return _with_submit_endpoint(_ios_wizard_spec(data, spanish, english))
 
 
 # ── 92. list_wizard_definitions ──────────────────────────────────────────────
