@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 710 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 718 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 354 read tools are **on** by default and can be switched off individually. A
+All 357 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7228,6 +7228,156 @@ Returns the matrix, `by_requirement` counts per curriculum, and a `summary` of
 `total_employees` / `fully_compliant` / `partially_compliant` / `non_compliant`.
 Partially compliant means *holds some and lacks some*; non-compliant means
 *holds none of them*.
+
+### The curriculum and the group session
+### The curriculum and the group session
+
+*Eight tools that close both ends of the training loop.* At one end a
+`Training Type` was a name and a regime tag, so the matrix could name a gap and
+could not deliver the training. At the other, every record was filed one person
+at a time, so a crew leader who trained twelve people in a shed had twelve forms
+to type — and twelve forms typed one at a time disagree about the date, the
+topics and the trainer by the third.
+
+**Nothing here replaces `Employee Training Record`.** The matrix reads per-person
+records, `training_expiring` watches per-person expiry, `generate_audit_packet`
+pulls per-person rows. The session is the **act**; the records are the
+**evidence**; `complete_training_session` is the one moment the first becomes the
+second, and it writes them *through* `record_training` so there is a single code
+path on this site that knows what a training record means.
+
+#### `update_training_type`
+
+**MUTATING, default OFF.** Puts the content on a curriculum.
+
+| Argument | Notes |
+| --- | --- |
+| `training_type` | **Required.** An existing Training Type. Not auto-created — see below. |
+| `video_url` | An `http(s)` link a handset can open. A path is refused. |
+| `materials_description` | What the trainer has to bring. |
+| `duration_minutes` | Becomes the default duration of every session of it. |
+| `description` | What the course covers, and the citation that says so. |
+| `delivery_method` | `Video`, `Classroom`, `Field Demo`, `Online`, `Self Study` — or `field_demo` etc. |
+| `regimes` | Which audits the course answers. Unknown tokens refused by name. |
+| `active`, `retention_years` | |
+
+**It refuses a curriculum nobody has filed against,** unlike `record_training`,
+which takes free text because refusing it would leave an operation with the
+training and no record. A *content update* against a name that does not exist is
+a typo far more often than it is a new course.
+
+**PDFs and slides go on as attachments,** through `attach_file_to_document`
+against doctype `Training Type` — the ordinary Frappe path, so they inherit the
+site's own extension allowlist and permission model rather than a second one.
+
+**It touches nothing already filed.** Every session and every training record
+carries its own copy of what actually happened, taken on the day.
+
+#### `get_training_curriculum`
+
+**Read-only.** One curriculum in the shape a handset renders it — video,
+materials, minutes, method, regimes, attachments — or, with no name, the whole
+list. `content_gaps` names what a screen would want and the record lacks (no
+description, no delivery method, marked as video with nothing to play) rather
+than refusing. Attachments are present on a single read and omitted from a
+listing: one query per curriculum to count PDFs is a hundred round trips for a
+screen that shows names.
+
+#### `create_training_session`
+
+**MUTATING, default OFF.** Opens a group event — curriculum, day, place, trainer.
+Takes `training_type` (required), `company`, `session_date`, `start_time`,
+`end_time`, `location`, `conducted_by` / `instructor_name` / `provider`,
+`duration_minutes`, `delivery_method`, `regimes`, `content_topics_covered`,
+`expires_date`, `training_source`, `status`, `notes`. Named `TRNS-2026-0001`,
+where the year is the year the session **ran**.
+
+**It writes nothing to anybody's file,** which is why it is a separate document
+from the records it will produce: it can be opened a week early, cancelled, or
+left half-filled while the crew arrives. Duration, delivery method and regimes
+are inherited from the curriculum whenever the session's own column is empty —
+the curriculum says what the course normally is, the session says what this
+afternoon was, and an afternoon that ran short is entitled to say so. `Completed`
+is refused at creation, and an end time before the start is refused as the typo
+it is. An outside trainer is `instructor_name` and `provider`, not
+`conducted_by`: forcing a PSA instructor to become an Employee record would put a
+stranger on the personnel register to satisfy a form.
+
+#### `add_session_attendee`
+
+**MUTATING, default OFF.** One person on the sign-in sheet. Takes `session`
+(required), `badge_scan`, `employee`, `scan_location`, `scanned_at`, `attended`,
+`notes`.
+
+**The scan is the identification and the employee link is its result.**
+`badge_scan` alone is enough and it goes through the same `resolve_badge` path
+the crew clock uses, so a retired card, a card belonging to somebody who has left
+and a QR that is not a badge at all are each refused by their own sentence
+*before* a name reaches a sheet. A badge and a name that disagree are refused: a
+sheet recording one person's badge against another's name would be the one
+document in this app that states something nobody believes.
+
+A row with **no** badge is allowed and produces no training record — it says
+somebody typed a name, which is true and is not evidence. `scan_location` is not
+required; a metal packing shed is where GPS goes to die.
+
+#### `sign_session_attendance`
+
+**MUTATING, default OFF.** Takes `session` and `signature` (both required),
+`employee` or `badge_scan`, `signed_at`, `replace_signature`, `device_id`,
+`gps_latitude` / `gps_longitude`.
+
+**A separate call from `add_session_attendee`, deliberately** — the same reason
+`sign_training_supervisor_review` is separate from `record_training`. The badge
+is scanned when somebody walks in and the signature is given when the session
+ends; one call taking both would make a single timestamp the default, and thirty
+scans and thirty signatures sharing a minute is the shape of a sheet an inspector
+reads as filled in at the end. The result says so when it sees it.
+
+**The session is hashed before the signature is written,** which is the only
+moment that answers what the signer was shown — the curriculum, the date, the
+topics, the other names. A `Signing Evidence` row carries the hash, the
+verification method (`Badge QR` where a badge was scanned), and the coordinates,
+falling back to the badge scan's own fix where the phone had one at the door and
+none an hour later.
+
+#### `complete_training_session`
+
+**MUTATING, default OFF.** Turns every provable attendance into its own
+`Employee Training Record`. Takes `session` (required),
+`content_topics_covered`, `regimes`, `expires_date`, `skip_incomplete`,
+`completed_at`.
+
+**It refuses by default when somebody marked present cannot be proved to have
+been there** — no badge scan, or no signature — and names them. A sheet where
+four of twelve never signed is a sheet somebody has to fix while the crew is
+still on site, and quietly filing the other eight would take that Monday away
+from them. `skip_incomplete=true` files the eight and names the four. Both calls
+are legitimate; which is right is not a decision this app can make, and it will
+not make it silently.
+
+A row that fails does not take the others with it, and a second call files only
+what is outstanding — a row that already produced a record is skipped, so this is
+safe to retry. It refuses a cancelled session, a session with no regimes, a
+session with no topics, and a session where nobody is ready.
+
+#### `get_training_session` / `list_training_sessions`
+
+**Read-only.** The sheet, and the register. Every attendee row carries a `state`
+— `recorded`, `ready`, `absent` or `incomplete` — and a `missing` list, computed
+in one place so a read cannot say *ready* about a row the completion will skip.
+`completion_blockers` is session-level only: an attendee who has not signed does
+not block a completion, because a session where eleven of twelve signed should
+file eleven rather than nothing.
+
+`list_training_sessions` filters by `company`, `training_type`, `status`,
+`employee`, `conducted_by`, `regime` and period. **`employee` is what makes this
+more than a diary:** it answers "which sessions was Ana at" off the attendee rows
+rather than off the training register, so it includes the session she attended
+and did not sign — the one that produced no record and is therefore invisible to
+`list_trainings`. `with_unproved_attendance` names the open sessions holding
+somebody in exactly that state. Attendee rows are omitted from a listing and the
+counts are not.
 
 ## The twelfth alert rule and the packet section
 

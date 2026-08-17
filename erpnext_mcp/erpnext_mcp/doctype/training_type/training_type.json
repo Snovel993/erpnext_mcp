@@ -12,8 +12,14 @@
   "active",
   "identity_col",
   "retention_years",
+  "delivery_method",
+  "duration_minutes",
   "coverage_section",
   "regimes",
+  "curriculum_section",
+  "video_url",
+  "curriculum_col",
+  "materials_description",
   "detail_section",
   "description"
  ],
@@ -48,6 +54,20 @@
    "label": "Retention (years)"
   },
   {
+   "description": "How the course is delivered, which is what a handset needs in order to know whether to open a video player, a document viewer or nothing at all. Left empty on a curriculum nobody has said — an empty column is honest and a guessed one sends a picker to a screen that shows them nothing.",
+   "fieldname": "delivery_method",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Delivery Method",
+   "options": "\nVideo\nClassroom\nField Demo\nOnline\nSelf Study"
+  },
+  {
+   "description": "How long a session of this course normally takes, in minutes. It is what a Training Session takes as its default duration, and it is what somebody scheduling a shed afternoon around it reads. It is NOT a rule: a session that ran longer records what it ran, because the session says what happened and the curriculum says what was planned.",
+   "fieldname": "duration_minutes",
+   "fieldtype": "Int",
+   "label": "Duration (minutes)"
+  },
+  {
    "fieldname": "coverage_section",
    "fieldtype": "Section Break",
    "label": "What It Satisfies"
@@ -58,6 +78,29 @@
    "fieldtype": "Table MultiSelect",
    "label": "Regimes",
    "options": "Compliance Regime Link"
+  },
+  {
+   "fieldname": "curriculum_section",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "description": "Where the safety video lives — a link a handset can open. A URL rather than an upload because the video is usually somebody else's: an EPA WPS training film, a PSA module, a supplier's machine walkthrough. Store the file as an ATTACHMENT on this curriculum when the operation owns it, and put the link here when it does not.",
+   "fieldname": "video_url",
+   "fieldtype": "Data",
+   "label": "Video URL",
+   "options": "URL"
+  },
+  {
+   "fieldname": "curriculum_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What the trainer has to bring: the handouts, the sign-in sheet, the respirator to demonstrate on, the thermometer. Read by whoever sets the shed up an hour beforehand, which is a different person from whoever booked the course.",
+   "fieldname": "materials_description",
+   "fieldtype": "Text",
+   "label": "Materials Needed"
   },
   {
    "fieldname": "detail_section",
@@ -73,6 +116,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
+ "max_attachments": 20,
  "modified": "2026-08-03 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",

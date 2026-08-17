@@ -1,0 +1,293 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-17 14:00:00.000000",
+ "description": "One training event with a room full of people in it. THE REGISTER HAS ALWAYS BEEN PER-PERSON and that is right — an auditor asks about Ana, and Ana's file has to answer — but a crew leader who trained twelve people in a shed on Tuesday had to file twelve records by hand, and twelve records typed one at a time disagree about the date, the topics and the trainer by the third one. This is the afternoon, recorded once: the curriculum, when and where, who ran it, and one row per attendee carrying the badge that identified them and the signature they gave. complete_training_session turns each ready row into its own Employee Training Record and links the two together, so the compliance matrix is fed by the same act that documented the session and nobody retypes anything.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "training_type",
+  "status",
+  "identity_col",
+  "company",
+  "session_date",
+  "duration_minutes",
+  "schedule_section",
+  "start_time",
+  "end_time",
+  "location",
+  "schedule_col",
+  "conducted_by",
+  "conducted_by_name",
+  "instructor_name",
+  "provider",
+  "coverage_section",
+  "regimes",
+  "content_topics_covered",
+  "coverage_col",
+  "training_source",
+  "delivery_method",
+  "expires_date",
+  "attendance_section",
+  "attendees",
+  "completion_section",
+  "completed_at",
+  "completed_by",
+  "records_created",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "TRNS-.YYYY.-.####",
+   "description": "The series a Training Session is named from, expanded by the controller so a docname is the same shape on a bench and in the standalone suite — TRNS-2026-0001. The year is the year the SESSION RAN, not the year somebody filed it, which is the only reading that survives a December session written up in January.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "TRNS-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The curriculum that was delivered. A Link to the Training Type master, so the video, the materials list and the regimes this course normally answers are read off one record rather than restated per session — and so a curriculum corrected once is corrected for every session of it.",
+   "fieldname": "training_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Training Type",
+   "options": "Training Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Scheduled",
+   "description": "Where the session has got to. Scheduled is booked; In Progress is the room is full; Completed is the training records have been written; Cancelled is it did not happen. THE TRAINING RECORDS ARE WRITTEN ON THE MOVE TO COMPLETED and not before — a scheduled session puts nothing on anybody's file and clears no compliance alert, exactly as a booking should not.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Scheduled\nIn Progress\nCompleted\nCancelled",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The entity that ran the training. Every record the session produces is filed against it, and an attendee employed by another company is refused rather than filed here — a training record in the wrong entity's register is evidence handed to an auditor asking about a different company.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The day it ran. It becomes `completed_date` on every training record the session produces, which is what makes twelve records agree about a date instead of carrying twelve typed guesses.",
+   "fieldname": "session_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Session Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "How long it ran, in minutes. Defaulted from the Training Type's own duration when the session is created and overridable, because the curriculum says what was planned and the session says what happened. Oregon's heat rule and the WPS handler curriculum are both read against the time actually spent, so an honest short number is worth more than a copied ideal one.",
+   "fieldname": "duration_minutes",
+   "fieldtype": "Int",
+   "label": "Duration (minutes)"
+  },
+  {
+   "fieldname": "schedule_section",
+   "fieldtype": "Section Break",
+   "label": "When and where"
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "label": "Start Time"
+  },
+  {
+   "description": "When it finished. Refused if it is before the start time on the same day — a session that ended before it began is a typo, and it is the typo that would make a duration negative.",
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "label": "End Time"
+  },
+  {
+   "description": "Where it happened, in the words somebody would use to find it: 'Main packing shed', 'Block 4 headland', 'Break room'. Free text rather than a Link because a training session happens wherever there is shade, and a register of shady spots is not a register worth keeping.",
+   "fieldname": "location",
+   "fieldtype": "Data",
+   "label": "Location"
+  },
+  {
+   "fieldname": "schedule_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The Employee who ran it, where the trainer is one of ours. Copied onto every training record the session produces as the provider's stand-in, and available to the §112.161(b) supervisor review as the person who is NOT eligible to review their own attendees' records.",
+   "fieldname": "conducted_by",
+   "fieldtype": "Link",
+   "label": "Conducted By",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "fieldname": "conducted_by_name",
+   "fieldtype": "Data",
+   "label": "Conducted By (name)",
+   "read_only": 1
+  },
+  {
+   "description": "The trainer's name where they are NOT an Employee — a PSA-certified instructor, an extension agent, an ODA officer, a chemical rep. Both columns exist because both cases are ordinary, and forcing an outside instructor to become an Employee record would put a stranger on the payroll register to satisfy a form.",
+   "fieldname": "instructor_name",
+   "fieldtype": "Data",
+   "label": "Instructor (external)"
+  },
+  {
+   "description": "The organisation that delivered it, where one did: 'Oregon State Extension', 'PSA', 'Wilbur-Ellis'. Copied onto every training record as `provider`.",
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider"
+  },
+  {
+   "fieldname": "coverage_section",
+   "fieldtype": "Section Break",
+   "label": "What it satisfies"
+  },
+  {
+   "description": "Which audits THIS afternoon counts towards, defaulted from the Training Type and overridable on the session. The curriculum says what the course normally answers; the session says what was actually covered, and a session that ran short is entitled to say so. Every training record the session produces carries this list, so twelve records tagged from one place cannot disagree about which packet they belong in.",
+   "fieldname": "regimes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Regimes",
+   "options": "Compliance Regime Link"
+  },
+  {
+   "description": "The topics actually covered, comma-separated. Required before the session can be completed, and for the reason record_training requires it: Oregon's heat rule names six topics that must be covered annually, and a record claiming OR-OSHA without them is a record an inspector will disallow. 'Heat, water, shade, symptoms, reporting, emergency response' is a curriculum; 'safety meeting' is not.",
+   "fieldname": "content_topics_covered",
+   "fieldtype": "Small Text",
+   "label": "Topics Covered"
+  },
+  {
+   "fieldname": "coverage_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Internal",
+   "description": "Who delivered it, in the training register's own vocabulary. Copied onto every record the session produces.",
+   "fieldname": "training_source",
+   "fieldtype": "Select",
+   "label": "Training Source",
+   "options": "Internal\nExternal\nContractor\nOnline-Course"
+  },
+  {
+   "description": "How it was delivered, snapshotted off the Training Type when the session is created. The curriculum's own column can be corrected next year; this says what THIS afternoon was, which is the question an auditor asks about a session that claims to have covered a hands-on demonstration.",
+   "fieldname": "delivery_method",
+   "fieldtype": "Select",
+   "label": "Delivery Method",
+   "options": "\nVideo\nClassroom\nField Demo\nOnline\nSelf Study"
+  },
+  {
+   "description": "When the training this session delivered lapses, copied onto every record it produces. LEAVING IT EMPTY MEANS ONE-TIME and the compliance calendar will never ask for a renewal — right for a new-hire orientation, WRONG for WPS (12 months), Oregon heat illness (12 months) and annual GAP hygiene. complete_training_session says so when it is empty rather than guessing a year.",
+   "fieldname": "expires_date",
+   "fieldtype": "Date",
+   "label": "Expires"
+  },
+  {
+   "fieldname": "attendance_section",
+   "fieldtype": "Section Break",
+   "label": "Who was there"
+  },
+  {
+   "description": "One row per person, each carrying the badge scanned at the door and the signature given at the end. This is the sign-in sheet, and it is the whole reason the session exists as a record: a name typed into a list proves that somebody typed a name.",
+   "fieldname": "attendees",
+   "fieldtype": "Table",
+   "label": "Attendees",
+   "options": "Training Session Attendee"
+  },
+  {
+   "fieldname": "completion_section",
+   "fieldtype": "Section Break",
+   "label": "Completion"
+  },
+  {
+   "description": "When the session was completed and the training records written. Empty until then, which is what distinguishes a session somebody is part-way through from one nobody ever finished.",
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At",
+   "read_only": 1
+  },
+  {
+   "description": "The account that completed it. Data rather than a Link because the caller may be a bearer token with no User row behind it, and a Link pointed at a row that is not there would fail the save that closes the session.",
+   "fieldname": "completed_by",
+   "fieldtype": "Data",
+   "label": "Completed By",
+   "read_only": 1
+  },
+  {
+   "description": "How many Employee Training Records the completion wrote. Not the same number as the attendee count whenever somebody did not attend or did not sign, and the difference is the point: a session that produced eight records from twelve rows says so on its face.",
+   "fieldname": "records_created",
+   "fieldtype": "Int",
+   "label": "Records Created",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "description": "What happened that the columns do not hold: the video would not play so it was delivered as a talk, the Spanish handout ran out, two people were called away to a broken line.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "max_attachments": 20,
+ "modified": "2026-08-17 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Training Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "training_type,session_date,status",
+ "sort_field": "session_date",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "training_type",
+ "track_changes": 1
+}

@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-17 14:00:00.000000",
+ "description": "One person at one training session, and the two things that make their attendance evidence rather than a tick: a badge scanned at the shed door and a signature given at the end. A sign-in sheet with thirty names in one hand is the document every auditor has learned to distrust — WPS §170.501, FSMA §112.161(a)(4) and every GAP checklist ask for the trainee's OWN mark — so the row carries the scan that says who was there, where the handset was when it was scanned, the signature, and the moment it was given. THE TRAINING RECORD IS NOT WRITTEN HERE. complete_training_session writes it, once, per attendee who has both, and links it back into `training_record` so the register and the afternoon can be read from either end.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "attended",
+  "identity_col",
+  "badge_scan",
+  "scan_location",
+  "scanned_at",
+  "signature_section",
+  "signature",
+  "signed_at",
+  "signature_col",
+  "training_record",
+  "signing_evidence",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Who attended. A Link rather than a name, because the whole value of a session record is that the training it produces lands on a person's own file — and 'J. Martinez' on a sign-in sheet is what makes a compliance matrix unable to say whether the Martinez who needed WPS is the Martinez who got it.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Their name as it stood on the day, copied off the Employee when the row was added. A printed sign-in sheet reads names, and a person who marries in October should not make September's sheet unreadable.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether they were actually there. Ticked when the row is added, because a row is added by scanning somebody's badge at the door; untick it for somebody who was rostered and did not come. An unticked row produces no training record and is NOT an error — a session where two of twelve did not show is an ordinary Tuesday, and deleting their rows would lose the fact that they were expected.",
+   "fieldname": "attended",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Attended"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The badge ID read off their card at the door, exactly as the scanner produced it. IT IS KEPT EVEN THOUGH `employee` IS ALREADY RESOLVED, and that is the point: the Link says who this app decided was there and the scan says what the handset actually read, and an auditor asking how identity was established gets the second rather than an assurance. add_session_attendee resolves it through the same resolve_badge path the crew clock uses, so a retired card or a card belonging to somebody who has left is refused at the door instead of appearing as a name on a sheet.",
+   "fieldname": "badge_scan",
+   "fieldtype": "Data",
+   "label": "Badge Scan",
+   "search_index": 1
+  },
+  {
+   "description": "Where the handset was when the badge was scanned — '45.5152,-122.6784'. FSMA §112.161(a)(1)(i) asks an activity record where it happened, and a training session's location field says which shed while this says where the person was standing. A scan with no coordinates is recorded without them rather than refused: a metal packing shed is where GPS goes to die, and a training that happened is better evidence than a refusal.",
+   "fieldname": "scan_location",
+   "fieldtype": "Data",
+   "label": "Scan Location (GPS)"
+  },
+  {
+   "description": "When the badge was scanned. Written by add_session_attendee at the moment it happens, which is what makes 'thirty scans inside four seconds' visible to anybody who reads the column — a sheet signed in one hand at the end of the week looks exactly like a sheet signed as people arrived, and this is the difference.",
+   "fieldname": "scanned_at",
+   "fieldtype": "Datetime",
+   "label": "Scanned At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signature_section",
+   "fieldtype": "Section Break",
+   "label": "Attestation"
+  },
+  {
+   "description": "The worker's own signature, as a File. §112.161(a)(4) asks for the record to be signed or initialled by the person who performed the activity, and WPS and every GAP scheme ask the same in their own words. It travels here through the same stage_file_chunk upload path every other piece of field evidence uses, so a signature captured on a phone with no signal still arrives.",
+   "fieldname": "signature",
+   "fieldtype": "Attach",
+   "label": "Signature"
+  },
+  {
+   "description": "When they signed. A SEPARATE MOMENT FROM `scanned_at` ON PURPOSE — the badge is scanned when somebody walks in and the signature is given when the session ends, and a row where the two are identical is a row where somebody collected both at once. Recorded honestly either way; it is not refused, because a short toolbox talk genuinely is one moment.",
+   "fieldname": "signed_at",
+   "fieldtype": "Datetime",
+   "label": "Signed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "signature_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The Employee Training Record this attendee's row produced, written by complete_training_session. It is the audit trail in the direction an auditor actually walks it: from the afternoon to the register. Empty until the session is completed, and empty afterwards for anybody who did not attend or did not have both a scan and a signature.",
+   "fieldname": "training_record",
+   "fieldtype": "Link",
+   "label": "Training Record",
+   "options": "Employee Training Record",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Signing Evidence row for this signature — who was verified, how, where the handset was, and the hash of what they were shown. Written by sign_session_attendance where that register is on the site. Its absence weakens the packet and does not invalidate the signature, which is why it is a column rather than a requirement.",
+   "fieldname": "signing_evidence",
+   "fieldtype": "Link",
+   "label": "Signing Evidence",
+   "options": "Signing Evidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": ""
+  },
+  {
+   "description": "Anything about this one person's attendance: arrived late, translated for, took the Spanish version, left before the demonstration. The kind of fact that decides an argument a year later.",
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-17 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Training Session Attendee",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

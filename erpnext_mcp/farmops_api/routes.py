@@ -650,6 +650,34 @@ ROUTES = (
 	Route("/mobile", mobile_api.get_osha_300_log),
 	Route("/mobile", mobile_api.get_osha_300a_summary),
 	Route("/mobile", mobile_api.get_spray_application_report),
+	# The curriculum and the afternoon. THE ONLY SET ON THIS TABLE WHOSE WHOLE
+	# POINT IS THAT IT HAPPENS WITH A PHONE IN ONE HAND: a crew leader scans
+	# twelve badges at a shed door, takes twelve signatures an hour later, and
+	# completes the session before anybody has driven anywhere. The alternative
+	# this replaces is a paper sheet that reaches a desk on Thursday and becomes
+	# twelve typed forms that disagree by the third.
+	#
+	# `get_training_curriculum` IS THE ONE OPEN ON ENROLMENT ALONE. It returns
+	# what a COURSE is — a video link, a materials list, a duration — and none of
+	# it is a fact about a person. The picker whose WPS card the compliance tab
+	# has just told them has lapsed is exactly who should be able to open the
+	# film. Every other route here carries the HR gate the training matrix
+	# carries, in its own body, because a session names by name who was taught
+	# what.
+	#
+	# `update_training_type`'s `regimes` AND `retention_years` ARE UNREACHABLE
+	# HERE. The tool takes both so a desk can correct a curriculum; the wrapper
+	# declares neither, so this table's argument filter drops them — which audits
+	# a course answers and how long its records are kept are decisions with a
+	# citation behind them, not corrections typed into a phone in a shed.
+	Route("/mobile", mobile_api.get_training_curriculum),
+	Route("/mobile", mobile_api.update_training_type),
+	Route("/mobile", mobile_api.create_training_session),
+	Route("/mobile", mobile_api.add_session_attendee),
+	Route("/mobile", mobile_api.sign_session_attendance),
+	Route("/mobile", mobile_api.complete_training_session),
+	Route("/mobile", mobile_api.get_training_session),
+	Route("/mobile", mobile_api.list_training_sessions),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 	# Direct deposit. The worker's OWN bank details and nobody else's —

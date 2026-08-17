@@ -118,6 +118,7 @@ from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
 from ..tools import receipts as receipt_tools
 from ..tools import training as training_tools
+from ..tools import training_sessions as training_session_tools
 from ..tools import accidents as accident_tools
 from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
@@ -145,6 +146,7 @@ HOUSING_UNIT = "Housing Unit"
 HOUSING_ASSIGNMENT = "Housing Assignment"
 CERTIFICATION = "Certification"
 TRAINING_RECORD = "Employee Training Record"
+TRAINING_SESSION = "Training Session"
 REGULATORY_FILING = "Regulatory Filing"
 COMPLIANCE_POLICY = "Compliance Policy"
 EXPENSE_RECEIPT = "Expense Receipt"
@@ -9686,3 +9688,310 @@ def update_payroll_deduction(
 			inner[key] = value
 
 	return payroll_deduction_tools.update_payroll_deduction(inner).data
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# THE CURRICULUM AND THE AFTERNOON — eight routes, and the one that is not
+# gated like the other seven.
+#
+# `get_training_curriculum` IS OPEN ON ENROLMENT ALONE, and it is the only one
+# here that is. It returns what a COURSE is — a video link, a materials list, a
+# duration — and none of that is a fact about a person. The picker who has just
+# been told by the compliance tab that their WPS card lapsed is exactly who
+# should be able to open the film, and a gate that made them ask a foreman for
+# it would be a gate that turns a two-minute fix into somebody's Monday.
+#
+# THE OTHER SEVEN CARRY THE HR GATE the training matrix carries. A session names
+# by name who was taught what, which is a personnel document — and the two reads
+# call `require_hr_role` in the wrapper as well as one layer down, for the reason
+# the five discipline routes do: the refusal should happen before the register is
+# read, not after.
+#
+# THE NUMBERING CONTINUES FROM 123 and may have gaps: several sessions were
+# appending to this file at once. A gap costs a reader nothing; two blocks
+# sharing a number costs them the assumption that the number identifies a method.
+
+
+# ── 124. get_training_curriculum ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_training_curriculum", limit=guard.READ_LIMIT)
+def get_training_curriculum(user: str, training_type=None, include_inactive=None) -> dict:
+	"""What a course is, in the shape a handset renders it.
+
+	NO COMPANY ARGUMENT, and there is nothing missing. A Training Type is a
+	site-wide master — 'WPS Handler Training' is the same course whichever entity
+	ran it — so there is no per-company scope to apply and inventing one would
+	refuse a curriculum on the grounds of an entity it does not belong to.
+	"""
+	guard.require_scope(user)
+
+	inner: dict = {}
+	for key, value in (("training_type", training_type), ("include_inactive", include_inactive)):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return training_session_tools.get_training_curriculum(inner).data
+
+
+# ── 125. update_training_type ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_training_type", mutating=True, limit=guard.WRITE_LIMIT)
+def update_training_type(
+	user: str,
+	training_type=None,
+	video_url=None,
+	materials_description=None,
+	duration_minutes=None,
+	description=None,
+	delivery_method=None,
+	active=None,
+) -> dict:
+	"""Put the content on a curriculum, from the phone of whoever ran the session.
+
+	`regimes` AND `retention_years` ARE ON THE TOOL AND NOT IN THIS SIGNATURE, so
+	`routes.bind` drops them. Which audits a course answers and how long its
+	records are kept are decisions with a citation behind them, made once at a
+	desk by somebody who has read the rule — not corrections typed into a phone
+	in a shed. Everything here is content: the film, the handouts, the minutes.
+	"""
+	guard.require_scope(user)
+	personnel.require_hr_role()
+
+	inner: dict = {"training_type": training_type}
+	for key, value in (
+		("video_url", video_url),
+		("materials_description", materials_description),
+		("duration_minutes", duration_minutes),
+		("description", description),
+		("delivery_method", delivery_method),
+		("active", active),
+	):
+		if value is not None:
+			inner[key] = value
+
+	return training_session_tools.update_training_type(inner).data
+
+
+# ── 126. create_training_session ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_training_session", mutating=True, limit=guard.WRITE_LIMIT)
+def create_training_session(
+	user: str,
+	training_type=None,
+	company=None,
+	session_date=None,
+	start_time=None,
+	end_time=None,
+	location=None,
+	conducted_by=None,
+	instructor_name=None,
+	provider=None,
+	duration_minutes=None,
+	delivery_method=None,
+	regimes=None,
+	content_topics_covered=None,
+	expires_date=None,
+	training_source=None,
+	notes=None,
+) -> dict:
+	"""Open a group training event from the shed it is about to happen in.
+
+	`status` IS NOT IN THIS SIGNATURE. A session created from a handset is one
+	that is about to run, and the two states worth choosing between are the
+	default and In Progress — neither of which is worth an argument a caller
+	could get wrong. Completed is refused by the tool anyway.
+	"""
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {"training_type": training_type, "company": entity}
+	for key, value in (
+		("session_date", session_date),
+		("start_time", start_time),
+		("end_time", end_time),
+		("location", location),
+		("conducted_by", conducted_by),
+		("instructor_name", instructor_name),
+		("provider", provider),
+		("duration_minutes", duration_minutes),
+		("delivery_method", delivery_method),
+		("regimes", regimes),
+		("content_topics_covered", content_topics_covered),
+		("expires_date", expires_date),
+		("training_source", training_source),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	if inner.get("conducted_by"):
+		inner["conducted_by"] = _employee_argument(inner["conducted_by"], allowed, "conducted_by")
+
+	return training_session_tools.create_training_session(inner).data
+
+
+# ── 127. add_session_attendee ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_session_attendee", mutating=True, limit=guard.WRITE_LIMIT)
+def add_session_attendee(
+	user: str,
+	session=None,
+	badge_scan=None,
+	employee=None,
+	scan_location=None,
+	scanned_at=None,
+	attended=None,
+	notes=None,
+) -> dict:
+	"""Scan somebody in at the shed door.
+
+	THE ROUTE THIS WHOLE SET EXISTS FOR. Everything else here has a desk it could
+	have been done from; this one happens with a phone in one hand and a queue of
+	people at the door, and it is why the badge — not a typed name — is the
+	identification. `resolve_badge` runs one layer down, so a retired card is
+	refused at the door rather than discovered in an audit.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
+
+	inner: dict = {"session": name}
+	for key, value in (
+		("badge_scan", badge_scan),
+		("scan_location", scan_location),
+		("scanned_at", scanned_at),
+		("attended", attended),
+		("notes", notes),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if employee not in (None, ""):
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	return training_session_tools.add_session_attendee(inner).data
+
+
+# ── 128. sign_session_attendance ─────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("sign_session_attendance", mutating=True, limit=guard.WRITE_LIMIT)
+def sign_session_attendance(
+	user: str,
+	session=None,
+	employee=None,
+	badge_scan=None,
+	signature=None,
+	signed_at=None,
+	replace_signature=None,
+	device_id=None,
+	gps_latitude=None,
+	gps_longitude=None,
+) -> dict:
+	"""Take a worker's signature on the pad they are holding.
+
+	The signature file gets here through `stage_file_chunk` like every other
+	piece of field evidence, so a pad used in a shed with no signal still
+	arrives. The evidence row is written one layer down, hash and all.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
+
+	inner: dict = {"session": name, "signature": signature}
+	for key, value in (
+		("badge_scan", badge_scan),
+		("signed_at", signed_at),
+		("replace_signature", replace_signature),
+		("device_id", device_id),
+		("gps_latitude", gps_latitude),
+		("gps_longitude", gps_longitude),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if employee not in (None, ""):
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	return training_session_tools.sign_session_attendance(inner).data
+
+
+# ── 129. complete_training_session ───────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("complete_training_session", mutating=True, limit=guard.WRITE_LIMIT)
+def complete_training_session(
+	user: str,
+	session=None,
+	content_topics_covered=None,
+	regimes=None,
+	expires_date=None,
+	skip_incomplete=None,
+	completed_at=None,
+) -> dict:
+	"""Turn the sheet into training records, standing where the sheet was filled in.
+
+	`skip_incomplete` IS REACHABLE FROM HERE and that is deliberate: the person
+	who knows whether the four who did not sign went home is the person holding
+	the phone, and the refusal they get without it names exactly who to go and
+	find. A desk deciding that an hour later is deciding it with less
+	information, not more.
+	"""
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
+
+	inner: dict = {"session": name}
+	for key, value in (
+		("content_topics_covered", content_topics_covered),
+		("regimes", regimes),
+		("expires_date", expires_date),
+		("skip_incomplete", skip_incomplete),
+		("completed_at", completed_at),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return training_session_tools.complete_training_session(inner).data
+
+
+# ── 130. get_training_session ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_training_session", limit=guard.READ_LIMIT)
+def get_training_session(user: str, session=None) -> dict:
+	"""One session's sign-in sheet, and what is still short on it."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
+	return training_session_tools.get_training_session({"session": name}).data
+
+
+# ── 131. list_training_sessions ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_training_sessions", limit=guard.READ_LIMIT)
+def list_training_sessions(
+	user: str,
+	company=None,
+	training_type=None,
+	status=None,
+	employee=None,
+	conducted_by=None,
+	regime=None,
+	from_date=None,
+	to_date=None,
+	limit=None,
+) -> dict:
+	"""The session register, scoped to the entities this account may reach."""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {"company": entity}
+	for key, value in (
+		("training_type", training_type),
+		("status", status),
+		("conducted_by", conducted_by),
+		("regime", regime),
+		("from_date", from_date),
+		("to_date", to_date),
+		("limit", limit),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+	if employee not in (None, ""):
+		inner["employee"] = _employee_argument(employee, allowed)
+
+	return training_session_tools.list_training_sessions(inner).data

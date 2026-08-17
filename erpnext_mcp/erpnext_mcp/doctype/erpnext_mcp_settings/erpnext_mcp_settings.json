@@ -319,9 +319,17 @@
   "allow_list_trainings",
   "allow_get_training",
   "allow_get_training_compliance_report",
+  "allow_get_training_curriculum",
+  "allow_get_training_session",
+  "allow_list_training_sessions",
   "training_col",
   "allow_record_training",
   "allow_sign_training_supervisor_review",
+  "allow_update_training_type",
+  "allow_create_training_session",
+  "allow_add_session_attendee",
+  "allow_sign_session_attendance",
+  "allow_complete_training_session",
   "i9_section",
   "allow_get_i9_settings",
   "allow_get_i9_form",
@@ -2966,6 +2974,27 @@
    "label": "Get Training Compliance Report"
   },
   {
+   "default": "1",
+   "description": "READ. What a course IS, in the shape a handset renders it: the safety video link, the materials to lay out, how long it runs, how it is delivered, and every PDF attached to it. The read the compliance matrix needed and did not have — a matrix that names six pickers missing WPS and cannot deliver the training has generated a task for somebody else.",
+   "fieldname": "allow_get_training_curriculum",
+   "fieldtype": "Check",
+   "label": "Get Training Curriculum"
+  },
+  {
+   "default": "1",
+   "description": "READ. One group training session in full: the curriculum, the sign-in sheet with each person's badge scan and signature, and what still stands between it and a completion. Every attendee row carries the state that decides whether it becomes a training record, computed in the same place the completion writes from.",
+   "fieldname": "allow_get_training_session",
+   "fieldtype": "Check",
+   "label": "Get Training Session"
+  },
+  {
+   "default": "1",
+   "description": "READ. The session register — what was taught, when, by whom, and which open sessions still hold somebody marked present without a badge scan or a signature. Filtering by employee answers 'which sessions was Ana at', including the one she attended and did not sign, which produced no record and is invisible to the training register.",
+   "fieldname": "allow_list_training_sessions",
+   "fieldtype": "Check",
+   "label": "List Training Sessions"
+  },
+  {
    "fieldname": "training_col",
    "fieldtype": "Column Break",
    "label": ""
@@ -2983,6 +3012,41 @@
    "fieldname": "allow_sign_training_supervisor_review",
    "fieldtype": "Check",
    "label": "Sign Training Supervisor Review"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Puts the content on a curriculum — the safety video link, the materials list, the duration, the delivery method — so a handset can deliver the training a compliance gap names. It does NOT touch what is already filed: every session and every record carries its own copy of what actually happened, taken on the day.",
+   "fieldname": "allow_update_training_type",
+   "fieldtype": "Check",
+   "label": "Update Training Type"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Opens one group training event — a curriculum, a day, a place, a trainer. It writes nothing to anybody's file, which is what makes it safe to open a week early or to cancel; only completing it produces training records.",
+   "fieldname": "allow_create_training_session",
+   "fieldtype": "Check",
+   "label": "Create Training Session"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Puts one person on a session's sign-in sheet, identified by the badge scanned at the door — through the same resolve_badge path the crew clock uses, so a retired card or a card belonging to somebody who has left is refused before a name reaches a sheet. A badge and a name that disagree are refused.",
+   "fieldname": "allow_add_session_attendee",
+   "fieldtype": "Check",
+   "label": "Add Session Attendee"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Takes one attendee's signature and files the Signing Evidence row that says how they were identified and where. The session is hashed BEFORE the signature is written, so an operation that edits the topics afterwards can be shown to have done it after the crew signed.",
+   "fieldname": "allow_sign_session_attendance",
+   "fieldtype": "Check",
+   "label": "Sign Session Attendance"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Turns every provable attendance on a session into its own Employee Training Record, written through record_training so there is one code path on this site that knows what a training record means. Refuses by default when somebody marked present has no badge scan or no signature, and names them.",
+   "fieldname": "allow_complete_training_session",
+   "fieldtype": "Check",
+   "label": "Complete Training Session"
   },
   {
    "description": "Structured Form I-9 workflow — employment eligibility verification with Section 1/2 status tracking, retention dates, audit logging, and USCIS document type lookup. Only usable where the I-9 doctypes exist (run bench migrate after installing v0.27.0).",

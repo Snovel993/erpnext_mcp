@@ -136,6 +136,7 @@ from .tools import (
 	taxforms,
 	trade,
 	training,
+	training_sessions,
 	translations,
 	universal_scan,
 	uploads,
@@ -13995,6 +13996,462 @@ TOOLS = {
 		title="Sign a training supervisor review",
 		available=_needs_doctype("Employee Training Record"),
 		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── the curriculum, and the afternoon it is delivered in ────────────────
+	#
+	# The two ends of the loop v0.19.0 and the compliance matrix left open. At one
+	# end a Training Type was a name and a tag, so a matrix could tell a picker
+	# they were due for WPS and could not show them the film. At the other, every
+	# record was filed one person at a time, so a shed full of twelve people was
+	# twelve forms — and twelve forms typed one at a time disagree about the date,
+	# the topics and the trainer by the third.
+	#
+	# NOTHING HERE REPLACES `Employee Training Record`. The matrix reads per-person
+	# records, the `training_expiring` rule watches per-person expiry, and
+	# `generate_audit_packet` pulls per-person rows; a group document that called
+	# itself the evidence would be evidence none of the three can see into. The
+	# session is the ACT, `complete_training_session` is the one moment it becomes
+	# records, and it writes them THROUGH `record_training` so there is one code
+	# path on this site that knows what a training record means.
+	"update_training_type": _tool(
+		training_sessions.update_training_type,
+		"MUTATING (default OFF). Put the content on a curriculum: the safety video, "
+		"the materials to lay out, how long it runs, how it is delivered.\n\n"
+		"THE FIELD THAT MAKES THE REST WORTH HAVING IS `video_url`. A compliance "
+		"matrix that names six pickers missing WPS and cannot deliver the training "
+		"has generated a task for somebody else. `get_training_curriculum` is what a "
+		"handset reads this back through, and between them a gap and its remedy are "
+		"one screen.\n\n"
+		"IT DOES NOT TOUCH WHAT IS ALREADY FILED. A curriculum's length, method and "
+		"materials describe the COURSE; every session and every training record "
+		"carries its own copy of what actually happened, taken on the day. "
+		"Correcting a curriculum in August does not make July's forty-minute session "
+		"ninety minutes long.\n\n"
+		"PDFs AND SLIDES GO ON AS ATTACHMENTS, through attach_file_to_document "
+		"against doctype 'Training Type' — the ordinary Frappe path, so they inherit "
+		"the site's own extension allowlist and permission model rather than a "
+		"second one invented here.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"training_type": _field(
+				_STRING,
+				"The curriculum. An existing Training Type, matched case- and "
+				"space-insensitively. NOT auto-created — unlike record_training, which takes free "
+				"text because refusing it would leave an operation with the training and no "
+				"record; a content update against a name nobody has filed against is a typo far "
+				"more often than a new course.",
+			),
+			"video_url": _field(
+				_STRING,
+				"Where the safety film lives — an http:// or https:// link a handset can open. A "
+				"path or a filename is refused: on a phone it renders as a link that goes "
+				"nowhere, which is worse than an empty column because it looks answered. Pass an "
+				"empty string to clear it.",
+			),
+			"materials_description": _field(
+				_STRING,
+				"What the trainer has to bring: the handouts, the sign-in sheet, the respirator to "
+				"demonstrate on, the thermometer. Read by whoever sets the shed up an hour "
+				"beforehand, who is not the person who booked the course.",
+			),
+			"duration_minutes": _field(
+				_INTEGER,
+				"How long a session normally takes. Becomes the default duration of every Training "
+				"Session of this curriculum, and is what lets one be booked against a shift.",
+			),
+			"description": _field(
+				_STRING,
+				"What the course covers, who issues it, how often it must be repeated and the "
+				"citation that says so.",
+			),
+			"delivery_method": _field(
+				_STRING,
+				"Video, Classroom, Field Demo, Online or Self Study — or the same words as "
+				"video, classroom, field_demo, online, self_study. It is how a handset knows "
+				"whether to open a player, a document or nothing.",
+			),
+			"regimes": _field(
+				_STRING_ARRAY,
+				"Which audits a session of this course counts towards. Stating it once here is "
+				"what stops thirty records of the course being thirty chances to mistype the tag. "
+				"An unknown token is refused by name rather than dropped.",
+			),
+			"active": _field(
+				_BOOLEAN,
+				"Untick a curriculum this operation no longer runs. It is then held against "
+				"nobody in the compliance matrix, and the records already filed against it are "
+				"untouched — last season's evidence is still evidence about last season.",
+			),
+			"retention_years": _field(
+				_INTEGER,
+				"Years to keep a record of this training. The authoritative answer for any one "
+				"record is still computed from that record's own tags; this is what the curriculum "
+				"implies.",
+			),
+		},
+		required=("training_type",),
+		mutating=True,
+		title="Update a training curriculum",
+		available=_needs_doctype("Training Type"),
+		requires="the Training Type DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_training_curriculum": _tool(
+		training_sessions.get_training_curriculum,
+		"What a course IS, in the shape a handset renders it: the film, the "
+		"materials, the minutes, the regimes and every PDF attached to it. "
+		"Read-only.\n\n"
+		"THE READ THE MATRIX NEEDED AND DID NOT HAVE. "
+		"get_training_compliance_report can tell a foreman six pickers are missing "
+		"WPS; until this existed the next step was somebody driving to an office for "
+		"a DVD. One name in, and the answer carries the link to play, the list to lay "
+		"out and the files to hand round.\n\n"
+		"NO NAME LISTS THE WHOLE CURRICULUM, which is the other question a screen "
+		"asks — what training does this operation run — in one call rather than a "
+		"listing plus one read per row. Attachments are omitted from the listing and "
+		"present on a single read: one query per curriculum to count PDFs is a "
+		"hundred round trips for a screen that shows names.\n\n"
+		"`content_gaps` NAMES WHAT A SCREEN WOULD WANT AND THIS CURRICULUM LACKS — "
+		"no description, no delivery method, marked as video with nothing to play. "
+		"Reported rather than refused: a curriculum with a name and a regime tag is "
+		"still the record thirty training records link to.",
+		{
+			"training_type": _field(
+				_STRING,
+				"One curriculum by name. Omit it to list every active one on the site.",
+			),
+			"name": _field(_STRING, "Alias for training_type."),
+			"include_inactive": _field(
+				_BOOLEAN,
+				"Include curricula somebody unticked. Default false — a listing that showed a "
+				"course retired in 2019 is a listing somebody has to filter by hand.",
+			),
+		},
+		title="Get a training curriculum",
+		available=_needs_doctype("Training Type"),
+		requires="the Training Type DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_training_session": _tool(
+		training_sessions.create_training_session,
+		"MUTATING (default OFF). Open one group training event — a curriculum, a "
+		"day, a place and a trainer. Nobody is on it yet and nothing is filed.\n\n"
+		"A SESSION WRITES NOTHING TO ANYBODY'S FILE, which is the whole reason it is "
+		"a separate document from the records it will produce. It can be created a "
+		"week early, it can be cancelled, it can sit half-filled while the crew is "
+		"still arriving — none of which should put a training record on a compliance "
+		"matrix. complete_training_session is the only call that does.\n\n"
+		"IT INHERITS FROM THE CURRICULUM AND THEN STOPS. Duration, delivery method "
+		"and regimes are copied off the Training Type at creation and never "
+		"re-applied: the curriculum says what the course normally is and the session "
+		"says what this afternoon was, and an afternoon that ran short is entitled to "
+		"say so.\n\n"
+		"AN OUTSIDE TRAINER IS `instructor_name` AND `provider`, NOT `conducted_by`. "
+		"The Link is for somebody on this payroll; forcing a PSA instructor or an "
+		"extension agent to become an Employee record would put a stranger on the "
+		"personnel register to satisfy a form.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager, and refuses a "
+		"company the calling account cannot see.",
+		{
+			"training_type": _field(
+				_STRING,
+				"The curriculum being delivered. An existing Training Type — get_training_curriculum "
+				"lists them, and record_training creates one from free text where the course is "
+				"genuinely new.",
+			),
+			"company": _COMPANY,
+			"session_date": _field(_STRING, "The day it runs, YYYY-MM-DD. Defaults to today."),
+			"start_time": _field(_STRING, "HH:MM or HH:MM:SS."),
+			"end_time": _field(
+				_STRING, "HH:MM or HH:MM:SS. Earlier than the start time on the same day is refused."
+			),
+			"location": _field(
+				_STRING,
+				"Where it happens, in the words somebody would use to find it: 'Main packing "
+				"shed', 'Block 4 headland'. Free text, because training happens wherever there is "
+				"shade.",
+			),
+			"conducted_by": _field(
+				_STRING,
+				"The Employee who ran it. Docname, employee number, name or login. Somebody "
+				"employed by another entity is refused — record them as instructor_name instead.",
+			),
+			"instructor_name": _field(
+				_STRING,
+				"The trainer's name where they are NOT an employee: a PSA-certified instructor, an "
+				"extension agent, an ODA officer, a chemical rep.",
+			),
+			"provider": _field(
+				_STRING,
+				"The organisation that delivered it — 'Oregon State Extension', 'PSA'. Copied onto "
+				"every training record the session produces.",
+			),
+			"duration_minutes": _field(
+				_INTEGER, "Defaults to the curriculum's own duration. Override it for a session that ran short."
+			),
+			"delivery_method": _field(
+				_STRING,
+				"Video, Classroom, Field Demo, Online or Self Study. Defaults to the curriculum's.",
+			),
+			"regimes": _field(
+				_STRING_ARRAY,
+				"Which audits THIS afternoon counts towards. Defaults to the curriculum's. Required "
+				"by the time the session is completed — an untagged record appears in no packet.",
+			),
+			"content_topics_covered": _field(
+				_STRING,
+				"The topics actually covered, comma-separated. May be filled in at completion, "
+				"which is the moment somebody knows — but it is required by then, for the reason "
+				"record_training requires it.",
+			),
+			"expires_date": _field(
+				_STRING,
+				"When the training this session delivers lapses, YYYY-MM-DD, copied onto every "
+				"record it produces. EMPTY MEANS ONE-TIME and the compliance calendar will never "
+				"ask for a renewal — wrong for WPS, Oregon heat illness and annual GAP hygiene.",
+			),
+			"training_source": _field(
+				_STRING, "Internal (default), External, Contractor or Online-Course."
+			),
+			"status": _field(
+				_STRING,
+				"Scheduled (default) or In Progress. Completed is refused here: completion is what "
+				"writes the training records, and a session that arrived already finished would "
+				"claim an afternoon that produced no evidence.",
+			),
+			"notes": _field(_STRING, "What happened that the columns do not hold."),
+		},
+		required=("training_type",),
+		mutating=True,
+		title="Create a training session",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"add_session_attendee": _tool(
+		training_sessions.add_session_attendee,
+		"MUTATING (default OFF). Put one person on the sign-in sheet, identified by "
+		"the badge scanned at the door.\n\n"
+		"THE SCAN IS THE IDENTIFICATION AND THE EMPLOYEE LINK IS ITS RESULT. "
+		"`badge_scan` alone is enough, and it goes through the same resolve_badge "
+		"path the crew clock uses — so a retired card, a card belonging to somebody "
+		"who has left, and a QR that is not a badge at all are each refused by their "
+		"own sentence BEFORE a name reaches a sheet. Passing a badge AND a name that "
+		"disagree is refused: a sheet recording one person's badge against another's "
+		"name would be the one document in this app that states something nobody "
+		"believes.\n\n"
+		"A ROW WITH NO BADGE IS ALLOWED AND PRODUCES NO RECORD. It says somebody "
+		"typed a name, which is true and is not evidence — complete_training_session "
+		"names it rather than filing it.\n\n"
+		"`scan_location` IS NOT REQUIRED. A metal packing shed is where GPS goes to "
+		"die, and a session refused for want of coordinates is a training that "
+		"happened and was not recorded.",
+		{
+			"session": _field(_STRING, "The Training Session docname — TRNS-2026-0001."),
+			"name": _field(_STRING, "Alias for session."),
+			"training_session": _field(_STRING, "Alias for session."),
+			"badge_scan": _field(
+				_STRING,
+				"The badge ID read off their card at the door, exactly as the scanner produced it. "
+				"Resolved to an Employee, and kept alongside — the Link says who this app decided "
+				"was there, the scan says what the handset actually read.",
+			),
+			"employee": _field(
+				_STRING,
+				"Who attended, where there is no badge to scan. Docname, employee number, name or "
+				"login. Given alongside a badge, the two must agree.",
+			),
+			"scan_location": _field(
+				_STRING, "Where the handset was when the badge was scanned — '45.5152,-122.6784'."
+			),
+			"scanned_at": _field(
+				_STRING, "When it was scanned, YYYY-MM-DD HH:MM:SS. Defaults to now where a badge was given."
+			),
+			"attended": _field(
+				_BOOLEAN,
+				"Default true. Untick for somebody rostered who did not come — their row is kept, "
+				"because deleting it would lose the fact that they were expected.",
+			),
+			"notes": _field(
+				_STRING, "Arrived late, translated for, took the Spanish version, left early."
+			),
+		},
+		required=("session",),
+		mutating=True,
+		title="Add a training session attendee",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"sign_session_attendance": _tool(
+		training_sessions.sign_session_attendance,
+		"MUTATING (default OFF). Take one attendee's signature, and file the "
+		"Signing Evidence row that says how they were identified and where.\n\n"
+		"A SEPARATE CALL FROM add_session_attendee, DELIBERATELY, and for the reason "
+		"sign_training_supervisor_review is separate from record_training: the badge "
+		"is scanned when somebody walks in and the signature is given when the "
+		"session ends. A single call that took both would make one timestamp the "
+		"default, and thirty scans and thirty signatures sharing a minute is the "
+		"shape of a sheet an inspector reads as having been filled in at the end. "
+		"The result says so when it sees it.\n\n"
+		"THE SESSION IS HASHED BEFORE THE SIGNATURE IS WRITTEN, which is the only "
+		"moment that answers what the signer was shown — the curriculum, the date, "
+		"the topics, the other names on the sheet. An operation that edits the topics "
+		"list afterwards can be shown to have done it after the crew signed, which is "
+		"a question a paper sign-in sheet has never been able to answer.\n\n"
+		"IT REFUSES to overwrite a signature already on the row without "
+		"replace_signature=true, and refuses a person who is not on the sheet — "
+		"add_session_attendee puts them there, with the badge that makes the "
+		"signature evidence of a particular person rather than of a mark.",
+		{
+			"session": _field(_STRING, "The Training Session docname."),
+			"name": _field(_STRING, "Alias for session."),
+			"training_session": _field(_STRING, "Alias for session."),
+			"employee": _field(_STRING, "Who is signing. Docname, employee number, name or login."),
+			"badge_scan": _field(_STRING, "Their badge, where that is what the handset has."),
+			"signature": _field(
+				_STRING,
+				"The signature file, as a File docname or file_url — upload it through "
+				"stage_file_chunk first. It is what §112.161(a)(4) asks for by name.",
+			),
+			"signed_at": _field(
+				_STRING, "When they signed, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			),
+			"replace_signature": _field(
+				_BOOLEAN,
+				"Overwrite a signature already on this row. Default false — replacing one on a "
+				"compliance record is a decision rather than a retry.",
+			),
+			"device_id": _field(_STRING, "The handset the signature was taken on, for the evidence row."),
+			"gps_latitude": _field(
+				_NUMBER,
+				"Where the signature was taken. Falls back to the coordinates of the badge scan, "
+				"because a phone with a fix at the door and none an hour later is ordinary.",
+			),
+			"gps_longitude": _field(_NUMBER, "See gps_latitude."),
+		},
+		required=("session", "signature"),
+		mutating=True,
+		title="Sign training session attendance",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"complete_training_session": _tool(
+		training_sessions.complete_training_session,
+		"MUTATING (default OFF). Turn every provable attendance into its own "
+		"Employee Training Record. One call, one afternoon, as many records as there "
+		"were people who can be shown to have been there.\n\n"
+		"THIS IS THE MOMENT THE SESSION BECOMES EVIDENCE and it is the only one. "
+		"Each ready row is filed THROUGH record_training — the same guards, the same "
+		"§112.161 derivations, the same supersession report a single record gets — so "
+		"the difference between one person and twelve is a loop rather than a second "
+		"idea of what a training record means. The records feed "
+		"get_training_compliance_report immediately.\n\n"
+		"IT REFUSES BY DEFAULT WHEN SOMEBODY MARKED PRESENT CANNOT BE PROVED TO HAVE "
+		"BEEN THERE — no badge scan, or no signature — and names them. That is the "
+		"check worth having: a sheet where four of twelve never signed is a sheet "
+		"somebody has to fix while the crew is still on site, and quietly filing the "
+		"other eight would have taken that Monday away from them. "
+		"`skip_incomplete=true` files the eight and names the four. Both calls are "
+		"legitimate; which is right is not a decision this app can make, and it will "
+		"not make it silently.\n\n"
+		"A ROW THAT FAILS DOES NOT TAKE THE OTHERS WITH IT. Eleven filed and one "
+		"refused by name beats a refusal that leaves twelve people with nothing. A "
+		"second call files only what is outstanding — a row that already produced a "
+		"record is skipped, so this is safe to retry.\n\n"
+		"IT REFUSES a cancelled session, a session with no regimes, a session with no "
+		"topics, and a session where nobody is ready.",
+		{
+			"session": _field(_STRING, "The Training Session docname."),
+			"name": _field(_STRING, "Alias for session."),
+			"training_session": _field(_STRING, "Alias for session."),
+			"content_topics_covered": _field(
+				_STRING,
+				"The topics actually covered, comma-separated — set here where the session was "
+				"created without them, which is usually the case. REQUIRED by completion: it is "
+				"what makes a regime tag defensible rather than optimistic.",
+			),
+			"regimes": _field(
+				_STRING_ARRAY,
+				"Correct the session's regimes at completion, where the afternoon covered "
+				"something other than the curriculum's usual. Required to be non-empty by then.",
+			),
+			"expires_date": _field(
+				_STRING,
+				"When this training lapses, YYYY-MM-DD, written onto every record produced. Empty "
+				"means one-time and the calendar will never ask for a renewal.",
+			),
+			"skip_incomplete": _field(
+				_BOOLEAN,
+				"File the ready rows and leave the unprovable ones named. Default false, which "
+				"refuses and names them instead.",
+			),
+			"completed_at": _field(
+				_STRING, "When the session was completed, YYYY-MM-DD HH:MM:SS. Defaults to now."
+			),
+		},
+		required=("session",),
+		mutating=True,
+		title="Complete a training session",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_training_session": _tool(
+		training_sessions.get_training_session,
+		"One training session in full: the curriculum, the sign-in sheet with each "
+		"person's badge and signature, and what still stands between it and a "
+		"completion. Read-only.\n\n"
+		"EVERY ATTENDEE ROW CARRIES A `state` AND A `missing` LIST — recorded, "
+		"ready, absent or incomplete, and which of the badge and the signature is "
+		"absent. It is computed in one place and the completion writes from the same "
+		"rule, so this read cannot say ready about a row the completion will skip.\n\n"
+		"`completion_blockers` IS SESSION-LEVEL ONLY. An attendee who has not signed "
+		"does not block a completion — their row simply produces no record — because "
+		"a session where eleven of twelve signed should file eleven rather than "
+		"nothing.\n\n"
+		"Scoped to the companies the calling account may reach.",
+		{
+			"session": _field(_STRING, "The Training Session docname — TRNS-2026-0001."),
+			"name": _field(_STRING, "Alias for session."),
+			"training_session": _field(_STRING, "Alias for session."),
+		},
+		required=("session",),
+		title="Get a training session",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_training_sessions": _tool(
+		training_sessions.list_training_sessions,
+		"The session register — what was taught, when, by whom, and where the sheet "
+		"is still short. Read-only.\n\n"
+		"`employee` IS THE FILTER THAT MAKES THIS MORE THAN A DIARY. 'Which sessions "
+		"was Ana at' is answered off the attendee rows rather than off the training "
+		"register, so it includes the session she attended and did not sign — the one "
+		"that produced no record and is therefore invisible to list_trainings. That "
+		"gap is exactly what somebody asking the question is looking for.\n\n"
+		"`with_unproved_attendance` NAMES THE OPEN SESSIONS HOLDING SOMEBODY MARKED "
+		"PRESENT WITHOUT A SCAN OR A SIGNATURE. Those people are trained and the "
+		"compliance matrix does not know it, which is the gap found by an inspector "
+		"rather than by a report.\n\n"
+		"Attendee rows are omitted and the counts are not — forty sessions of twelve "
+		"is five hundred rows to answer 'what happened in June'. get_training_session "
+		"has the sheet.",
+		{
+			"company": _COMPANY,
+			"training_type": _field(_STRING, "One curriculum by name."),
+			"status": _field(
+				_STRING, "Scheduled, In Progress, Completed or Cancelled. Also accepts in_progress."
+			),
+			"employee": _field(
+				_STRING, "Only sessions this person is on the attendee list of, signed or not."
+			),
+			"conducted_by": _field(_STRING, "Only sessions this employee ran."),
+			"regime": _field(
+				_STRING, "Only sessions tagged for this audit. Matched by TAG, never by substring."
+			),
+			"from_date": _field(_STRING, "Earliest session_date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest session_date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List training sessions",
+		available=_needs_doctype("Training Session"),
+		requires="the Training Session DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.19.3: the shift, and the heat record anchored to it ──────────────
 	"start_shift": _tool(

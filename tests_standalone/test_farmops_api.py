@@ -478,6 +478,18 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/get_osha_300_log",
 		"/mobile/get_osha_300a_summary",
 		"/mobile/get_spray_application_report",
+		# The curriculum and the group training session. `update_training_type`
+		# is the one whose ABSENT arguments matter: `regimes` and
+		# `retention_years` are on the tool and not on the wrapper, so `bind`
+		# drops them and a handset cannot repoint which audits a course answers.
+		"/mobile/get_training_curriculum",
+		"/mobile/update_training_type",
+		"/mobile/create_training_session",
+		"/mobile/add_session_attendee",
+		"/mobile/sign_session_attendance",
+		"/mobile/complete_training_session",
+		"/mobile/get_training_session",
+		"/mobile/list_training_sessions",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 		# v0.91.0. Direct deposit. The read is the caller's own accounts and the

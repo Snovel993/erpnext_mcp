@@ -1371,6 +1371,12 @@ APP_DOCTYPES = {
 	"Compliance Regime": "compliance_regime",
 	"Compliance Regime Link": "compliance_regime_link",
 	"Training Type": "training_type",
+	# The group training event and its sign-in sheet. The session is the ACT and
+	# the Employee Training Records it produces are the EVIDENCE — see
+	# `erpnext_mcp/training_sessions.py` — so both are here and the register above
+	# is unchanged.
+	"Training Session": "training_session",
+	"Training Session Attendee": "training_session_attendee",
 	# ── v0.19.3: the shift, and the heat record anchored to it ──────────────
 	"Farm Shift": "farm_shift",
 	"Farm Shift Crew Member": "farm_shift_crew_member",
@@ -2248,6 +2254,8 @@ CHILD_TABLES = {
 	# Training Type as untagged and call the packet filter a pass.
 	("Compliance Alert", "regime"): "Compliance Regime Link",
 	("Training Type", "regimes"): "Compliance Regime Link",
+	("Training Session", "regimes"): "Compliance Regime Link",
+	("Training Session", "attendees"): "Training Session Attendee",
 	# v0.19.3. The crew envelope and the two timelines hanging off a shift, plus
 	# the acclimatization plan on a heat record. Modelling all four is what makes
 	# `shifts.crew_of` and the Attendance bridge testable at all: both read the
@@ -2355,6 +2363,10 @@ REHYDRATED_CHILD_FIELDS = (
 	# documents on the second read as well as on the first.
 	"checklist",
 	"compliance_regimes",
+	# `sign_session_attendance` and `complete_training_session` both re-read a
+	# session they did not write, find one attendee row and set a field on it —
+	# which is `.set()` and attribute assignment, neither of which a bare dict has.
+	"attendees",
 	# v0.48.0. The authorized signer roster, on a Single. `update_authorized_signer`
 	# and `remove_authorized_signer` re-read I-9 Settings, find one row and set a
 	# field on it — which is `.set()`, which a bare dict does not have.
@@ -4279,7 +4291,18 @@ CHILD_TABLE_SOURCES = {
 		# v0.41.0. A fifth parent. `task_templates.regimes_of` filters on
 		# `parenttype` for the same reason every reader above does.
 		("Farm Task Template", "compliance_regimes"),
+		# A sixth parent. `training_sessions.describe` reads a session's regimes
+		# through `rows_for_parents`, so without this every session would report
+		# itself untagged — and `completion_blockers` would then refuse every
+		# completion here while passing on a bench, which is the worst direction
+		# for the double to be wrong in.
+		("Training Session", "regimes"),
 	),
+	# The sign-in sheet, read by `parent` rather than off a document somebody
+	# already loaded: `list_training_sessions` reports the attendance counts of
+	# forty sessions at once, and forty parent loads to count signatures is forty
+	# round trips to answer one join.
+	"Training Session Attendee": (("Training Session", "attendees"),),
 	# v0.19.3. `shifts.crew_of`, `events_of` and `weather_of` all query the child
 	# doctype directly with a `parent` filter, because the Attendance bridge and
 	# the read tools work from a docname rather than from a document somebody

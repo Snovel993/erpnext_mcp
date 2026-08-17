@@ -574,6 +574,42 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"get_osha_300_log",
 		"get_osha_300a_summary",
 		"get_spray_application_report",
+		# The curriculum and the group training session — eight methods, and the
+		# same reason as every entry above: `MobileAPI.swift` names none of them
+		# yet, there being no training screen in the app, and the server half is
+		# published first so the iOS half is a client change rather than a
+		# release of both. They are not in `MOBILE` because `test_ios_contract`
+		# requires a mirror of the Swift Codable for everything in that set, and
+		# there is no Codable to mirror; writing one here would invent the
+		# contract rather than transcribe it.
+		"get_training_curriculum",
+		"update_training_type",
+		"create_training_session",
+		"add_session_attendee",
+		"sign_session_attendance",
+		"complete_training_session",
+		"get_training_session",
+		"list_training_sessions",
+		# The payroll deduction register: three reads and two writes.
+		# `MobileAPI.swift` names none of the five — there is no deductions
+		# screen in the app — so the server half is published first and the iOS
+		# half is a client change rather than a release of both.
+		#
+		# THEY ARE HERE RATHER THAN IN `MOBILE` FOR THIS SET'S ORDINARY REASON
+		# and not as paperwork: `test_ios_contract` requires a mirror of the
+		# Swift Codable for everything in that set, and there is no Codable to
+		# mirror. Writing one would invent the contract rather than transcribe
+		# it, and an invented contract is worse than an absent one — the app
+		# would be built against a shape nothing on either side agreed to.
+		#
+		# ALL FIVE ARE HR-ONLY IN THEIR OWN BODIES, which is the thing to check
+		# if any appears in an app build. What a person's wages are garnished
+		# for is among the most sensitive facts this app holds.
+		"list_payroll_deductions",
+		"get_payroll_deduction",
+		"list_employee_deductions",
+		"create_payroll_deduction",
+		"update_payroll_deduction",
 		# v0.91.0. Direct deposit, entered by the worker whose wages it is.
 		# `MobileAPI.swift` names none of the three yet — the handset half is
 		# separate work — so they sit here rather than in `MOBILE`.
