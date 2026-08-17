@@ -1092,11 +1092,47 @@ class TheSchemaMatchesTheHandler(StateTaxTestCase):
                 found.add(node.args[1].value)
         return found
 
-    def _assert_declared(self, tool_name, function_name):
+    #: Handlers that do NOT read `args` key by key, and how to resolve what they
+    #: do read. `create_state_tax_config` and `update_state_tax_config` iterate
+    #: `_config_rate_fields(state)` and pull each name off `args` through a loop
+    #: variable, so the AST walk above sees only their three literal arguments
+    #: out of thirteen and fourteen.
+    #:
+    #: THAT IS WORSE THAN SEEING NONE. A walk that finds nothing is obviously
+    #: broken; one that finds a quarter of the surface reports "every argument
+    #: declared" and is believed. The entry below resolves the tuple by calling
+    #: the function, and `test_the_walk_can_see_every_required_argument` is what
+    #: catches the next handler that grows a shape this file cannot read.
+    _INDIRECT_READERS = {
+        "create_state_tax_config": ("_config_rate_fields", ("OR", "WA")),
+        "update_state_tax_config": ("_config_rate_fields", ("OR", "WA")),
+    }
+
+    def _indirect_arguments(self, function_name):
         import erpnext_mcp.tools.state_tax as module
+
+        entry = self._INDIRECT_READERS.get(function_name)
+        if not entry:
+            return set()
+        resolver_name, arguments = entry
+        resolver = getattr(module, resolver_name)
+        names = set()
+        for argument in arguments:
+            names.update(resolver(argument))
+        return names
+
+    def _all_arguments_read_by(self, function_name):
+        import erpnext_mcp.tools.state_tax as module
+
+        return (
+            self._arguments_read_by(module.__file__, function_name)
+            | self._indirect_arguments(function_name)
+        )
+
+    def _assert_declared(self, tool_name, function_name):
         from erpnext_mcp import registry
 
-        read = self._arguments_read_by(module.__file__, function_name)
+        read = self._all_arguments_read_by(function_name)
         declared = set(registry.TOOLS[tool_name]["inputSchema"]["properties"])
         undeclared = read - declared
         self.assertEqual(
@@ -1118,17 +1154,89 @@ class TheSchemaMatchesTheHandler(StateTaxTestCase):
     def test_import_state_tax_table_schema_covers_its_handler(self):
         self._assert_declared("import_state_tax_table", "import_state_tax_table")
 
+    #: Every state-tax tool and the handler behind it. Named once so the two
+    #: tests below cannot drift apart about which tools are covered.
+    COVERED = (
+        ("get_state_tax_config", "get_state_tax_config"),
+        ("list_state_tax_configs", "list_state_tax_configs"),
+        ("get_state_tax_table", "get_state_tax_table"),
+        ("preview_state_withholding", "preview_state_withholding"),
+        ("preview_total_payroll_taxes", "preview_total_payroll_taxes"),
+        ("list_employees_by_work_state", "list_employees_by_work_state"),
+        ("create_state_tax_config", "create_state_tax_config"),
+        ("update_state_tax_config", "update_state_tax_config"),
+    )
+
     def test_the_other_state_tax_tools_too(self):
-        for tool_name, function_name in (
-            ("get_state_tax_config", "get_state_tax_config"),
-            ("list_state_tax_configs", "list_state_tax_configs"),
-            ("get_state_tax_table", "get_state_tax_table"),
-            ("preview_state_withholding", "preview_state_withholding"),
-            ("preview_total_payroll_taxes", "preview_total_payroll_taxes"),
-            ("list_employees_by_work_state", "list_employees_by_work_state"),
-        ):
+        for tool_name, function_name in self.COVERED:
             with self.subTest(tool=tool_name):
                 self._assert_declared(tool_name, function_name)
+
+    def test_the_walk_can_see_every_required_argument(self):
+        """The vacuity canary. A blind check must fail, not pass.
+
+        If a handler stops reading its arguments in a shape this file can read,
+        `_assert_declared` goes on passing — it compares an empty set against the
+        schema and finds nothing undeclared. That is how a guard rots into
+        decoration.
+
+        A REQUIRED argument is one the handler certainly consumes, so the walk
+        being unable to see it means the walk is blind rather than the tool being
+        clean.
+
+        WHAT THIS DOES NOT CATCH, stated because the first draft of this
+        docstring claimed otherwise. It would NOT have caught the
+        `create_state_tax_config` blindness that prompted it: that handler reads
+        `state` and `tax_year` — its only required arguments — as literals, and
+        it was the ten optional rate fields behind `_config_rate_fields` that
+        were invisible. The test below is what fails in that case, because a read
+        set missing those fields makes them look declared-but-ignored. This one
+        covers the sharper regression where a handler's required arguments go
+        behind a helper too, which is the shape that would leave
+        `_assert_declared` comparing an empty set and passing.
+        """
+        from erpnext_mcp import registry
+
+        for tool_name, function_name in self.COVERED:
+            with self.subTest(tool=tool_name):
+                required = set(registry.TOOLS[tool_name]["inputSchema"]["required"])
+                if not required:
+                    continue
+                read = self._all_arguments_read_by(function_name)
+                invisible = required - read
+                self.assertEqual(
+                    invisible,
+                    set(),
+                    f"{tool_name} marks {sorted(invisible)} required, but this test cannot see "
+                    f"the handler read them — so it is not actually checking this tool. The "
+                    f"handler probably reads its arguments through a loop or a helper; add it "
+                    f"to _INDIRECT_READERS rather than letting the check pass blind.",
+                )
+
+    def test_the_config_tools_declare_nothing_they_ignore(self):
+        """The other direction, for the two tools whose reads are fully known.
+
+        A schema field no handler consumes is accepted, documented, and silently
+        dropped — the caller is told it worked. Only asserted where the read set
+        is complete; on a tool the walk covers partially it would be noise.
+        """
+        from erpnext_mcp import registry
+
+        for tool_name, function_name in (
+            ("create_state_tax_config", "create_state_tax_config"),
+            ("update_state_tax_config", "update_state_tax_config"),
+        ):
+            with self.subTest(tool=tool_name):
+                declared = set(registry.TOOLS[tool_name]["inputSchema"]["properties"])
+                read = self._all_arguments_read_by(function_name)
+                ignored = declared - read
+                self.assertEqual(
+                    ignored,
+                    set(),
+                    f"{tool_name}'s schema declares {sorted(ignored)}, which its handler never "
+                    f"reads. A caller that sends one is told the call succeeded and the value "
+                    f"is dropped.",
+                )
 
     def test_the_refusal_names_an_argument_the_schema_allows(self):
         """The refusal says "Pass replace=true"; the schema has to permit that.
