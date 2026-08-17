@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 658 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 663 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 321 read tools are **on** by default and can be switched off individually. A
+All 324 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -14510,3 +14510,131 @@ the ones nobody looked at stay visible.
 On a Frappe bench with no ERPNext there is no `UOM` master, so the units and the
 conversions that link to them are skipped **by name** while the crops and markets,
 which link to neither, are seeded anyway.
+---
+
+# Breakeven calculator (v0.87.0)
+
+*What price does this crop have to make?* Five tools over one record, and the
+record is a **perspective on the ledger the farm already keeps**. Nothing here
+posts, nothing is a journal entry, and no number it produces changes what the
+financial statements say. What a Breakeven Analysis adds to the chart of accounts
+is the one thing a chart of accounts cannot hold: which accounts stop mattering
+when the crop gets bigger.
+
+| Tool | What it does |
+| --- | --- |
+| `create_breakeven_analysis` | Register a crop, a volume and a price to model. Creates; does **not** compute |
+| `compute_breakeven` | Read the expense accounts, classify them, answer the question — and store every intermediate |
+| `get_breakeven_analysis` | One analysis in full, with every cost line and **who classified it** |
+| `list_breakeven_analyses` | The register, naming the rows that are not answers |
+| `get_breakeven_sensitivity` | What-if over one variable across a range. Stores nothing |
+
+## A fruit farm has two volumes, and everything follows from that
+
+A textbook breakeven has one. Picking, hauling and field bins are bought for
+**everything that comes off the trees**; cartons, packing labour, freight and
+commission are bought only for **what packs out**. So when packout falls from
+85% to 60%, the second pile falls with it and the first does not — it spreads
+over fewer sellable boxes. Every cost line therefore carries a `volume_basis`,
+and the arithmetic is:
+
+```
+variable cost per sellable unit  =  vh / p  +  vs
+cull credit per sellable unit    =  c · (1 − p) / p
+contribution margin per unit     =  P + cull credit − variable cost
+```
+
+Each packed box carries `1/p` harvested units of picking with it and brings
+`(1−p)/p` culls' worth of juice money along. A model with a **single** variable
+pile gets the direction of a packout change right and the magnitude wrong, which
+is the more dangerous of the two errors: it looks like an answer.
+
+The **cull credit is not decoration**. Thirty percent culls at juice price is not
+thirty percent of the crop earning nothing, and a model that treated it that way
+would make every light-packout scenario look worse than it is — the direction
+that leaves fruit on the tree that should have been picked.
+
+## The packout slider is an argument to `compute_breakeven`
+
+```json
+{"name": "Gala 2026 - ETC", "packout_pct": 62}
+```
+
+One call, one number. The analysis is recomputed at that packout and keeps it, so
+the record always says which packout its stored results answer. `breakeven_packout_pct`
+is the same question read backwards — *"we need 74% out of this block"* is a
+target a packhouse can be given, and a breakeven revenue is not.
+
+## Every line says who classified it
+
+Three sources, best evidence first, stored on every line:
+
+* **Account** — an operator classified the account itself with
+  `breakeven_cost_behavior`, installed on `Account` as a Custom Field. Said once,
+  true for every analysis afterwards.
+* **Override** — this analysis was told to treat one account differently, once,
+  and nothing was written to the Account.
+* **Heuristic** — nobody has said, so the account's name and ERPNext type were
+  read and a guess was made.
+
+The heuristic is genuinely useful *and* genuinely a guess, and the design turns
+on holding both at once. A first run on a real chart of accounts classifies most
+of it correctly and hands back a number in a minute rather than an afternoon —
+and reports how many lines it guessed at, in the result, in
+`computation_warnings`, and again on every read. **A breakeven resting on forty
+guessed classifications is a different object from one resting on none**, and the
+person about to quote it to a lender is entitled to know which they have.
+
+An override naming an account that is not an expense account of the company is
+**refused**, not ignored: a dropped override leaves the account being guessed at
+while the caller believes they classified it, and the result would look identical.
+
+**Income tax is excluded by rule, not by heuristic.** At breakeven there is no
+pre-tax income to tax, so a model carrying the tax line would demand the farm
+cover a liability it does not have.
+
+## What the reads refuse to do
+
+**No breakeven quantity where the contribution margin is not positive.** There is
+no such quantity — every additional box loses money — and the arithmetic limit is
+an enormous number that reads as a hard target. `breakeven_units` comes back
+`null` and the reason is stated. The breakeven **price** is still reported, and
+there it is the number that matters: it says how far the price has to come up
+before volume helps at all.
+
+**No conversion between packages on the market overlay.** A breakeven per 40-lb
+box compared against a USDA quotation per 20-lb carton is out by a factor of two
+and looks entirely plausible. Both packages are reported next to the spread and
+neither is converted, because pack style is a judgement this app has no basis to
+make.
+
+**No writing from a read.** `get_breakeven_sensitivity` answers whatever band it
+is asked for and stores nothing; `compute_breakeven` stores a standard ±10/±20%
+band across all five variables. What is in the register depends on who ran a
+computation, not on who was browsing.
+
+**An edited input goes stale rather than recomputing.** Change the price in the
+Desk and the record flips to `Stale` with its old results intact. A breakeven
+that changed underneath the person reading it, keeping the same `computed_on`, is
+worse than one that says it is out of date.
+
+## The market overlay reads a register, not the internet
+
+USDA AMS Market News publishes shipping point prices — what a district was asking
+f.o.b. — and every quotation this app sees is kept as a `USDA Price Quote`. The
+overlay reads **the register**, which is what makes it work in a farm office
+whose link is down and on a site that has never configured an API key at all. A
+grower with a broker's bid in hand has a better number than any district average,
+and `compute_breakeven(market_price=…)` stores it as its own labelled kind of
+source.
+
+Fetching is opt-in twice over: a MARS API key in settings, and either
+`refresh_usda_prices` with a report slug or the nightly sweep, which **ships
+off**. No report slugs are shipped — AMS identifies reports by slugs an operator
+looks up for the districts they actually ship into, and a list invented here
+would be right for one region and a nightly 404 everywhere else.
+
+A quotation belongs to **no company**. A shipping point price is a fact about a
+market, not about anybody's operation; the records that carry the operation are
+the analyses that read it, and every one of those links to Company and is scoped
+by Frappe exactly as before.

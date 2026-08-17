@@ -833,7 +833,19 @@
   "shadow_log_feed_enabled",
   "allow_list_shadow_log_entries",
   "allow_get_shadow_log_entry",
-  "allow_acknowledge_shadow_log"
+  "allow_acknowledge_shadow_log",
+  "breakeven_section",
+  "allow_get_breakeven_analysis",
+  "allow_list_breakeven_analyses",
+  "allow_get_breakeven_sensitivity",
+  "allow_create_breakeven_analysis",
+  "allow_compute_breakeven",
+  "usda_market_section",
+  "usda_mars_api_key",
+  "usda_api_base_url",
+  "usda_market_col",
+  "enable_usda_price_sweep",
+  "usda_price_reports"
  ],
  "fields": [
   {
@@ -6342,6 +6354,83 @@
    "fieldname": "allow_acknowledge_shadow_log",
    "fieldtype": "Check",
    "label": "Acknowledge Shadow Log"
+  },
+  {
+   "description": "The breakeven calculator. A Breakeven Analysis is a PERSPECTIVE on the chart of accounts the farm already keeps — nothing here posts, nothing is a journal entry, and no number it produces changes what the financial statements say. What it adds is the one thing a chart of accounts cannot hold: which accounts stop mattering when the crop gets bigger. The three reads default ON and none of them ever refuses. The two writes are off until an operator turns them on, and both are 'mutating' because they STORE — the cost lines, the results and the scenario band go onto the analysis, which is what makes this season's breakeven comparable with next season's.",
+   "fieldname": "breakeven_section",
+   "fieldtype": "Section Break",
+   "label": "Breakeven Calculator (v0.87.0)"
+  },
+  {
+   "default": "1",
+   "description": "One analysis in full: the inputs, every cost line with WHO CLASSIFIED IT, the stored scenario band, and the market overlay. It says when its numbers are not answers — a Draft has never been computed and a Stale one had an input changed after the last run. Read-only.",
+   "fieldname": "allow_get_breakeven_analysis",
+   "fieldtype": "Check",
+   "label": "Get Breakeven Analysis"
+  },
+  {
+   "default": "1",
+   "description": "The register, with the headline number on every row — breakeven price, contribution margin, margin of safety. Names the ones that are NOT answers: never computed, stale, and the ones where no volume breaks even at all. Read-only.",
+   "fieldname": "allow_list_breakeven_analyses",
+   "fieldtype": "Check",
+   "label": "List Breakeven Analyses"
+  },
+  {
+   "default": "1",
+   "description": "What-if over ONE variable across a range: price, yield, packout, fixed cost or variable cost. Reports how far the breakeven price moved across the whole band, which is the figure that says whether this is the term worth managing. Stores nothing. Read-only.",
+   "fieldname": "allow_get_breakeven_sensitivity",
+   "fieldtype": "Check",
+   "label": "Get Breakeven Sensitivity"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Register a crop, a volume and a price to model — the record behind 'what price do I need to break even?'. Nothing is posted and nothing is computed: creation and computation have separate switches on purpose.",
+   "fieldname": "allow_create_breakeven_analysis",
+   "fieldtype": "Check",
+   "label": "Create Breakeven Analysis"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING (default OFF). Read the company's expense accounts, sort them into fixed and variable, and answer the question — breakeven units, breakeven revenue, contribution margin per unit, and THE BREAKEVEN PRICE. Mutating because it STORES, not because it posts: the ledger is not touched. This is also where the packout slider lands.",
+   "fieldname": "allow_compute_breakeven",
+   "fieldtype": "Check",
+   "label": "Compute Breakeven"
+  },
+  {
+   "collapsible": 1,
+   "description": "Where the market overlay's prices come from. USDA AMS Market News publishes shipping point prices — what a district was asking f.o.b. — and this app keeps every quotation it sees in the USDA Price Quote register. THE OVERLAY READS THE REGISTER, NOT THE INTERNET, which is what makes it work in a farm office whose link is down and on a site that has never configured a key at all. None of this is needed to compute a breakeven; it answers the second question, 'is the market currently paying that?'",
+   "fieldname": "usda_market_section",
+   "fieldtype": "Section Break",
+   "label": "USDA Market News (v0.87.0)"
+  },
+  {
+   "description": "An API key for the USDA MARS API, obtained free from AMS. Held in a Password field, so it is encrypted at rest and never returned by any tool — the same contract the MCP bearer token above carries. Without one, nothing is ever fetched and the overlay reads whatever quotations are already on the site, including prices somebody typed in from a broker's bid.",
+   "fieldname": "usda_mars_api_key",
+   "fieldtype": "Password",
+   "label": "USDA MARS API Key"
+  },
+  {
+   "description": "Override the MARS API base URL. Leave empty for the shipped default (https://marsapi.ams.usda.gov/services/v1.2). Set it only to pin a different API version or to point at a cache inside your own network.",
+   "fieldname": "usda_api_base_url",
+   "fieldtype": "Data",
+   "label": "USDA API Base URL"
+  },
+  {
+   "fieldname": "usda_market_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Whether the overnight sweep fetches the reports named below. SHIPS OFF, unlike the weather sweep, and the difference is that weather works out of the box against a keyless public API while this does not: a nightly job that cannot authenticate would write a failure to the error log every night on every site that never wanted a market overlay. Turn it on in the same visit as entering the key.",
+   "fieldname": "enable_usda_price_sweep",
+   "fieldtype": "Check",
+   "label": "Enable USDA Price Sweep"
+  },
+  {
+   "description": "Which AMS reports the sweep pulls, by slug, comma- or newline-separated. NO DEFAULTS ARE SHIPPED, deliberately: AMS identifies its reports by slugs an operator looks up for the districts and commodities they actually ship into, and a list invented here would be right for one region and a nightly 404 for everybody else. An unconfigured sweep does nothing and says so.",
+   "fieldname": "usda_price_reports",
+   "fieldtype": "Small Text",
+   "label": "USDA Report Slugs"
   }
  ],
  "index_web_pages_for_search": 0,

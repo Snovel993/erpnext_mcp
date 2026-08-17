@@ -3,6 +3,69 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.87.0 — 2026-08-16 — a fruit farm has two volumes
+
+The breakeven calculator: *what price do I need to break even?* Five tools, four
+doctypes, three Custom Fields on Account, eighty-two tests.
+
+### A textbook breakeven has one volume; an orchard has two
+
+Picking, hauling and field bins are bought for everything that comes off the
+trees. Cartons, packing labour, freight and commission are bought only for what
+packs out. When packout falls the second pile falls with it and the first does
+not — it lands on fewer sellable boxes. So each cost line carries a
+`volume_basis`, every packed box carries `1/p` harvested units of picking, and it
+brings `(1−p)/p` culls' worth of juice money with it.
+
+On the release's own fixture the breakeven is 16.00 a box; at 60% packout it is
+**19.75**. A single-pile model says 21.00, a static one says 16.00 — both wrong,
+both close, and **both look exactly like an answer**.
+
+### The bug this nearly shipped
+
+Turning ledger totals into model rates means dividing by the volume those totals
+correspond to. Re-derive them at whatever the slider currently says and
+`vh/p + vs` collapses to `(Vh + Vs)/S` — the split cancels out of the arithmetic
+entirely while every figure still looks plausible. So `baseline_harvest_units`
+and `baseline_packout_pct` are stored, set on the first computation, and not
+moved by the slider. `compute_breakeven(packout_pct=62)` and
+`get_breakeven_sensitivity` at −22.5% packout now agree to six decimal places,
+and a test asserts it. `rebase_costs` moves the baseline on purpose.
+
+### It says what it guessed
+
+Classification comes from the Account (`breakeven_cost_behavior`, a Custom Field
+this release installs), from a per-analysis override, or from a heuristic over
+the account's name and ERPNext type — and the source is stored on every line. The
+guess count is repeated in the result, in `computation_warnings`, and on every
+read: a breakeven resting on forty guesses is a different object from one resting
+on none. Income tax is excluded **by rule** — at breakeven there is no pre-tax
+income to tax. An override naming an account the company does not have is
+refused, never ignored.
+
+### What the reads refuse
+
+No breakeven quantity where the contribution margin is not positive — there is no
+such quantity, and the arithmetic limit reads as a hard target. No conversion
+between a breakeven per 40-lb box and a quotation per 20-lb carton; both packages
+are reported and neither is converted. No writing from a read. An edited input
+goes **Stale** rather than silently recomputing.
+
+### The market overlay reads a register, not the internet
+
+Every USDA AMS shipping point quotation is kept as a `USDA Price Quote`, so the
+overlay works in a farm office whose link is down and on a site with no API key —
+and can answer whether the crop cleared its breakeven in any of the last three
+weeks. A broker's bid is stored as its own labelled source. Fetching needs a MARS
+key and an explicit report slug; the nightly sweep is the only scheduled job in
+this app that ships **off**, because it is the only one that cannot authenticate
+out of the box. No report slugs are shipped. A quotation belongs to no company.
+
+### Switches
+
+Three reads on, two writes off. Both writes are mutating because they **store**,
+not because they post — nothing here touches the ledger. `create_breakeven_analysis`
+does not compute: the two tools have separate switches.
 ## 0.85.0 — 2026-08-16 — the language a worker reads, and the copy their supervisor keeps
 
 Two features, six tools, two doctypes, one mobile route. They ship together

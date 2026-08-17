@@ -1,0 +1,573 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 18:00:00.000000",
+ "description": "WHAT PRICE DO I NEED TO BREAK EVEN. That is the whole question, and everything on this record exists either to answer it or to say how much the answer can be trusted.\n\nIT IS A PERSPECTIVE ON THE CHART OF ACCOUNTS, NOT A SECOND SET OF BOOKS. The costs come out of the ledger the farm already keeps; what this record adds is the CLASSIFICATION — which accounts stop mattering when the crop gets bigger and which do not — plus the volume and price the grower expects. Nothing here posts, nothing here is a journal entry, and no number on it changes what the financial statements say.\n\nTHE PACKOUT IS THE FIELD THAT MAKES IT AN ORCHARD MODEL RATHER THAN A TEXTBOOK ONE. A factory's breakeven has one volume; a fruit farm has two, because picking is paid on everything that comes off the trees and cartons are only bought for what packs out. Slide the packout down and the picking bill does not fall — it spreads over fewer sellable boxes, which is exactly why a light packout year hurts more than the tonnage suggests. Every cost line therefore says which volume it follows, and `compute_breakeven` treats the two piles differently. A model with one variable pile gets the DIRECTION of a packout change right and the MAGNITUDE wrong, which is the more dangerous of the two errors because it looks like an answer.\n\nEVERY INTERMEDIATE IS STORED, ON PURPOSE. The fixed total, both variable totals, the per-unit variable rate, the contribution margin, the units, the price and the scenario band are all columns rather than things recomputed on read. That is this app's 'Maximal Data Science' rule doing real work: the interesting quantity is almost never this season's breakeven on its own, it is how the breakeven moved between seasons and WHICH TERM MOVED IT — and that comparison only exists if the terms were kept.\n\nSTATUS SAYS WHETHER THE NUMBERS ARE THE INPUTS'. Editing an input marks the record Stale rather than silently recomputing it, because a breakeven that quietly changed underneath the person reading it is worse than one that says it is out of date.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "analysis_name",
+  "company",
+  "fiscal_year",
+  "crop_type",
+  "identity_col",
+  "unit_label",
+  "currency",
+  "status",
+  "cost_center",
+  "volume_section",
+  "expected_harvest_units",
+  "packout_pct",
+  "volume_col",
+  "expected_price",
+  "cull_credit_per_unit",
+  "sellable_units",
+  "window_section",
+  "cost_source",
+  "from_date",
+  "window_col",
+  "to_date",
+  "cost_lines_section",
+  "cost_lines",
+  "result_section",
+  "total_fixed_cost",
+  "total_variable_cost",
+  "variable_cost_per_sellable_unit",
+  "contribution_margin_per_unit",
+  "contribution_margin_ratio",
+  "result_col",
+  "breakeven_units",
+  "breakeven_harvest_units",
+  "breakeven_revenue",
+  "breakeven_price",
+  "breakeven_packout_pct",
+  "projected_profit",
+  "margin_of_safety_pct",
+  "detail_section",
+  "total_variable_harvest_cost",
+  "total_variable_sellable_cost",
+  "rate_harvest",
+  "rate_sellable",
+  "detail_col",
+  "total_excluded_cost",
+  "cull_credit_total",
+  "baseline_harvest_units",
+  "baseline_packout_pct",
+  "usda_section",
+  "usda_commodity",
+  "usda_variety",
+  "usda_market",
+  "usda_col",
+  "usda_quote",
+  "usda_price",
+  "usda_package",
+  "usda_report_date",
+  "usda_spread",
+  "usda_verdict",
+  "scenarios_section",
+  "scenarios",
+  "audit_section",
+  "computed_on",
+  "computed_by",
+  "audit_col",
+  "computation_warnings",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What this analysis is called, in the grower's own words — '2026 Gala, Southgate block'.",
+   "fieldname": "analysis_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Analysis Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The year whose costs this reads. It is also where `from_date` and `to_date` default from, so an analysis for a whole season is three fields rather than five.",
+   "fieldname": "fiscal_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Fiscal Year",
+   "options": "Fiscal Year",
+   "reqd": 1
+  },
+  {
+   "description": "What is being grown — 'Gala', 'Bing cherries', 'Bartlett'. FREE TEXT AND NOT A LINK, for the same reason `Standard Cost.subject` is: a breakeven is run on a crop long before that crop is an Item on anybody's site, and forcing 'Bing cherries' to become an Item to be modelled would put a row in the stock module that has no business there.",
+   "fieldname": "crop_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Crop",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Box",
+   "description": "THE UNIT EVERY NUMBER ON THIS RECORD IS IN, both sides of the packout. Volumes are stated in sellable-equivalent units: `expected_harvest_units` is what the block would make at a perfect packout, and `packout_pct` is the share that actually gets there. ONE UNIT THROUGHOUT rather than bins in and boxes out, because two units means a conversion factor, and a wrong conversion factor is the single commonest way a farm budget is out by a multiple while looking entirely reasonable.",
+   "fieldname": "unit_label",
+   "fieldtype": "Select",
+   "label": "Unit",
+   "options": "Box\nBin\nCarton\nTon\nPound\nCase\nUnit"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft — never computed. Computed — the results below are this record's inputs run through the model. STALE — an input changed after the last run, so the results are the OLD inputs' answer. Stale rather than a silent recompute, because a breakeven that changed underneath the person reading it is worse than one that admits it is out of date.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nComputed\nStale",
+   "read_only": 1
+  },
+  {
+   "description": "Narrow the cost pull to one cost center and its descendants — the block, the packhouse, the orchard division. Blank reads the whole company's expense ledger, which is right for a single-enterprise farm and wrong for one that also runs a cattle operation through the same books.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "volume_section",
+   "fieldtype": "Section Break",
+   "label": "Volume and price"
+  },
+  {
+   "description": "What the block is expected to make, in sellable-equivalent units, BEFORE packout. Cull and pack-out loss come off it via `packout_pct` — so this is the gross crop, the number a field estimate produces.",
+   "fieldname": "expected_harvest_units",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Expected Harvest",
+   "precision": "3",
+   "reqd": 1
+  },
+  {
+   "default": "100",
+   "description": "THE SLIDER. What share of the harvest is sellable as fresh fruit. 100 means everything packs; 60 is a hail year. Moving it does three things at once, which is why it deserves its own control rather than being folded into the yield: it shrinks the revenue, it shrinks the packing-basis costs with it, and it leaves the harvest-basis costs exactly where they were — so those spread over fewer boxes and the breakeven price per box climbs faster than the volume falls.",
+   "fieldname": "packout_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Packout %",
+   "reqd": 1
+  },
+  {
+   "fieldname": "volume_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The NET price per sellable unit the grower expects — after commission, after freight if the sale is delivered, after the packing charge if it is deducted from the return. Whatever the cost lines already account for must not be deducted here as well, and the commonest way a breakeven comes out optimistic is counting the commission twice.",
+   "fieldname": "expected_price",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Expected Price"
+  },
+  {
+   "default": "0",
+   "description": "What a culled unit returns — juice, processor, cattle feed — per unit of harvest that did NOT pack out. Usually small and almost never zero, and it is the term that stops a packout slider from overstating a bad year: 30% culls at juice price is not 30% of the crop earning nothing.",
+   "fieldname": "cull_credit_per_unit",
+   "fieldtype": "Currency",
+   "label": "Cull Credit / Unit"
+  },
+  {
+   "description": "Harvest times packout. Derived, and stored because every per-unit figure below is divided by it.",
+   "fieldname": "sellable_units",
+   "fieldtype": "Float",
+   "label": "Sellable Units",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "window_section",
+   "fieldtype": "Section Break",
+   "label": "Where the costs come from"
+  },
+  {
+   "default": "Ledger Actuals",
+   "description": "Ledger Actuals — posted GL entries in the window, which is what the farm actually spent. Budget — the company's Budget rows for the year, which is what it planned to. Actuals answer 'did we break even'; Budget answers 'will we', and a season that has not happened yet has no actuals to read.",
+   "fieldname": "cost_source",
+   "fieldtype": "Select",
+   "label": "Cost Source",
+   "options": "Ledger Actuals\nBudget"
+  },
+  {
+   "description": "First day of the cost window, inclusive. Defaults to the fiscal year's start.",
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "From Date"
+  },
+  {
+   "fieldname": "window_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Last day, inclusive. Defaults to the fiscal year's end.",
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To Date"
+  },
+  {
+   "fieldname": "cost_lines_section",
+   "fieldtype": "Section Break",
+   "label": "Cost lines"
+  },
+  {
+   "description": "One row per expense account in the window, each carrying which pile it went into and WHO DECIDED. Written by `compute_breakeven` and kept, so next season's analysis can be diffed against this one account by account.",
+   "fieldname": "cost_lines",
+   "fieldtype": "Table",
+   "label": "Cost Lines",
+   "options": "Breakeven Cost Line"
+  },
+  {
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "description": "Everything that does not move with the crop. The numerator of the breakeven.",
+   "fieldname": "total_fixed_cost",
+   "fieldtype": "Currency",
+   "label": "Fixed Cost",
+   "read_only": 1
+  },
+  {
+   "description": "Both variable piles added together, at THIS analysis's volumes. Only the sellable-basis half moves when the packout slider moves, which is why the two are also reported separately below.",
+   "fieldname": "total_variable_cost",
+   "fieldtype": "Currency",
+   "label": "Variable Cost",
+   "read_only": 1
+  },
+  {
+   "description": "What one more sellable unit costs, INCLUDING its share of the picking and hauling of the culls that came with it. That inclusion is the packout doing its work: at 60% packout every packed box carries the harvest cost of 1.67 boxes.",
+   "fieldname": "variable_cost_per_sellable_unit",
+   "fieldtype": "Currency",
+   "label": "Variable Cost / Unit",
+   "read_only": 1
+  },
+  {
+   "description": "Price minus variable cost per sellable unit, plus the cull credit each sellable unit brings with it. WHAT ONE BOX CONTRIBUTES TOWARD THE FIXED COSTS — and if it is negative, no volume will ever cover them, which is a different and much worse finding than a high breakeven.",
+   "fieldname": "contribution_margin_per_unit",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "CM / Unit",
+   "read_only": 1
+  },
+  {
+   "description": "Contribution margin as a share of price. The figure to compare across crops, since dollars per box do not compare between apples and cherries.",
+   "fieldname": "contribution_margin_ratio",
+   "fieldtype": "Percent",
+   "label": "CM Ratio",
+   "read_only": 1
+  },
+  {
+   "fieldname": "result_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Sellable units that must be sold at the expected price to cover the fixed cost. Blank where the contribution margin is not positive, because there is no such quantity.",
+   "fieldname": "breakeven_units",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Breakeven Units",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "description": "The same point expressed as fruit ON THE TREE — breakeven units divided by the packout. It is the number a grower can actually walk out and look at.",
+   "fieldname": "breakeven_harvest_units",
+   "fieldtype": "Float",
+   "label": "Breakeven Harvest",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "breakeven_revenue",
+   "fieldtype": "Currency",
+   "label": "Breakeven Revenue",
+   "read_only": 1
+  },
+  {
+   "description": "THE ANSWER TO THE QUESTION THE TOOL EXISTS FOR: the price per sellable unit that covers every cost at the expected harvest and packout. Unlike the breakeven quantity this one exists even when the contribution margin is negative — indeed that is when it matters most, because it says how far the price has to come up before any volume helps.",
+   "fieldname": "breakeven_price",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Breakeven Price",
+   "read_only": 1
+  },
+  {
+   "description": "The packout that would break even at the expected price and harvest — the other way to read the slider. 'We need 74% out of this block' is a target a packhouse can be given; a breakeven revenue is not.",
+   "fieldname": "breakeven_packout_pct",
+   "fieldtype": "Percent",
+   "label": "Breakeven Packout %",
+   "read_only": 1
+  },
+  {
+   "description": "Profit or loss at the expected harvest, packout and price. Negative is shown as a loss rather than as a zero.",
+   "fieldname": "projected_profit",
+   "fieldtype": "Currency",
+   "label": "Projected P/L",
+   "read_only": 1
+  },
+  {
+   "description": "How far the expected volume sits above the breakeven volume, as a share of the expected volume. The room for the season to go wrong.",
+   "fieldname": "margin_of_safety_pct",
+   "fieldtype": "Percent",
+   "label": "Margin of Safety %",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "The two variable piles"
+  },
+  {
+   "description": "Costs that follow everything off the trees — picking, hauling, field bins. THIS PILE DOES NOT SHRINK WHEN PACKOUT FALLS, which is the whole reason it is counted separately: the same fruit was picked either way, and the bill simply lands on fewer boxes.",
+   "fieldname": "total_variable_harvest_cost",
+   "fieldtype": "Currency",
+   "label": "Harvest-basis Variable",
+   "read_only": 1
+  },
+  {
+   "description": "Costs that follow only what packs out — cartons, packing labour, freight, commission. This pile DOES shrink with the packout: fewer boxes means fewer cartons bought.",
+   "fieldname": "total_variable_sellable_cost",
+   "fieldtype": "Currency",
+   "label": "Sellable-basis Variable",
+   "read_only": 1
+  },
+  {
+   "description": "The harvest-basis cost per HARVESTED unit, derived once at the baseline below. The model works in rates rather than totals, and this is one of the two: re-deriving it at whatever the slider currently says would cancel the harvest/sellable distinction out of the arithmetic completely, leaving every figure looking plausible and the packout slider meaningless.",
+   "fieldname": "rate_harvest",
+   "fieldtype": "Currency",
+   "label": "Harvest-basis Rate",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "description": "The sellable-basis cost per SELLABLE unit, derived once at the baseline below.",
+   "fieldname": "rate_sellable",
+   "fieldtype": "Currency",
+   "label": "Sellable-basis Rate",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Money in accounts the model was told to leave out — interest, income tax, anything the grower judged not to belong to this crop. REPORTED RATHER THAN HIDDEN: an exclusion nobody can see is how a breakeven quietly gets easier to hit.",
+   "fieldname": "total_excluded_cost",
+   "fieldtype": "Currency",
+   "label": "Excluded Cost",
+   "read_only": 1
+  },
+  {
+   "description": "What the culls are expected to return in total. Counted as a credit against cost rather than as revenue, so the contribution margin stays a per-sellable-unit figure.",
+   "fieldname": "cull_credit_total",
+   "fieldtype": "Currency",
+   "label": "Cull Credit Total",
+   "read_only": 1
+  },
+  {
+   "description": "The harvest the cost rates were derived at. Set on the FIRST computation and not moved by the slider afterwards — that is the mechanism that makes sliding the packout to 62% mean 'the same money per carton, over fewer cartons' rather than 'the same money, over fewer cartons'. Pass rebase_costs to compute_breakeven to move it once the season's real crop is known; doing so changes every per-unit figure here, which is why it is a decision rather than a side effect.",
+   "fieldname": "baseline_harvest_units",
+   "fieldtype": "Float",
+   "label": "Baseline Harvest",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "description": "The packout the cost rates were derived at. Same rule as the baseline harvest above, and together they are why get_breakeven_sensitivity's packout rows agree exactly with what compute_breakeven stores at the same packout. Two tools answering one question with two numbers would be worse than either being slightly wrong.",
+   "fieldname": "baseline_packout_pct",
+   "fieldtype": "Percent",
+   "label": "Baseline Packout %",
+   "read_only": 1
+  },
+  {
+   "fieldname": "usda_section",
+   "fieldtype": "Section Break",
+   "label": "Market overlay (USDA shipping point)"
+  },
+  {
+   "description": "The commodity to read the market in, as USDA AMS names it — 'APPLES', 'CHERRIES'. Blank switches the overlay off, and an analysis with no overlay is a complete analysis: the breakeven does not depend on it.",
+   "fieldname": "usda_commodity",
+   "fieldtype": "Data",
+   "label": "USDA Commodity"
+  },
+  {
+   "fieldname": "usda_variety",
+   "fieldtype": "Data",
+   "label": "USDA Variety"
+  },
+  {
+   "description": "The shipping point district to read. Blank takes the most recent quote for the commodity and variety whatever district it came from, and says which one it used.",
+   "fieldname": "usda_market",
+   "fieldtype": "Data",
+   "label": "USDA Market"
+  },
+  {
+   "fieldname": "usda_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The exact quotation the overlay read. A LINK RATHER THAN A COPIED NUMBER, so anybody can open it and see the band, the package and the report it came out of.",
+   "fieldname": "usda_quote",
+   "fieldtype": "Link",
+   "label": "Quote",
+   "options": "USDA Price Quote",
+   "read_only": 1
+  },
+  {
+   "description": "The market price the overlay compared against — the midpoint of the quote's mostly band where it has one, and of its low-to-high range where it does not.",
+   "fieldname": "usda_price",
+   "fieldtype": "Currency",
+   "label": "Market Price",
+   "read_only": 1
+  },
+  {
+   "description": "The package the market price is FOR, copied from the quote. THE FIELD THAT SAYS WHETHER THE COMPARISON IS VALID: a breakeven per 40-lb box against a price per 20-lb carton is out by a factor of two and looks entirely plausible. This app reports the package and never converts it, because pack style is a judgement it has no basis to make.",
+   "fieldname": "usda_package",
+   "fieldtype": "Data",
+   "label": "Market Package",
+   "read_only": 1
+  },
+  {
+   "fieldname": "usda_report_date",
+   "fieldtype": "Date",
+   "label": "Quote Date",
+   "read_only": 1
+  },
+  {
+   "description": "Market price minus breakeven price. Positive is money; negative is the amount per unit the market is short of covering this crop's costs.",
+   "fieldname": "usda_spread",
+   "fieldtype": "Currency",
+   "label": "Spread vs Breakeven",
+   "read_only": 1
+  },
+  {
+   "description": "The overlay in one sentence, including the reason when there is no overlay at all. 'No quote on file' is an answer; a silent zero would not be.",
+   "fieldname": "usda_verdict",
+   "fieldtype": "Small Text",
+   "label": "Market Verdict",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "scenarios_section",
+   "fieldtype": "Section Break",
+   "label": "Stored scenarios"
+  },
+  {
+   "description": "The standard sensitivity band, rewritten by every `compute_breakeven`. Kept so that next season somebody can ask which of this season's terms the breakeven was actually sensitive to, rather than recomputing a derivative from inputs that have since changed.",
+   "fieldname": "scenarios",
+   "fieldtype": "Table",
+   "label": "Scenarios",
+   "options": "Breakeven Scenario"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "fieldname": "computed_on",
+   "fieldtype": "Datetime",
+   "label": "Computed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "computed_by",
+   "fieldtype": "Data",
+   "label": "Computed By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "audit_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What the last run could not do, in full — accounts it had to guess at, a window with no postings in it, an overlay with no quote. NEVER EMPTIED BY A SUCCESSFUL RUN THAT STILL HAD WARNINGS: a breakeven resting on twelve guessed classifications is a different object from one resting on none, and the only place that difference is visible is here.",
+   "fieldname": "computation_warnings",
+   "fieldtype": "Small Text",
+   "label": "Computation Warnings",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Breakeven Analysis",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "analysis_name,company,crop_type,fiscal_year",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

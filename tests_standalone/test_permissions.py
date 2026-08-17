@@ -280,6 +280,21 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# names a company and IS scoped by Frappe, because it carries a person's
 		# work in a snapshot — a manager at one entity has no business reading
 		# another's crew, which is precisely the distinction this list draws.
+		# THE v0.87.0 ADDITION IS THE SAME ARGUMENT ABOUT A MARKET. A USDA Price
+		# Quote is what a shipping point district was ASKING for a commodity on a
+		# day — a published fact about a market, not about anybody's operation. It
+		# names no block, no cost, no customer and no crop anybody owns. The
+		# records that carry those are the Breakeven ANALYSES that read it, every
+		# one of which links to Company and is scoped by Frappe exactly as before.
+		#
+		# Scoping it would be wrong rather than merely unnecessary, for the reason
+		# the Merchant Alias paragraph gives: the quotation is public and
+		# site-wide, so a per-company copy would mean the same published number
+		# stored once per entity — two copies of one fact that will eventually
+		# disagree — or a quotation owned by one entity quietly overlaying
+		# another's analysis. And the register's whole design rests on commodity,
+		# variety, market, package and date being the identity, which a company
+		# column would break by making that key non-unique.
 		self.assertEqual(
 			sorted(unscoped),
 			[
@@ -299,6 +314,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"State Tax Table",
 				"Trade Document Template",
 				"Training Type",
+				"USDA Price Quote",
 				"Wizard Definition",
 			],
 		)

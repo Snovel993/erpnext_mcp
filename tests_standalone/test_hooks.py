@@ -524,6 +524,17 @@ class TheScheduledJobs(unittest.TestCase):
 		that already has one open, which is what makes a nightly job safe to
 		leave running rather than a nightly source of duplicates. One entry that
 		iterates every company, same as the four crons above it.
+
+		The USDA price sweep arrived in v0.87.0 as the twelfth, at five — last of
+		the night jobs, because it is the only one whose whole purpose is to have
+		an answer waiting before anybody asks, and a grower reads a market at
+		breakfast. IT IS THE THIRD JOB HERE THAT TALKS TO SOMEBODY ELSE'S SERVER
+		AND THE ONLY ONE THAT SHIPS SWITCHED OFF: the weather and the regulation
+		feeds work against keyless public sources and this needs an AMS API key,
+		so an always-on entry would log an authentication failure every night on
+		every site that never wanted a market overlay. One entry that iterates
+		the report slugs an operator configured; with none configured it does
+		nothing and says so rather than guessing at a report.
 		"""
 		self.assertEqual(
 			hooks.scheduler_events,
@@ -535,6 +546,7 @@ class TheScheduledJobs(unittest.TestCase):
 					"15 3 * * *": ["erpnext_mcp.tools.budget.refresh_all_active_budgets"],
 					"0 4 * * *": ["erpnext_mcp.services.regulation_feed.sweep_due_feeds"],
 					"30 4 * * *": ["erpnext_mcp.tools.maintenance.sweep_due_maintenance"],
+					"0 5 * * *": ["erpnext_mcp.services.usda_prices.sweep_configured_reports"],
 				},
 				"hourly": [
 					"erpnext_mcp.alerts.sweep",

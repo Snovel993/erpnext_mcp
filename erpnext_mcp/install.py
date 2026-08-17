@@ -153,6 +153,7 @@ def after_install() -> None:
 	_bank_pairing_fields()
 	_receipt_intelligence_fields()
 	_translations()
+	_breakeven_account_fields()
 	frappe.db.commit()
 
 
@@ -191,6 +192,7 @@ def after_migrate() -> None:
 	_trade_documents()
 	_reporting_templates()
 	_translations()
+	_breakeven_account_fields()
 
 
 def _translations() -> None:
@@ -1746,3 +1748,39 @@ def _farm_task_templates() -> None:
 		)
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed farm task template {failure.get('name')} — {failure.get('reason')}")
+
+
+def _breakeven_account_fields() -> None:
+	"""Give Account the three columns a cost classification lives in. v0.87.0.
+
+	The seventh place this app installs Custom Fields at migrate time, and it
+	extends somebody else's doctype for the reason the earlier ones do: an Account
+	is ERPNext's, a farm may never run a breakeven, and three shipped fields on a
+	core doctype for a feature that site will not use is schema nobody asked for. A
+	Custom Field is something the operator who decided against it can remove.
+
+	`tools/breakeven.ensure_account_behavior_fields` creates the same columns
+	lazily on first use, so a bench that pulled the code without running the
+	installer classifies an account the first time somebody says so. Doing it here
+	means they exist before anybody needs them, which is what makes them visible on
+	the Account form and filterable in the Desk.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import breakeven
+
+		if not frappe.db.exists("DocType", "Account"):
+			return
+		if breakeven.ensure_account_behavior_fields():
+			return
+		print(
+			"erpnext_mcp: Account did not take the three breakeven classification Custom Fields. "
+			"Every breakeven still COMPUTES and the heuristic still runs; the only loss is that a "
+			"classification cannot be made to stick between analyses, so each one guesses afresh "
+			"unless it is passed cost_overrides. Every result says so rather than pretending "
+			"otherwise."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: the Account breakeven fields were not installed — {type(exc).__name__}: {exc}")

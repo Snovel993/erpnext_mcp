@@ -53,6 +53,7 @@ from .tools import (
 	badges,
 	banking,
 	banking_bridge,
+	breakeven,
 	bucket_log,
 	budget,
 	calendar,
@@ -385,6 +386,14 @@ _BIO_REQUIRES = (
 _STANDARD_REQUIRES = (
 	"the Standard Cost doctype, which ships with erpnext_mcp — run `bench migrate` after "
 	"installing v0.80.0"
+)
+#: v0.87.0. The breakeven calculator's own register. Named separately from the
+#: costing ones above for the reason the comment there gives: a site that
+#: migrated one register and not another should lose the tools for the one that
+#: is missing rather than the whole phase.
+_BREAKEVEN_REQUIRES = (
+	"the Breakeven Analysis doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing v0.87.0"
 )
 #: v0.84.0, split three ways for the reason the phase-3 registers are. The
 #: activity register is usable on its own — an operation can write down what it
@@ -22558,6 +22567,240 @@ TOOLS = {
 		title="Acknowledge a shadow log entry",
 		available=_needs_doctype("Shadow Log Entry"),
 		requires="the Shadow Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── the breakeven calculator, v0.87.0 ────────────────────────────────────
+	"create_breakeven_analysis": _tool(
+		breakeven.create_breakeven_analysis,
+		"MUTATING (default OFF). Register a crop, a volume and a price to model — "
+		"the record behind 'what price do I need to break even?'\n\n"
+		"NOTHING IS POSTED AND NOTHING IS COMPUTED. A Breakeven Analysis is a "
+		"PERSPECTIVE on the ledger the farm already keeps, not a second set of books: "
+		"no journal entry, no effect on any financial statement. Creation does not "
+		"compute either — `compute_breakeven` has its own switch, and a create that "
+		"ran the computation would hand an operator a tool they had not enabled.\n\n"
+		"ONE UNIT THROUGHOUT, BOTH SIDES OF THE PACKOUT. `expected_harvest_units` is "
+		"what the block makes BEFORE packout, in sellable-equivalents, and "
+		"`packout_pct` is the share that gets there. Bins in and boxes out would mean "
+		"a conversion factor, and a wrong conversion factor is the commonest way a "
+		"farm budget comes out wrong by a multiple while looking reasonable.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The year whose costs this reads. Also where the cost window defaults from."),
+			"crop_type": _field(
+				_STRING,
+				"What is being grown — 'Gala', 'Bing cherries'. Free text, not a link: a "
+				"breakeven is run on a crop long before that crop is an Item on anybody's site.",
+			),
+			"analysis_name": _field(_STRING, "What to call it. Defaults to '<crop> <fiscal year>'."),
+			"expected_harvest_units": _field(
+				_NUMBER,
+				"What the block is expected to make BEFORE packout, in sellable-equivalent units. "
+				"The gross crop — a field estimate, not a packout figure.",
+			),
+			"packout_pct": _field(
+				_NUMBER,
+				"THE SLIDER. What share of the harvest is sellable as fresh fruit. Default 100. "
+				"Moving it shrinks the revenue, shrinks the packing-basis costs with it, and "
+				"leaves the harvest-basis costs exactly where they were.",
+			),
+			"expected_price": _field(
+				_NUMBER,
+				"The NET price per sellable unit expected — after commission and freight where "
+				"the cost lines do not already carry them. Counting the commission twice is the "
+				"commonest way a breakeven comes out optimistic.",
+			),
+			"cull_credit_per_unit": _field(
+				_NUMBER,
+				"What a culled unit returns — juice, processor, feed. Default 0, and almost never "
+				"truly zero: 30% culls at juice price is not 30% of the crop earning nothing.",
+			),
+			"unit_label": _field(_STRING, "Box (default), Bin, Carton, Ton, Pound, Case or Unit."),
+			"cost_source": _field(
+				_STRING,
+				"Ledger Actuals (default) — posted GL entries in the window, what was actually "
+				"spent. Budget — this app's Budget rows, which is what a season that has not "
+				"happened yet has instead.",
+			),
+			"cost_center": _field(
+				_STRING,
+				"Narrow the cost pull to one cost center AND ITS DESCENDANTS. Blank reads the "
+				"whole company's expense ledger, which is wrong for a farm that also runs a "
+				"cattle operation through the same books.",
+			),
+			"from_date": _field(_STRING, "YYYY-MM-DD. Defaults to the fiscal year's start."),
+			"to_date": _field(_STRING, "YYYY-MM-DD. Defaults to the fiscal year's end."),
+			"usda_commodity": _field(
+				_STRING,
+				"The commodity to read the market in, as USDA AMS names it — 'APPLES'. Blank "
+				"switches the market overlay off; the breakeven does not depend on it.",
+			),
+			"usda_variety": _field(_STRING, "'GALA'. Narrows the overlay."),
+			"usda_market": _field(_STRING, "The shipping point district. Blank takes any."),
+			"currency": _field(_STRING, "Defaults to the company's."),
+			"notes": _field(_STRING, "Anything else about this model."),
+		},
+		required=("fiscal_year", "crop_type", "expected_harvest_units"),
+		mutating=True,
+		title="Create breakeven analysis",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"compute_breakeven": _tool(
+		breakeven.compute_breakeven,
+		"MUTATING (default OFF). Read the company's expense accounts, sort them into "
+		"fixed and variable, and answer the question — breakeven units, breakeven "
+		"revenue, contribution margin per unit, and THE BREAKEVEN PRICE.\n\n"
+		"MUTATING BECAUSE IT STORES, NOT BECAUSE IT POSTS. Nothing touches the "
+		"ledger; what it writes is the cost lines, the results and a standard "
+		"scenario band onto the analysis itself. That storage is the point — a "
+		"breakeven whose intermediates were thrown away can never be compared with "
+		"next season's.\n\n"
+		"THE PACKOUT SLIDER IS THE `packout_pct` ARGUMENT. Pass it and the analysis "
+		"is recomputed at that packout and keeps it. Every packed box carries 1/p "
+		"harvested units of picking with it, so a light packout raises the breakeven "
+		"price faster than it lowers the volume — which a model with one variable "
+		"pile gets directionally right and numerically wrong.\n\n"
+		"IT SAYS WHAT IT GUESSED. Accounts nobody has classified are sorted by a "
+		"heuristic over the account's name and ERPNext type, and every such line is "
+		"labelled `Heuristic` with the count repeated in the result. A breakeven "
+		"resting on forty guesses is a different object from one resting on none.\n\n"
+		"NO BREAKEVEN QUANTITY WHERE THE CONTRIBUTION MARGIN IS NOT POSITIVE — there "
+		"is no such quantity, and the arithmetic limit would read as a hard target. "
+		"The breakeven PRICE is still reported and is the number that matters there.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+			"packout_pct": _field(
+				_NUMBER,
+				"THE SLIDER. Recompute at this packout and keep it. Omit to use the stored figure.",
+			),
+			"expected_price": _field(_NUMBER, "Recompute at this price and keep it."),
+			"expected_harvest_units": _field(_NUMBER, "Recompute at this crop and keep it."),
+			"cull_credit_per_unit": _field(_NUMBER, "Recompute at this cull return and keep it."),
+			"cost_source": _field(_STRING, "Ledger Actuals or Budget. Omit to keep the stored choice."),
+			"rebase_costs": _field(
+				_BOOLEAN,
+				"Re-derive the cost RATES at the current harvest and packout, replacing the "
+				"baseline they were first derived at. Default false, and the default is the "
+				"load-bearing part: rates fixed at a stated volume are what make sliding the "
+				"packout mean 'the same money per carton over fewer cartons', and what makes this "
+				"tool agree with get_breakeven_sensitivity at the same packout. Set it once the "
+				"season's real crop and real packout are known — it changes every per-unit figure "
+				"on the record, so a comparison against an earlier run is then comparing two "
+				"different models.",
+			),
+			"cost_overrides": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'Classify accounts for THIS analysis only, without writing to the Account: '
+				'[{"account": "5110 - Picking - OML", "cost_behavior": "Variable", '
+				'"volume_basis": "Harvested", "variable_pct": 0, "reason": "piece rate"}]. '
+				"Behaviors: Fixed, Variable, Mixed, Excluded. Bases: Harvested (everything off "
+				"the trees) or Sellable (only what packs out). An override naming an account that "
+				"is not an expense account of this company is REFUSED rather than ignored — a "
+				"dropped override leaves the account being guessed at while you believe you "
+				"classified it.",
+			),
+			"market_price": _field(
+				_NUMBER,
+				"A price you were actually quoted, per package. Stored as a quotation of its own "
+				"kind and used for the overlay. A broker's bid in hand is a better number than "
+				"any district average, and it is labelled so nobody mistakes the two.",
+			),
+			"market_price_date": _field(_STRING, "YYYY-MM-DD for that quote. Defaults to today."),
+			"market_package": _field(_STRING, "What that price is FOR — '40 lb carton'. Defaults to the unit label."),
+			"market_price_source": _field(_STRING, "Manual (default) or Broker Quote."),
+			"refresh_usda_prices": _field(
+				_BOOLEAN,
+				"Fetch fresh quotations from USDA AMS Market News before overlaying. Needs a MARS "
+				"API key in settings AND `usda_report_slug`. Default false: the overlay reads the "
+				"quotations already on the site, which is what makes it work in a farm office "
+				"whose internet is down.",
+			),
+			"usda_report_slug": _field(
+				_STRING,
+				"Which AMS report to fetch. This app ships no default slugs — one invented here "
+				"would be right for one district and a 404 everywhere else.",
+			),
+			"usda_commodity": _field(_STRING, "Set or change the overlay's commodity."),
+			"usda_variety": _field(_STRING, "Set or change the overlay's variety."),
+			"usda_market": _field(_STRING, "Set or change the overlay's district."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Compute breakeven",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"get_breakeven_analysis": _tool(
+		breakeven.get_breakeven_analysis,
+		"One analysis in full: the inputs, every cost line with WHO CLASSIFIED IT, "
+		"the stored scenario band, and the market overlay. Read-only.\n\n"
+		"IT SAYS WHEN ITS NUMBERS ARE NOT ANSWERS. A Draft has never been computed "
+		"and its results are zeros; a STALE one had an input changed after the last "
+		"run, so its results answer the old question. Both carry a full set of "
+		"numeric columns that read exactly like a live result, which is why the "
+		"status is reported rather than left to be noticed.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+		},
+		required=("name",),
+		title="Get breakeven analysis",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"list_breakeven_analyses": _tool(
+		breakeven.list_breakeven_analyses,
+		"The register, with the headline number on every row — breakeven price, "
+		"contribution margin, margin of safety. Names the ones that are NOT answers: "
+		"never computed, stale, and the ones where no volume breaks even at all. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "One season's analyses."),
+			"crop_type": _field(_STRING, "One crop, across seasons — which is the comparison worth having."),
+			"status": _field(_STRING, "Draft, Computed or Stale."),
+			"cost_source": _field(_STRING, "Ledger Actuals or Budget."),
+			"limit": _LIMIT,
+		},
+		title="List breakeven analyses",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"get_breakeven_sensitivity": _tool(
+		breakeven.get_breakeven_sensitivity,
+		"What-if over ONE variable across a range: price, yield, packout, fixed cost "
+		"or variable cost. Returns the breakeven and the profit at each point, plus "
+		"HOW FAR THE BREAKEVEN PRICE MOVED across the whole band — which is the "
+		"figure that says whether this is the term worth managing. Read-only.\n\n"
+		"ONE VARIABLE AT A TIME, deliberately: a table that moved two would not say "
+		"which of them the breakeven was sensitive to.\n\n"
+		"STORES NOTHING. `compute_breakeven` writes a standard band onto the record; "
+		"this answers whatever band is asked for and leaves the register alone, so "
+		"what is stored depends on who ran a computation rather than who was "
+		"browsing. It reads the STORED cost piles, so an analysis that has never "
+		"been computed is refused rather than answered from zeros.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+			"variable": _field(
+				_STRING,
+				"price, yield, packout, fixed_cost or variable_cost. Default price. NOTE that "
+				"moving the yield scales BOTH variable piles — a bigger crop costs more to pick "
+				"and more to pack — while moving the packout scales only the packing pile.",
+			),
+			"range": _field(
+				{"type": "array", "items": {"type": "number"}},
+				"Percentage changes to model: [-20, -10, 0, 10, 20], which is the default. Up to "
+				"50 points. Zero belongs in the list — the unchanged case is what the rest are "
+				"read against.",
+			),
+		},
+		required=("name",),
+		title="Get breakeven sensitivity",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
 	),
 }
 

@@ -1591,6 +1591,16 @@ APP_DOCTYPES = {
 	# `tools/translations.py` and `tools/shadow_log.py`.
 	"Farm Translation": "farm_translation",
 	"Shadow Log Entry": "shadow_log_entry",
+	# v0.87.0, the breakeven calculator. The analysis is a PERSPECTIVE on the
+	# chart of accounts — nothing it holds is posted — and the two child tables
+	# are what make it comparable across seasons: one line per account with WHO
+	# classified it, and the stored what-if band. `USDA Price Quote` is the
+	# market register the overlay reads; it links to no Company because a
+	# shipping point price belongs to no operation.
+	"Breakeven Analysis": "breakeven_analysis",
+	"Breakeven Cost Line": "breakeven_cost_line",
+	"Breakeven Scenario": "breakeven_scenario",
+	"USDA Price Quote": "usda_price_quote",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

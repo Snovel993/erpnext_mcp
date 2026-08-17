@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 18:00:00.000000",
+ "description": "ONE EXPENSE ACCOUNT, AND WHAT ITS MONEY DOES WHEN THE CROP GETS BIGGER. A breakeven is arithmetic on two piles, and the whole difficulty of the arithmetic is deciding which pile an account belongs in — orchard rent does not care how many boxes came off the block and picking labour cares about nothing else. The line is stored rather than recomputed on every read because the CLASSIFICATION is a judgement somebody made on a day, and a report that silently reclassified an account between two runs would move a farm's breakeven with no record of why.\n\nTHE SECOND COLUMN IS THE ONE PEOPLE FORGET. A variable cost is not one thing on a fruit farm: picking and hauling scale with what came OFF THE TREES, and packing, boxes, freight and commission scale with what actually PACKED OUT. When packout falls, the first pile spreads over fewer sellable boxes and the second shrinks with them, and a model with one variable pile gets the direction of that right and the magnitude wrong.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "account",
+  "account_name",
+  "amount",
+  "cost_behavior",
+  "volume_basis",
+  "variable_pct",
+  "fixed_amount",
+  "variable_amount",
+  "classification_source",
+  "basis_note"
+ ],
+ "fields": [
+  {
+   "description": "The GL account this money sat in.",
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Account",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "description": "The account's name as it read when this analysis was computed. STORED RATHER THAN JOINED, because a chart gets renamed and a two-season cost comparison whose account labels silently changed underneath it is a comparison nobody can check.",
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "label": "Account Name"
+  },
+  {
+   "description": "What landed in the account over the analysis window.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount"
+  },
+  {
+   "default": "Fixed",
+   "description": "Which pile. FIXED does not move with volume — rent, insurance, the office. VARIABLE moves with it — picking, bins, freight, commission. MIXED is both in one account, split by `variable_pct`, which is the honest answer for utilities and for a repair account that carries both a service contract and per-hour work. EXCLUDED leaves the account out of the model entirely and says so in the result, which is what interest, income tax and depreciation of an asset the crop does not use need.",
+   "fieldname": "cost_behavior",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Behavior",
+   "options": "Fixed\nVariable\nMixed\nExcluded"
+  },
+  {
+   "default": "Harvested",
+   "description": "WHICH VOLUME the variable part follows. Harvested — everything that came off the trees, so picking, hauling and field bins. Sellable — only what packed out, so cartons, packing labour, freight and commission. Ignored when the behavior is Fixed or Excluded. This is the field the packout slider actually moves against: a harvested-basis cost spreads over fewer sellable boxes as packout falls, and a sellable-basis cost simply shrinks.",
+   "fieldname": "volume_basis",
+   "fieldtype": "Select",
+   "label": "Volume Basis",
+   "options": "Harvested\nSellable"
+  },
+  {
+   "default": "0",
+   "description": "For MIXED accounts only: what share of the amount behaves variably. The rest is treated as fixed. 0 on a Mixed line makes the line wholly fixed, which is a legitimate configuration and not a broken one.",
+   "fieldname": "variable_pct",
+   "fieldtype": "Percent",
+   "label": "Variable %"
+  },
+  {
+   "description": "The part of this account's money that the model treats as fixed. Derived, and stored so a later reader can add the column up and get the total back.",
+   "fieldname": "fixed_amount",
+   "fieldtype": "Currency",
+   "label": "Fixed Part",
+   "read_only": 1
+  },
+  {
+   "description": "The part that moves with volume. Derived.",
+   "fieldname": "variable_amount",
+   "fieldtype": "Currency",
+   "label": "Variable Part",
+   "read_only": 1
+  },
+  {
+   "default": "Heuristic",
+   "description": "WHERE THE CLASSIFICATION CAME FROM, which is the difference between a number somebody stands behind and a number a computer guessed. Account — the operator classified this account itself, on the Account. Override — this analysis was told to treat it differently, once. Heuristic — nobody has said, and this app read the account's ERPNext type and name and made a guess. Every read reports how many lines are still Heuristic, because a breakeven resting on guesses is a breakeven whose owner should know that before quoting it to a lender.",
+   "fieldname": "classification_source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "Account\nOverride\nHeuristic"
+  },
+  {
+   "description": "Why it was classified this way — the heuristic that fired, or the reason somebody gave for an override.",
+   "fieldname": "basis_note",
+   "fieldtype": "Small Text",
+   "label": "Basis"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Breakeven Cost Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

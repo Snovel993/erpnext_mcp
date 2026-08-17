@@ -1,0 +1,238 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 18:00:00.000000",
+ "description": "WHAT THE MARKET PAID FOR THIS, ON A DAY. USDA AMS Market News publishes shipping point prices — what shippers were asking f.o.b. the district, by commodity, variety and package — and this is one such quotation, kept.\n\nA REGISTER RATHER THAN A LOOKUP, because a price is only useful next to the other prices. One number fetched at the moment somebody opened a breakeven answers 'are we above water today'; a row per report date answers 'has this crop cleared its breakeven in any of the last three weeks', which is the question that decides whether to pick. Storing them also means the overlay still works on a farm office whose internet is down, which is a normal condition and not an outage.\n\nIT BELONGS TO NO COMPANY, and that is deliberate. A shipping point price for Washington Extra Fancy Galas is a fact about a market, not about anybody's operation — it names no block, no cost and no customer. The records that carry those are the Breakeven Analyses that read it, every one of which links to Company and is scoped by Frappe exactly as before. Scoping the quote itself would mean the same public number stored once per entity, and two copies of one fact that will eventually disagree.\n\nRANGES, NOT A PRICE. AMS reports a low and a high, and usually a narrower 'mostly' band inside them, because on any given day a district sells at a spread. Collapsing that to one number would throw away the only part of the quotation that says how firm it is — and this app's overlay reads the band, not the midpoint alone.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "commodity",
+  "variety",
+  "grade",
+  "identity_col",
+  "market",
+  "package",
+  "report_date",
+  "price_section",
+  "low_price",
+  "high_price",
+  "price_col",
+  "mostly_low",
+  "mostly_high",
+  "price_unit",
+  "currency",
+  "provenance_section",
+  "source",
+  "report_slug",
+  "report_title",
+  "provenance_col",
+  "fetched_on",
+  "fetched_by",
+  "notes",
+  "payload_section",
+  "payload"
+ ],
+ "fields": [
+  {
+   "description": "The commodity as AMS names it — 'APPLES', 'CHERRIES', 'PEARS'. Stored in the source's own vocabulary rather than translated into this app's crop names, because a quotation retyped into local words is a quotation nobody can check against the published report.",
+   "fieldname": "commodity",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Commodity",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The variety the quotation is for — 'GALA', 'BING'. Blank where the report quotes the commodity as a whole, which is a real shape and not a missing value.",
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Variety",
+   "search_index": 1
+  },
+  {
+   "description": "The grade or size band quoted — 'US EXTRA FANCY 88s'. Part of what makes two numbers for one commodity on one day both correct.",
+   "fieldname": "grade",
+   "fieldtype": "Data",
+   "label": "Grade / Size"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The shipping point district — 'YAKIMA VALLEY AND WENATCHEE DISTRICT WASHINGTON'. A f.o.b. price is a price AT A PLACE, and the same fruit on the same day quotes differently two districts apart.",
+   "fieldname": "market",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Market",
+   "search_index": 1
+  },
+  {
+   "description": "What the price is FOR — 'cartons tray pack', '20 lb cartons'. THE FIELD THAT MAKES THE OVERLAY HONEST OR USELESS: a breakeven computed per 40-lb box compared against a price per 20-lb carton is off by a factor of two and looks entirely plausible. `compute_breakeven` reports the package alongside the spread rather than converting it, because the conversion is a judgement about pack style that this app has no basis to make.",
+   "fieldname": "package",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Package"
+  },
+  {
+   "description": "The date of the report this quotation came out of — not the date it was fetched. The two differ, and it is the report date that says how stale the number is.",
+   "fieldname": "report_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "price_section",
+   "fieldtype": "Section Break",
+   "label": "Price"
+  },
+  {
+   "fieldname": "low_price",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Low"
+  },
+  {
+   "fieldname": "high_price",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "High"
+  },
+  {
+   "fieldname": "price_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The bottom of the 'mostly' band — where the bulk of the district's sales sat, inside the low-to-high range. Blank on reports that publish no mostly band.",
+   "fieldname": "mostly_low",
+   "fieldtype": "Currency",
+   "label": "Mostly Low"
+  },
+  {
+   "fieldname": "mostly_high",
+   "fieldtype": "Currency",
+   "label": "Mostly High"
+  },
+  {
+   "default": "per package",
+   "description": "What one unit of the price buys — 'per package', 'per pound', 'per cwt'.",
+   "fieldname": "price_unit",
+   "fieldtype": "Data",
+   "label": "Price Unit"
+  },
+  {
+   "default": "USD",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "USDA AMS Market News",
+   "description": "Where the number came from. USDA AMS Market News — fetched from the published report. Manual — somebody typed a price they were quoted, which is a legitimate and often better number for a grower with a real bid in hand, and is labelled so nobody mistakes one for the other. Broker Quote — a named buyer's offer.",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "USDA AMS Market News\nManual\nBroker Quote",
+   "reqd": 1
+  },
+  {
+   "description": "The AMS report this came out of, by its slug — the identifier that lets somebody open the same report and read the same line.",
+   "fieldname": "report_slug",
+   "fieldtype": "Data",
+   "label": "Report Slug"
+  },
+  {
+   "fieldname": "report_title",
+   "fieldtype": "Data",
+   "label": "Report Title"
+  },
+  {
+   "fieldname": "provenance_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fetched_on",
+   "fieldtype": "Datetime",
+   "label": "Fetched On",
+   "read_only": 1
+  },
+  {
+   "description": "Who or what wrote this row. A scheduled sweep, a tool call, a person.",
+   "fieldname": "fetched_by",
+   "fieldtype": "Data",
+   "label": "Fetched By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Source record"
+  },
+  {
+   "description": "The source row exactly as it arrived, as JSON. KEPT BECAUSE A PARSER IS A GUESS ABOUT SOMEBODY ELSE'S SCHEMA: when AMS renames a field, the rows already stored can be reparsed from this instead of being refetched from a report that may no longer be published.",
+   "fieldname": "payload",
+   "fieldtype": "Code",
+   "label": "Raw Payload",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "USDA Price Quote",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "commodity,variety,market,report_date",
+ "sort_field": "report_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

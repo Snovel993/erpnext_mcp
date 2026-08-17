@@ -1,0 +1,96 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 18:00:00.000000",
+ "description": "ONE WHAT-IF, KEPT. A sensitivity table computed and thrown away answers the question once; a sensitivity table STORED answers it again next season, when somebody wants to know whether the price the crop actually made was inside the band this analysis considered or outside it. That is the Maximal Data Science half of the design: the interesting number is rarely the breakeven itself, it is how far the breakeven moved for a ten percent move in something else, and that derivative only exists if the intermediate runs were kept.\n\nWRITTEN BY `compute_breakeven`, WHICH STORES A STANDARD BAND. `get_breakeven_sensitivity` computes any range asked for and stores NOTHING — it is a read tool, and a read tool that wrote rows would make the register depend on who had been browsing.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "variable",
+  "change_pct",
+  "scenario_value",
+  "contribution_margin_per_unit",
+  "breakeven_units",
+  "breakeven_price",
+  "projected_profit",
+  "verdict",
+  "computed_on"
+ ],
+ "fields": [
+  {
+   "description": "What was moved: Price, Yield, Packout, Fixed Cost or Variable Cost. One at a time, deliberately — a table that moved two at once would not say which of them the breakeven was sensitive to, which is the only thing anybody reads a sensitivity table for.",
+   "fieldname": "variable",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Variable",
+   "options": "Price\nYield\nPackout\nFixed Cost\nVariable Cost",
+   "reqd": 1
+  },
+  {
+   "description": "How far it was moved from the analysis's own figure, as a percentage. -20 means twenty percent worse than planned for price, yield and packout; twenty percent MORE for the two cost rows, which is also the bad direction. The sign is 'how much', never 'how bad'.",
+   "fieldname": "change_pct",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Change %"
+  },
+  {
+   "description": "The absolute value the variable took in this run — the price, the harvest, the packout percentage, the cost total. Stored alongside the percentage because a percentage is unreadable a season later without the base it moved from.",
+   "fieldname": "scenario_value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Value",
+   "precision": "4"
+  },
+  {
+   "fieldname": "contribution_margin_per_unit",
+   "fieldtype": "Currency",
+   "label": "CM / Unit"
+  },
+  {
+   "description": "Sellable units needed to cover fixed cost under this scenario. Blank where the contribution margin is zero or negative — no quantity of a unit sold at a loss ever covers a fixed cost, and a very large number there would read as a hard target rather than an impossible one.",
+   "fieldname": "breakeven_units",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Breakeven Units",
+   "precision": "2"
+  },
+  {
+   "description": "The price per sellable unit that would have made this scenario break even at its own yield and packout. THE GROWER'S QUESTION, answered per scenario: 'what do I need to get for these?'",
+   "fieldname": "breakeven_price",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Breakeven Price"
+  },
+  {
+   "description": "Profit or loss at the scenario's own volume and price. Negative is a loss and is shown as one.",
+   "fieldname": "projected_profit",
+   "fieldtype": "Currency",
+   "label": "Projected P/L"
+  },
+  {
+   "description": "The one-line reading — 'covers costs with 12% to spare', 'loses money at any volume'.",
+   "fieldname": "verdict",
+   "fieldtype": "Data",
+   "label": "Verdict"
+  },
+  {
+   "fieldname": "computed_on",
+   "fieldtype": "Datetime",
+   "label": "Computed On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Breakeven Scenario",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

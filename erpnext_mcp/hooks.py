@@ -329,6 +329,25 @@ scheduler_events = {
 		"30 4 * * *": [
 			"erpnext_mcp.tools.maintenance.sweep_due_maintenance",
 		],
+		#: v0.87.0. The USDA shipping point price sweep, at five — last of the
+		#: night jobs, and the only one whose whole purpose is to have an answer
+		#: waiting before anybody asks. A grower reads a market at breakfast.
+		#:
+		#: THE THIRD ENTRY HERE THAT TALKS TO SOMEBODY ELSE'S SERVER, and the
+		#: only one that ships SWITCHED OFF. The weather and the regulation feeds
+		#: work out of the box against keyless public sources; the MARS API does
+		#: not, so an always-on job here would write an authentication failure to
+		#: the error log every night on every site that never wanted a market
+		#: overlay. `enable_usda_price_sweep` is the switch and it sits beside
+		#: the key field, so turning it on is the same visit as entering one.
+		#:
+		#: ONE ENTRY THAT ITERATES the report slugs an operator configured, so
+		#: adding a district adds no line to this file — and a sweep with no
+		#: slugs configured does nothing and says so rather than guessing at a
+		#: report. It never raises; see `services/usda_prices.sweep_configured_reports`.
+		"0 5 * * *": [
+			"erpnext_mcp.services.usda_prices.sweep_configured_reports",
+		],
 	},
 	"hourly": [
 		"erpnext_mcp.alerts.sweep",
