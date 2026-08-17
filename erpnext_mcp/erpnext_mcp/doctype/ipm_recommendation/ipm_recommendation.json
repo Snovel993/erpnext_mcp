@@ -1,0 +1,358 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "The decision a crossed threshold produces: what was seen, what number it crossed, and what the options are in the order an IPM programme is meant to consider them — cultural and biological first, chemical last. It is GENERATED rather than typed, off the threshold's own recommended methods, so that a farm which has written its thresholds down once gets an actionable answer at the moment of the observation rather than a note saying something is over.\n\nIT IS A RECOMMENDATION AND NOT AN ORDER. Every action carries its own status, and a rejected one is kept rather than deleted — a farm that declined the biological option four times running has a pattern worth seeing, and a deleted row hides it. Nothing here dispatches work on its own; raising a Farm Task from an action is a separate, deliberate act.\n\nTHE SUSTAINABILITY SCORE IS THE POINT OF THE ACTION TABLE. It is computed from the mix of control methods across the accepted actions, on a published 0-100 scale that is this app's own and is documented in full at the top of ipm_recommendation.py. It is not a certification, and a farm should not present it as one; what it is good for is a season-over-season number that moves when the programme actually changes, which is the thing a claim of 'we practise IPM' otherwise has no evidence behind.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "company",
+  "block_doctype",
+  "block",
+  "identity_col",
+  "threat_category",
+  "threat",
+  "crop",
+  "crop_stage",
+  "season_year",
+  "trigger_section",
+  "pest_pressure",
+  "triggered_by",
+  "threshold",
+  "trigger_col",
+  "observed_value",
+  "threshold_value",
+  "urgency",
+  "generated_automatically",
+  "planting_season",
+  "actions_section",
+  "actions",
+  "score_section",
+  "sustainability_score",
+  "sustainability_grade",
+  "score_col",
+  "chemical_actions",
+  "biological_actions",
+  "cultural_actions",
+  "other_actions",
+  "rationale_section",
+  "rationale",
+  "outcome_section",
+  "decided_by",
+  "decided_on",
+  "outcome_col",
+  "resulting_spray_application",
+  "closed_on",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Open",
+   "description": "Open is generated and undecided. Accepted means somebody chose from it. Declined is a deliberate no — kept, because 'why was nothing done about this' has an answer and a deleted record has none. Superseded is a recommendation overtaken by a later observation on the same pressure.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nAccepted\nDeclined\nSuperseded\nClosed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Field",
+   "fieldname": "block_doctype",
+   "fieldtype": "Link",
+   "label": "Block DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "block",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Block",
+   "options": "block_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "threat_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat Category",
+   "options": "Insect\nDisease\nWeed\nVertebrate\nAbiotic\nNutrient",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "threat",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "label": "Crop"
+  },
+  {
+   "fieldname": "crop_stage",
+   "fieldtype": "Data",
+   "label": "Crop Stage"
+  },
+  {
+   "fieldname": "season_year",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Season Year",
+   "search_index": 1
+  },
+  {
+   "fieldname": "trigger_section",
+   "fieldtype": "Section Break",
+   "label": "What Triggered This"
+  },
+  {
+   "fieldname": "pest_pressure",
+   "fieldtype": "Link",
+   "label": "Pest Pressure",
+   "options": "Pest Pressure",
+   "search_index": 1
+  },
+  {
+   "description": "The observation that crossed the threshold. The whole chain — what was seen, what it was measured against, what was recommended — is readable from this one link.",
+   "fieldname": "triggered_by",
+   "fieldtype": "Link",
+   "label": "Triggered By",
+   "options": "Crop Observation",
+   "search_index": 1
+  },
+  {
+   "fieldname": "threshold",
+   "fieldtype": "Link",
+   "label": "Threshold",
+   "options": "Pest Action Threshold"
+  },
+  {
+   "fieldname": "trigger_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "observed_value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Observed Value",
+   "precision": "4"
+  },
+  {
+   "description": "The action number, copied at generation time so the decision can be re-read against the number that actually made it.",
+   "fieldname": "threshold_value",
+   "fieldtype": "Float",
+   "label": "Threshold Value",
+   "precision": "4"
+  },
+  {
+   "description": "Elevated is a threshold crossed more than once running or a rising trend; Urgent is a reading well past the number with nothing yet done. Set at generation and freely overridden by a person, who is standing in the block.",
+   "fieldname": "urgency",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Urgency",
+   "options": "Routine\nElevated\nUrgent"
+  },
+  {
+   "default": "0",
+   "description": "Generated by the threshold engine rather than written by hand. Worth distinguishing: a season's worth of automatic recommendations nobody ever accepted says something about the thresholds, not about the crew.",
+   "fieldname": "generated_automatically",
+   "fieldtype": "Check",
+   "label": "Generated Automatically",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planting_season",
+   "fieldtype": "Link",
+   "label": "Planting Season",
+   "options": "Planting Season",
+   "search_index": 1
+  },
+  {
+   "fieldname": "actions_section",
+   "fieldtype": "Section Break",
+   "label": "Options"
+  },
+  {
+   "description": "The options, least chemical first.",
+   "fieldname": "actions",
+   "fieldtype": "Table",
+   "label": "Actions",
+   "options": "IPM Recommendation Action"
+  },
+  {
+   "fieldname": "score_section",
+   "fieldtype": "Section Break",
+   "label": "Sustainability"
+  },
+  {
+   "description": "0 to 100, computed from the mix of control methods. Scores the ACCEPTED actions once anything has been accepted, and the proposed set before that — so the number moves when a farm chooses the spray over the release, which is the only time it should move. The weights, and what they are and are not evidence of, are documented at the top of ipm_recommendation.py.",
+   "fieldname": "sustainability_score",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Sustainability Score",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "description": "The score as a letter, so a list view is readable at a glance. A grade is not a certification and this app does not issue one.",
+   "fieldname": "sustainability_grade",
+   "fieldtype": "Data",
+   "label": "Grade",
+   "read_only": 1
+  },
+  {
+   "fieldname": "score_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "chemical_actions",
+   "fieldtype": "Int",
+   "label": "Chemical Actions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "biological_actions",
+   "fieldtype": "Int",
+   "label": "Biological Actions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cultural_actions",
+   "fieldtype": "Int",
+   "label": "Cultural Actions",
+   "read_only": 1
+  },
+  {
+   "description": "Mechanical, Behavioral, No Action and Unclassified together — counted so the three headline numbers plus this one always sum to the row count, which is how a reader knows nothing was dropped.",
+   "fieldname": "other_actions",
+   "fieldtype": "Int",
+   "label": "Other Actions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rationale_section",
+   "fieldtype": "Section Break",
+   "label": "Rationale"
+  },
+  {
+   "description": "Why this recommendation says what it says — the count, the threshold, the trend, and whether beneficials were present in numbers that argue for waiting. Written at generation and editable afterwards, because the person who declines it should be able to say why on the same record.",
+   "fieldname": "rationale",
+   "fieldtype": "Small Text",
+   "label": "Rationale"
+  },
+  {
+   "fieldname": "outcome_section",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "decided_by",
+   "fieldtype": "Link",
+   "label": "Decided By",
+   "options": "User"
+  },
+  {
+   "fieldname": "decided_on",
+   "fieldtype": "Datetime",
+   "label": "Decided On"
+  },
+  {
+   "fieldname": "outcome_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The spray filed in answer to this, where the answer was chemical. It closes the loop from the observation that found the problem to the tank that answered it, and it is what makes 'how many of our sprays were driven by a threshold' a question with an answer.",
+   "fieldname": "resulting_spray_application",
+   "fieldtype": "Link",
+   "label": "Resulting Spray Application",
+   "options": "Spray Application",
+   "search_index": 1
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Datetime",
+   "label": "Closed On"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "IPM Recommendation",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "block,threat,status,threat_category",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,205 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:nozzle_name",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One nozzle set as it is actually plumbed on a boom or an air-blast tower: what tip, what pattern, what it flows at what pressure, and how coarse the droplet is. It is a MASTER rather than a line on an application because the same tips go out fifty times a season and the number an inspector asks for — gallons per acre at the speed that was driven — is arithmetic off this record and the ground speed, not something anybody should be retyping into every spray. Droplet class is here because it is the drift control on most labels: a label that says 'apply as Coarse or coarser' is naming this column.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "nozzle_name",
+  "company",
+  "nozzle_type",
+  "identity_col",
+  "manufacturer",
+  "orifice_color",
+  "disabled",
+  "flow_section",
+  "flow_rate_gpm",
+  "rated_pressure_psi",
+  "flow_col",
+  "droplet_class",
+  "pattern",
+  "boom_section",
+  "spacing_inches",
+  "nozzles_active",
+  "boom_col",
+  "boom_width_ft",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the crew calls this set — 'Air blast upper', 'Herbicide band 8003'. It is the docname, so it is what every application points at.",
+   "fieldname": "nozzle_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nozzle Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Flat Fan",
+   "fieldname": "nozzle_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Nozzle Type",
+   "options": "Flat Fan\nHollow Cone\nFull Cone\nAir Induction\nTwin Flat Fan\nDisc Core\nFlood\nStream Bar\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "manufacturer",
+   "fieldtype": "Data",
+   "label": "Manufacturer"
+  },
+  {
+   "description": "The ISO colour code moulded into the tip — the thing a person actually reads standing at the boom. Stored as text rather than a Select because the colour vocabulary is the manufacturer's, not this app's.",
+   "fieldname": "orifice_color",
+   "fieldtype": "Data",
+   "label": "Orifice Colour"
+  },
+  {
+   "default": "0",
+   "description": "A set that has come off the machine. Kept rather than deleted: applications made through it are still on the record and still have to resolve their nozzle.",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "flow_section",
+   "fieldtype": "Section Break",
+   "label": "Flow"
+  },
+  {
+   "description": "Gallons per minute PER NOZZLE at the rated pressure, off the manufacturer's chart. Per nozzle rather than per boom, because the number on the chart is per nozzle and a record that quietly multiplied it would be a record nobody could check against the chart.",
+   "fieldname": "flow_rate_gpm",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Flow Rate (GPM per nozzle)",
+   "precision": "3",
+   "reqd": 1
+  },
+  {
+   "description": "The pressure the flow rate was read at. A tip flowed at a pressure other than this one does not flow at this rate, and the difference is the square root of the pressure ratio — which is why the pressure belongs beside the flow rather than in somebody's memory.",
+   "fieldname": "rated_pressure_psi",
+   "fieldtype": "Float",
+   "label": "Rated Pressure (PSI)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "flow_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "ASABE S572 droplet size class. This is the drift control on most labels — 'apply as Coarse or coarser' is an instruction about this column — so it is a first-class field rather than a note.",
+   "fieldname": "droplet_class",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Droplet Class",
+   "options": "\nExtremely Fine\nVery Fine\nFine\nMedium\nCoarse\nVery Coarse\nExtremely Coarse\nUltra Coarse"
+  },
+  {
+   "default": "Broadcast",
+   "description": "Where the spray is aimed. 'Canopy Upper' and 'Canopy Lower' are the two halves of an air-blast tower and are the ordinary case for a dual set on tree fruit.",
+   "fieldname": "pattern",
+   "fieldtype": "Select",
+   "label": "Pattern",
+   "options": "Broadcast\nBand\nDirected\nAir Blast\nCanopy Upper\nCanopy Lower\nOver The Row\nSoil"
+  },
+  {
+   "fieldname": "boom_section",
+   "fieldtype": "Section Break",
+   "label": "Boom"
+  },
+  {
+   "description": "Distance between tips along the boom. With the count and the flow rate this is what turns GPM into gallons per acre at a ground speed.",
+   "fieldname": "spacing_inches",
+   "fieldtype": "Float",
+   "label": "Nozzle Spacing (inches)",
+   "precision": "2"
+  },
+  {
+   "description": "How many tips of this set are open during an application. A tower with alternate tips plugged flows half what its spacing suggests, and that is a deliberate setting rather than a fault.",
+   "fieldname": "nozzles_active",
+   "fieldtype": "Int",
+   "label": "Active Nozzles"
+  },
+  {
+   "fieldname": "boom_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Effective swath width. Left blank for an air-blast set, where the swath is the row spacing rather than a property of the machine.",
+   "fieldname": "boom_width_ft",
+   "fieldtype": "Float",
+   "label": "Boom Width (ft)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray Nozzle Config",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "nozzle_type,pattern,droplet_class",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

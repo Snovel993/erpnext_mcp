@@ -1,0 +1,121 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One block that one application reached, with the acres covered on it and — where the machine carries two sets — which set was running there. A tank that went out over four blocks is four of these rows and four Spray REI records, because the acres differ per block and the restriction is a fact about a place. The REI record this row opened is linked back so the application and the restriction are one chain rather than two registers somebody has to join by hand.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "block_doctype",
+  "block",
+  "acres",
+  "nozzle_set_used",
+  "rei_record",
+  "detail_section",
+  "started_at",
+  "completed_at",
+  "detail_col",
+  "tanks_used",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 1,
+   "default": "Field",
+   "description": "'Field' for a planted block, 'Asset Register' for a block-shaped asset tag — the same pair Spray REI and Farm Task use, so a restriction, a task and an application on one block all key alike.",
+   "fieldname": "block_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Block DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "block",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Block",
+   "options": "block_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "columns": 1,
+   "description": "Acres actually covered on this block. Per block rather than one figure for the pass, because product used is rate times acres and a four-block pass has four answers.",
+   "fieldname": "acres",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Acres",
+   "precision": "3"
+  },
+  {
+   "columns": 2,
+   "default": "Both",
+   "description": "Which nozzle set was running on THIS block. 'A then B' is the flip actually performed mid-block. Recorded per block because the flip usually happens at a block edge, and an application that says 'we flipped somewhere' cannot tell anybody which block got which product.",
+   "fieldname": "nozzle_set_used",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nozzle Set Used",
+   "options": "Both\nA\nB\nA then B\nB then A"
+  },
+  {
+   "columns": 2,
+   "description": "The restricted-entry window this block's application opened. Written back after the REI record is created, so the application and the restriction are one chain.",
+   "fieldname": "rei_record",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "REI Record",
+   "options": "Spray REI",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "description": "When this block was started, where the pass was long enough for the blocks to differ. Left blank the application's own start is used.",
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At"
+  },
+  {
+   "description": "When this block FINISHED. The restricted-entry window for this block runs from here where it is set, and from the application's completion where it is not — a block sprayed at eight in the morning does not stay shut because the last block of the pass finished at two.",
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "tanks_used",
+   "fieldtype": "Float",
+   "label": "Tanks Used",
+   "precision": "2"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray Application Block",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

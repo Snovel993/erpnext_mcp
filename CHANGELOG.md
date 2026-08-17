@@ -3,6 +3,124 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.88.0 — 2026-08-16 — the block has a life, and a fiscal year cannot see it
+
+Wave 3: the spray program, the crop protection pipeline, and the value block
+lifecycle. Thirteen doctypes, twenty tools, one chain read end to end — a scout
+finds something, a threshold decides whether it is worth answering, the answer is
+often a spray, the spray shuts a block for a number of hours, and every hour and
+every gallon lands against the ground that consumed it.
+
+### The one idea
+
+A tree fruit block planted in 2021 spends four years costing money and returning
+none, then a decade returning more than it costs, then a decline somebody has to
+decide the end of. **Read one of those years as a profit and loss statement and
+the block is a catastrophe; read the whole life and it is the best investment on
+the farm.** Every general ledger in existence answers the first question and none
+answers the second, because the ledger's period is the fiscal year and the
+block's period is fifteen of them.
+
+`get_block_profitability` refuses to call an establishing block's negative margin
+a loss. A fourth-leaf block that spent $180,000 and returned $4,000 has not lost
+$176,000 — it has invested it. Every figure is still reported; what the app will
+not do is put the word *loss* next to them.
+
+### The spray program
+
+`Spray Tank Mix` is the recipe, `Spray Application` is the event, and
+`Spray Nozzle Config` is the tips. Several products in one tank **each at its own
+rate per acre** — a cover spray is two or three answers to two or three problems,
+and only a per-product rate can be checked against a label. Dual flip nozzles are
+first class: which product is on which set is part of the recipe, which set was
+running on a given block is part of the event, and the flip usually happens at a
+block edge.
+
+**`create_spray_application` does not refuse a tank with no label interval**, and
+that is the one deliberate difference from `record_spray_application` (v0.78.0).
+A tank of foliar nitrogen restricts nobody and is still a real pass over real
+acres: it records, opens zero `Spray REI` windows, and says so. The older tool
+refuses in that case because its entire purpose *is* the window, and a zero-hour
+window reads on every screen as *this block is clear*. Both readings are right
+for their own tool and getting either backwards is the failure that matters.
+
+**Weather is recorded, never enforced.** Wind above the label window is drift;
+wind **below** it is a temperature inversion, which is the half people forget.
+Both earn an advisory on the record. A refusal would not prevent the spray — it
+went out three hours ago — only the record of it, which is the half a state
+inspector asks for and the operator is least motivated to keep.
+
+Restricted entry is unchanged: one window per block, from that block's own
+completion time, and `get_active_rei` still answers every question about it.
+
+### Crop protection
+
+Six threat categories — Insect, Disease, Weed, Vertebrate, **Abiotic**,
+**Nutrient**. The last two are what every pest register leaves out and every
+grower records anyway: frost and hail have no organism behind them, and a tissue
+deficiency is a finding a threshold has to be able to express.
+
+**The comparison is a column, not an assumption.** A Nutrient threshold fires
+*below* its number. A hard-coded greater-than would fire on every healthy block
+and never on a deficient one — wrong in both directions at once, and silently.
+
+**Beneficials override the threshold**, and that is the whole difference between
+integrated pest management and pest counting. A count over threshold with
+predators present at the threshold's ratio generates *hold and re-scout* instead
+of a control, because the block is already handling itself and the spray that
+fixes it kills the predators and guarantees a worse flare in three weeks. The
+hold **replaces** the control options rather than joining them.
+
+Sustainability scoring is a published 0–100 scale weighting the IPM ladder.
+Chemical is 0.20 rather than 0 — a correctly timed threshold-driven spray *is*
+IPM, and scoring it zero would tell a farm its best chemical decision was worth
+the same as its worst. Unclassified sits *below* chemical so the scale never
+rewards leaving the field blank. Once anything is accepted the score describes
+what was **chosen** rather than what was offered. It is **not a certification**
+and the response says so.
+
+### Two counts kept apart
+
+`get_block_cost_summary` reports ledger cost and attributed cost **separately**,
+because adding them double counts whenever an attribution row came from the
+ledger. Rows that might have are excluded from the total **and listed** —
+including them inflates, dropping them silently understates, and a farm told
+which rows are in question settles it in a minute from the voucher numbers.
+
+`get_block_revenue_summary` is an **attribution** of revenue the ledger already
+recognised, not a recognition of it. It answers which ground earned the money,
+not what the business earned.
+
+### Added
+
+- **13 doctypes.** `Spray Nozzle Config`, `Spray Tank Mix` (+ `Spray Tank Mix
+  Product`), `Spray Application` (+ `Spray Application Block`); `Crop
+  Observation`, `Pest Action Threshold`, `Pest Pressure`, `IPM Recommendation`
+  (+ `IPM Recommendation Action`); `Planting Season`, `Block Cost Entry`,
+  `Block Revenue Entry`.
+- **20 tools — 14 read, 6 mutating.** Every mutating tool ships **off**.
+  - Spray: `create_spray_nozzle_config`, `list_spray_nozzle_configs`,
+    `create_spray_tank_mix`, `create_spray_application`,
+    `list_spray_applications`, `get_spray_application`.
+  - Crop protection: `set_pest_action_threshold`,
+    `list_pest_action_thresholds`, `create_crop_observation`,
+    `list_crop_observations`, `get_pest_pressure`, `list_pest_pressures`,
+    `get_ipm_recommendation`, `compute_sustainability_score`.
+  - Block lifecycle: `create_planting_season`, `list_planting_seasons`,
+    `get_planting_season`, `get_block_cost_summary`,
+    `get_block_revenue_summary`, `get_block_profitability`.
+- 159 standalone tests across `test_spray_application.py`,
+  `test_crop_protection.py` and `test_block_lifecycle.py`.
+
+### Notes
+
+`crop`, `variety` and `rootstock` are `Data` rather than links to the v0.82.0
+`Crop` register. That is deliberate: `Field.crop` has been free text since it
+shipped, a new Link beside it would give a site two answers to what grows here,
+and a Link would make `bench migrate` order load-bearing between two releases.
+Seeding `Crop` rows from the distinct strings already on a site is a release of
+its own.
+
 ## 0.87.0 — 2026-08-16 — a fruit farm has two volumes
 
 The breakeven calculator: *what price do I need to break even?* Five tools, four

@@ -1,0 +1,308 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One return attributed to one planting. The mirror of Block Cost Entry and it exists for the same reason: the ledger records that a settlement paid $84,000, and nothing in the ledger records that four blocks grew the fruit it paid for.\n\nATTRIBUTION IS THE WHOLE JOB, AND IT IS USUALLY AN ALLOCATION. A packing house settles on a pool, not a block — one statement covers everything delivered in a period, and splitting it back to the blocks that grew it is done on delivered weight, which this app can compute from the Scale Tickets that already carry a field and a block. The BASIS is on the record because it is a judgement: allocating by weight is right for a single variety and wrong the moment two blocks of different grades were pooled, and a farm reading its per-block returns three years later needs to know which was done.\n\nDIRECT IS STILL THE BEST ANSWER WHERE IT EXISTS. A bin sold off one block at a farm stand is Direct at 100 percent, and no allocation improves on that. The allocation machinery is for the pooled case, which is most of the crop on most farms.\n\nTHIS IS NOT THE LEDGER, exactly as Block Cost Entry is not. A revenue figure summed from here is an ATTRIBUTION of revenue the ledger already recognised, and the two answer different questions — 'what did the business earn' and 'which ground earned it'. A summary that presented this as the first would be wrong in a way an accountant would catch and a grower would not.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "planting_season",
+  "company",
+  "field",
+  "block_name",
+  "identity_col",
+  "posting_date",
+  "season_year",
+  "revenue_type",
+  "amount_section",
+  "amount",
+  "quantity",
+  "quantity_uom",
+  "amount_col",
+  "price_per_unit",
+  "variety",
+  "grade",
+  "source_section",
+  "source",
+  "settlement_statement",
+  "sales_invoice",
+  "source_col",
+  "scale_ticket",
+  "customer",
+  "reference_doctype",
+  "reference_name",
+  "allocation_section",
+  "allocation_basis",
+  "allocation_pct",
+  "allocation_col",
+  "pool_total",
+  "allocation_note",
+  "description_section",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "planting_season",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Planting Season",
+   "options": "Planting Season",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Field",
+   "options": "Field",
+   "search_index": 1
+  },
+  {
+   "fieldname": "block_name",
+   "fieldtype": "Data",
+   "label": "Block Name"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Posting Date",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The crop year this return is for, which is very often NOT the year it was paid. A settlement on stored fruit lands in the following March, and a register that filed it by payment date would show a barren year followed by a miraculous one.",
+   "fieldname": "season_year",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Season Year",
+   "search_index": 1
+  },
+  {
+   "fieldname": "revenue_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Revenue Type",
+   "options": "Settlement\nFresh Sales\nProcessing\nCull\nInsurance\nGovernment Program\nLease Income\nOther"
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "Amount"
+  },
+  {
+   "description": "The return attributed to this planting — the SHARE of the settlement, not the whole statement.",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "options": "Company:company:default_currency",
+   "reqd": 1
+  },
+  {
+   "description": "Weight or count attributed to this planting. It is what the allocation was computed FROM on a weight share, so it is kept rather than discarded after the arithmetic.",
+   "fieldname": "quantity",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Quantity",
+   "precision": "3"
+  },
+  {
+   "fieldname": "quantity_uom",
+   "fieldtype": "Data",
+   "label": "Quantity UOM"
+  },
+  {
+   "fieldname": "amount_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Amount over quantity, rewritten on every save. The number a grower actually compares between blocks and between years.",
+   "fieldname": "price_per_unit",
+   "fieldtype": "Currency",
+   "label": "Price / Unit",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Variety"
+  },
+  {
+   "description": "The grade this return was paid at. Worth carrying: two blocks in one pool that packed out differently earned different money, and an allocation on weight alone has already thrown that away.",
+   "fieldname": "grade",
+   "fieldtype": "Data",
+   "label": "Grade"
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Source"
+  },
+  {
+   "default": "Manual",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "Manual\nSettlement Statement\nSales Invoice\nScale Ticket\nGL Sweep\nAllocation",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "settlement_statement",
+   "fieldtype": "Link",
+   "label": "Settlement Statement",
+   "options": "Settlement Statement",
+   "search_index": 1
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "options": "Sales Invoice",
+   "search_index": 1
+  },
+  {
+   "fieldname": "source_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The delivery this return is of, where it traces to one. Scale Ticket already carries a field and a block, which is what makes a settlement allocable by weight at all.",
+   "fieldname": "scale_ticket",
+   "fieldtype": "Link",
+   "label": "Scale Ticket",
+   "options": "Scale Ticket",
+   "search_index": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "search_index": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "allocation_section",
+   "fieldtype": "Section Break",
+   "label": "Allocation"
+  },
+  {
+   "default": "Direct",
+   "description": "How this share was arrived at. Direct is fruit sold off one block and is the best answer wherever it exists. Weight Share is the pooled case and is most of the crop on most farms — see the doctype description for when it stops being right.",
+   "fieldname": "allocation_basis",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Allocation Basis",
+   "options": "Direct\nWeight Share\nAcre Share\nBin Share\nManual Split"
+  },
+  {
+   "fieldname": "allocation_pct",
+   "fieldtype": "Float",
+   "label": "Allocation %",
+   "precision": "3"
+  },
+  {
+   "fieldname": "allocation_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The whole figure this row is a share of. Kept so the allocation can be checked — a set of rows whose amounts do not sum to the pool total is an allocation that lost money somewhere, and without this column that is undetectable from the rows alone.",
+   "fieldname": "pool_total",
+   "fieldtype": "Currency",
+   "label": "Pool Total",
+   "options": "Company:company:default_currency"
+  },
+  {
+   "fieldname": "allocation_note",
+   "fieldtype": "Small Text",
+   "label": "Allocation Note"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Block Revenue Entry",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "planting_season,revenue_type,posting_date,source",
+ "sort_field": "posting_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

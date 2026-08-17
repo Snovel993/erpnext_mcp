@@ -1615,6 +1615,37 @@ APP_DOCTYPES = {
 	"Agricultural UOM Context": "agricultural_uom_context",
 	"Agricultural UOM Context Entry": "agricultural_uom_context_entry",
 	"Agricultural UOM Conversion": "agricultural_uom_conversion",
+	# v0.86.0, Wave 3 — the spray program. The recipe (a tank mix is several
+	# products each at its OWN rate per acre, optionally split across two nozzle
+	# sets flipped mid-pass), the nozzle master those sets point at, and the
+	# EVENT — what went out, where, when, in what wind. Registered here rather
+	# than seeded per-test because an application OPENS Spray REI records, and
+	# Spray REI is already on the scan path.
+	"Spray Nozzle Config": "spray_nozzle_config",
+	"Spray Tank Mix": "spray_tank_mix",
+	"Spray Tank Mix Product": "spray_tank_mix_product",
+	"Spray Application": "spray_application",
+	"Spray Application Block": "spray_application_block",
+	# v0.86.0, Wave 3 — crop protection. An observation raises a block's pressure
+	# for the season and, where it crosses that pest's action threshold,
+	# generates a recommendation whose options are ordered least-chemical-first.
+	# See `tools/cropprotect.py` for the resolution order and for the beneficial
+	# override, which is the part that makes it integrated pest management rather
+	# than pest counting.
+	"Crop Observation": "crop_observation",
+	"Pest Action Threshold": "pest_action_threshold",
+	"Pest Pressure": "pest_pressure",
+	"IPM Recommendation": "ipm_recommendation",
+	"IPM Recommendation Action": "ipm_recommendation_action",
+	# v0.86.0, Wave 3 — the value block lifecycle. A junction between a block and
+	# what grows on it for one year, so a perennial that costs money for four
+	# years before it returns any can be read over its LIFE rather than through a
+	# fiscal year. See `tools/blocklifecycle.py` on why no general ledger can
+	# answer that question and why an establishing block's negative margin is
+	# reported as investment rather than as a loss.
+	"Planting Season": "planting_season",
+	"Block Cost Entry": "block_cost_entry",
+	"Block Revenue Entry": "block_revenue_entry",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows
@@ -4281,6 +4312,15 @@ CHILD_TABLE_SOURCES = {
 	"Crop Water Requirement": (("Crop", "water_requirements"),),
 	"Market Grade Standard": (("Market", "grade_standards"),),
 	"Agricultural UOM Context Entry": (("Agricultural UOM Context", "uoms"),),
+	# v0.86.0. `spray.list_spray_applications` filters by BLOCK, and the block
+	# lives on the child table rather than on the header — one pass covers
+	# several blocks and there is no single block column to filter on. So it
+	# finds the matching child rows and keeps their parents, which is the same
+	# shape `list_stock_entries` uses for warehouse and item and for the same
+	# reason. Without this entry the block filter would match nothing and a
+	# register full of sprays on that block would answer "none", which is the
+	# worst possible direction for a pesticide record to be wrong in.
+	"Spray Application Block": (("Spray Application", "blocks"),),
 }
 
 

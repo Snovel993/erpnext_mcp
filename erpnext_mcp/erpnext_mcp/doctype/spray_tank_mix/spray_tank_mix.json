@@ -1,0 +1,272 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:mix_name",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "A recipe: what goes in one tank, at what rate per acre each, and through which nozzle set. It is a MASTER and not a record of an event — the event is Spray Application, which points here and copies the mix onto itself. Keeping them apart is what lets a farm approve one mix in March and file forty applications against it without forty chances to retype a rate.\n\nTHE LONGEST INTERVAL IN THE TANK WINS, and it is computed here rather than left to the person filing the spray. A four-hour product and a twenty-four-hour one restrict a block for twenty-four hours; the block does not become half-enterable at hour twelve. The same rule governs the pre-harvest interval.\n\nDUAL SETS ARE A PROPERTY OF THE MIX, NOT OF THE MACHINE. A tower that carries a fungicide up and an insecticide down is running one tank through two sets of tips, and which product is on which set is part of the recipe — so it lives on the product line, and a mix that says it is dual has to have something on each side.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "mix_name",
+  "company",
+  "status",
+  "identity_col",
+  "crop",
+  "target_pest",
+  "season_year",
+  "tank_section",
+  "tank_size_gal",
+  "carrier_gpa",
+  "tank_col",
+  "acres_per_tank",
+  "products_section",
+  "products",
+  "nozzle_section",
+  "dual_nozzle",
+  "nozzle_set_a",
+  "set_a_purpose",
+  "nozzle_col",
+  "nozzle_set_b",
+  "set_b_purpose",
+  "label_section",
+  "rei_hours",
+  "rei_source_item",
+  "label_col",
+  "phi_days",
+  "phi_source_item",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "What the farm calls this mix — 'Petal fall cover 1', 'Summer mite + mildew'. It is the docname.",
+   "fieldname": "mix_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mix Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Draft",
+   "description": "Approved is the mix a crew may load. Retired is one that was loaded and no longer should be — kept rather than deleted, because every application filed against it still points here.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nApproved\nRetired",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Crop"
+  },
+  {
+   "description": "What the tank is aimed at, as a whole. The per-product target is on each line, because a cover spray is usually two answers to two different problems.",
+   "fieldname": "target_pest",
+   "fieldtype": "Data",
+   "label": "Target"
+  },
+  {
+   "fieldname": "season_year",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Season Year"
+  },
+  {
+   "fieldname": "tank_section",
+   "fieldtype": "Section Break",
+   "label": "Tank"
+  },
+  {
+   "description": "Working volume of the tank the mix is loaded into.",
+   "fieldname": "tank_size_gal",
+   "fieldtype": "Float",
+   "label": "Tank Size (gal)",
+   "precision": "2"
+  },
+  {
+   "description": "Carrier volume — total gallons of finished spray put on one acre. With the tank size this is what says how many acres one load covers, which is the number the person filling the tank is actually working with.",
+   "fieldname": "carrier_gpa",
+   "fieldtype": "Float",
+   "label": "Carrier (gal/acre)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "tank_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Tank size divided by carrier rate, rewritten on every save. Computed rather than typed: two figures a person can edit independently are two figures that will disagree, and the disagreement is discovered by somebody running out of spray halfway down a row.",
+   "fieldname": "acres_per_tank",
+   "fieldtype": "Float",
+   "label": "Acres / Tank",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "products_section",
+   "fieldtype": "Section Break",
+   "label": "Products"
+  },
+  {
+   "description": "Everything in the tank, each at its own rate per acre.",
+   "fieldname": "products",
+   "fieldtype": "Table",
+   "label": "Products",
+   "options": "Spray Tank Mix Product",
+   "reqd": 1
+  },
+  {
+   "fieldname": "nozzle_section",
+   "fieldtype": "Section Break",
+   "label": "Nozzles"
+  },
+  {
+   "default": "0",
+   "description": "This mix goes out through TWO nozzle sets that are flipped during the application. Ticking it means the products are split across sets A and B, and a mix that claims to be dual with nothing on one side is refused — that is a single-set mix somebody ticked by accident.",
+   "fieldname": "dual_nozzle",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Dual Flip Nozzle"
+  },
+  {
+   "fieldname": "nozzle_set_a",
+   "fieldtype": "Link",
+   "label": "Nozzle Set A",
+   "options": "Spray Nozzle Config"
+  },
+  {
+   "description": "What set A is for, in the crew's own words — 'fungicide, upper canopy'.",
+   "fieldname": "set_a_purpose",
+   "fieldtype": "Data",
+   "label": "Set A Purpose"
+  },
+  {
+   "fieldname": "nozzle_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "nozzle_set_b",
+   "fieldtype": "Link",
+   "label": "Nozzle Set B",
+   "options": "Spray Nozzle Config"
+  },
+  {
+   "fieldname": "set_b_purpose",
+   "fieldtype": "Data",
+   "label": "Set B Purpose"
+  },
+  {
+   "fieldname": "label_section",
+   "fieldtype": "Section Break",
+   "label": "Label Intervals"
+  },
+  {
+   "description": "The longest restricted-entry interval in the tank, rewritten on every save from the product lines. Read-only because it is a consequence of the recipe rather than a choice about it.",
+   "fieldname": "rei_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "REI Hours",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "description": "Which product set the interval, so nobody has to reopen five labels to find out what they are waiting on.",
+   "fieldname": "rei_source_item",
+   "fieldtype": "Link",
+   "label": "REI From",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "label_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The longest pre-harvest interval in the tank, by the same rule.",
+   "fieldname": "phi_days",
+   "fieldtype": "Float",
+   "label": "PHI Days",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "phi_source_item",
+   "fieldtype": "Link",
+   "label": "PHI From",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray Tank Mix",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "crop,target_pest,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

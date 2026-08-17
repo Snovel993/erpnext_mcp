@@ -1,0 +1,222 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "The number that turns a count into a decision: how many of this threat, on this crop, at this growth stage, before somebody has to act. It is a RECORD rather than a constant in code because the number is local — an extension bulletin for the Hood River valley and one for Yakima do not agree, and a farm that has watched its own blocks for ten years disagrees with both. A threshold nobody can edit is one a crew quietly stops believing.\n\nTHE COMPARISON IS A COLUMN, not an assumption. Most thresholds are 'act above this', but a nutrient threshold is 'act BELOW this' — tissue nitrogen under 2.2 percent is the finding, not over. Hard-coding greater-than would have made half the six threat categories unrepresentable, and the half it broke would be the half that fails silently: a nutrient threshold of 2.2 with a greater-than rule fires on every healthy block and never on a deficient one.\n\nCROP STAGE IS OPTIONAL AND MATCHES WIDEST-LAST. A blank stage is the fallback for the season; a stage-specific row beats it. Codling moth at 2 per trap means something different at petal fall than at first cover, and a single season-long number is the one both camps will argue was wrong.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "crop",
+  "threat_category",
+  "threat",
+  "identity_col",
+  "crop_stage",
+  "sample_unit",
+  "effective_from",
+  "disabled",
+  "threshold_section",
+  "comparison",
+  "action_threshold",
+  "warning_threshold",
+  "threshold_col",
+  "beneficial_ratio_min",
+  "min_sample_size",
+  "guidance_section",
+  "recommended_methods",
+  "source",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The crop this threshold is for — 'Cherry', 'Apple', 'Pear'. Free text rather than a link, matched case-insensitively, for the same reason Field.crop is: a block of table grapes should not be a schema change.",
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Crop",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Which of the six kinds of threat this is. The categories are fixed because they are what an IPM programme reports against, and a seventh invented on one farm would drop out of every roll-up.",
+   "fieldname": "threat_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat Category",
+   "options": "Insect\nDisease\nWeed\nVertebrate\nAbiotic\nNutrient",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The specific threat — 'Codling Moth', 'Powdery Mildew', 'Vole', 'Boron'. Matched case-insensitively against what a scout types.",
+   "fieldname": "threat",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The growth stage this number applies at — 'Petal Fall', 'First Cover', a BBCH code. BLANK MEANS EVERY STAGE and is the fallback: a stage-specific row beats it, and where none matches, the blank one is used.",
+   "fieldname": "crop_stage",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Crop Stage"
+  },
+  {
+   "description": "What the number counts. A threshold and an observation that disagree about the unit are two numbers nobody should compare — 'two per trap' against 'two percent infested' is the kind of mistake that reads as fine.",
+   "fieldname": "sample_unit",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Sample Unit",
+   "options": "\nPer Trap\nPer Trap Per Week\nPer Leaf\nPer Shoot\nPer Branch\nPer Tree\nPer 100 Fruit\nPer Sq Ft\nPercent Infested\nPercent Defoliation\nDegree Days\nPercent Dry Weight\nPPM\nCount"
+  },
+  {
+   "description": "When this number takes effect. A threshold revised mid-season does not retroactively change what last month's scouting decided.",
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "label": "Effective From"
+  },
+  {
+   "default": "0",
+   "description": "Retired rather than deleted, so the recommendations it generated still resolve to the number that generated them.",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "threshold_section",
+   "fieldtype": "Section Break",
+   "label": "Threshold"
+  },
+  {
+   "default": "Greater Than",
+   "description": "Which direction counts as exceeding. 'Greater Than' for a pest count; 'Less Than' for a nutrient or a soil moisture floor, where the finding is that the number has fallen too far. This is a column and not an assumption — see the doctype description for what hard-coding it would have broken.",
+   "fieldname": "comparison",
+   "fieldtype": "Select",
+   "label": "Comparison",
+   "options": "Greater Than\nGreater Than Or Equal\nLess Than\nLess Than Or Equal",
+   "reqd": 1
+  },
+  {
+   "description": "Cross this and an IPM recommendation is generated. The number a crew acts on.",
+   "fieldname": "action_threshold",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Action Threshold",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "description": "Optional early number. Crossing it raises the pest's pressure to Watch without generating a recommendation — a farm gets a week's notice rather than an alarm on the morning it is already too late. Must sit on the safe side of the action threshold, in whichever direction the comparison runs.",
+   "fieldname": "warning_threshold",
+   "fieldtype": "Float",
+   "label": "Warning Threshold",
+   "precision": "4"
+  },
+  {
+   "fieldname": "threshold_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Predator-to-pest ratio above which no action is recommended even though the count is over threshold. THIS IS THE WHOLE OF IPM IN ONE COLUMN: a mite count over threshold with a healthy population of predatory mites eating it is a block that is already handling itself, and spraying it kills the predators and guarantees the second flare. Leave blank where no beneficial is being counted.",
+   "fieldname": "beneficial_ratio_min",
+   "fieldtype": "Float",
+   "label": "Beneficial Ratio Minimum",
+   "precision": "3"
+  },
+  {
+   "description": "How many units have to be examined before a count off this threshold means anything. Two infested leaves out of five is not twenty percent infestation; it is a sample too small to say. An observation under this size is flagged rather than acted on.",
+   "fieldname": "min_sample_size",
+   "fieldtype": "Int",
+   "label": "Minimum Sample Size"
+  },
+  {
+   "fieldname": "guidance_section",
+   "fieldtype": "Section Break",
+   "label": "Guidance"
+  },
+  {
+   "description": "What to do when it is crossed, one action per line, each optionally prefixed with a control method and a colon — 'Biological: release predatory mites', 'Cultural: remove alternate hosts on the headland', 'Chemical: cover spray at label rate'. These seed the generated recommendation's actions, which is what makes the threshold engine produce something a person can act on rather than an alarm.",
+   "fieldname": "recommended_methods",
+   "fieldtype": "Small Text",
+   "label": "Recommended Methods"
+  },
+  {
+   "description": "Where the number came from — an extension bulletin, a certifier's standard, or the farm's own record. A threshold with no provenance is one nobody will defend when it is inconvenient.",
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Pest Action Threshold",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "crop,threat,threat_category,crop_stage",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

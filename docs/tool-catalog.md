@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 673 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 693 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 330 read tools are **on** by default and can be switched off individually. A
+All 344 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -14933,3 +14933,280 @@ A quotation belongs to **no company**. A shipping point price is a fact about a
 market, not about anybody's operation; the records that carry the operation are
 the analyses that read it, and every one of those links to Company and is scoped
 by Frappe exactly as before.
+
+## The spray program, crop protection and the block's own life (v0.86.0)
+
+Three features that are one chain read end to end: a scout finds something, the
+threshold engine decides whether it is worth answering, the answer that gets
+chosen is often a spray, the spray shuts a block for a number of hours, and every
+hour and every gallon of it lands against the ground that consumed it.
+
+### The spray program
+
+`Spray Tank Mix` is the **recipe** and `Spray Application` is the **event**.
+Keeping them apart is what lets a farm approve one mix in March and file forty
+applications against it without forty chances to retype a rate.
+
+#### `create_spray_nozzle_config` / `list_spray_nozzle_configs`
+
+One nozzle set as it is actually plumbed on a boom or an air-blast tower.
+
+| Argument | Meaning |
+| --- | --- |
+| `nozzle_name` | What the crew calls it — the docname every application points at |
+| `flow_rate_gpm` | Gallons per minute **per nozzle**, off the manufacturer's chart |
+| `nozzle_type`, `pattern` | `Canopy Upper` / `Canopy Lower` are the halves of an air-blast tower |
+| `droplet_class` | ASABE S572 — what a label's drift language names |
+| `rated_pressure_psi`, `spacing_inches`, `nozzles_active`, `boom_width_ft` | |
+
+**Flow is per nozzle and is never silently multiplied.** A record holding boom
+flow is one nobody can check against the chart in their hand at the machine, and
+the only way to find the error would be to spray at twice the rate.
+
+#### `create_spray_tank_mix` — MUTATING, default off
+
+Several products in one tank, **each at its own rate per acre**.
+
+| Argument | Meaning |
+| --- | --- |
+| `mix_name` | The docname |
+| `products` | `[{item_code, rate_per_acre, rate_uom, nozzle_set, target}]` |
+| `dual_nozzle`, `nozzle_set_a`, `nozzle_set_b` | Two sets flipped mid-pass |
+| `tank_size_gal`, `carrier_gpa` | Together they give acres per tank |
+| `crop`, `target_pest`, `season_year`, `status`, `company`, `notes` | |
+
+**Per-product rates, not one rate for the tank.** A cover spray is two or three
+answers to two or three different problems, and only a per-product rate can be
+checked against a label.
+
+**The longest interval in the tank wins**, computed on save, for both REI and
+PHI. Each product's label numbers are **copied off its Item at mix time** — a mix
+filed in April and read in a hearing in November has to say what the label said
+in April, and a live join says what it says now.
+
+**A dual mix with nothing on one side is refused.** The flag's whole purpose is
+that an application will ask which set was running where; a mix that puts every
+product on `Both` cannot answer, and is a single-set mix ticked by accident.
+
+#### `create_spray_application` — MUTATING, default off
+
+What went out, over which blocks, when, by whom, **in what weather** — and the
+restricted-entry windows it opens.
+
+| Argument | Meaning |
+| --- | --- |
+| `blocks` | Names, or `[{block, acres, nozzle_set_used, completed_at}]` |
+| `tank_mix` | The recipe. Its products are **copied onto** the record |
+| `products` | Overrides the mix, for a tank mixed at the machine |
+| `completed_at` | When the pass **finished** — every window runs from here |
+| `status` | `Applied` (default), `Planned`, `Cancelled` |
+| `applicator_license` | One of the first things a state inspection asks for |
+| `ground_speed_mph` | With the nozzle's flow and spacing, gives gallons per acre |
+| `flip_performed`, `flip_at` | Whether the flip actually happened |
+| `wind_speed_mph`, `wind_direction`, `temperature_f`, `humidity_pct`, `weather_source`, `weather_recorded_at` | |
+| `rei_hours` | Overrides every label. Omit to record a spray that restricts nobody |
+
+**It does not refuse a tank with no label interval, and that is the one
+deliberate difference from `record_spray_application`.** A tank of foliar
+nitrogen restricts nobody and is still a real pass over real acres: it is
+recorded, **zero** `Spray REI` records are created, and the response says so.
+`record_spray_application` refuses in that case because its entire purpose *is*
+the window — and a zero-hour window reads as *this block is clear*.
+
+**One window per block, from that block's own completion time.** A block sprayed
+at eight in the morning does not stay shut because the last block of the pass
+finished at two. `get_active_rei` still answers every question about restricted
+entry; nothing here re-answers it.
+
+**Weather is recorded, never enforced.** Wind above the label window is drift;
+wind **below** it is a temperature inversion, which is the half people forget.
+Both earn an advisory written onto the record. A refusal would not prevent the
+spray — it went out three hours ago — only the record of it.
+
+**Calibration is arithmetic, not a typed number.** `gallons_per_acre` is
+`(GPM × 5940) / (mph × spacing)`; 5940 is square inches per acre over inches
+travelled per minute at 1 mph, spelled out in the constants so the one figure an
+inspector recomputes by hand can be checked.
+
+#### `list_spray_applications` / `get_spray_application`
+
+`applications_without_wind_recorded` is the point of the list: wind at the time
+of application is the most asked-for line on a state record and it cannot be
+reconstructed afterwards. `get_spray_application` reports which blocks are
+**still restricted right now**, read through the `Spray REI` register rather than
+recomputed, so it stays correct after a window is cancelled and on a bench whose
+scheduler has stopped.
+
+### Crop protection: observation → pressure → IPM
+
+Six threat categories, fixed because they are what a programme reports against:
+**Insect, Disease, Weed, Vertebrate, Abiotic, Nutrient**. Abiotic covers frost,
+hail and sunburn — damage with no organism behind it, which every pest register
+leaves out and every grower has to record anyway.
+
+#### `set_pest_action_threshold` / `list_pest_action_thresholds`
+
+| Argument | Meaning |
+| --- | --- |
+| `crop`, `threat`, `threat_category` | Matched case-insensitively |
+| `action_threshold` | Cross it and a recommendation is generated |
+| `comparison` | `Greater Than` (default) … or `Less Than` for a **floor** |
+| `warning_threshold` | The early number. Must arrive *first* |
+| `crop_stage` | Blank means every stage, and is the fallback |
+| `sample_unit` | An observation in a different unit is **not** evaluated |
+| `beneficial_ratio_min` | Predators at or above this ⇒ no control recommended |
+| `min_sample_size` | Below it, nothing is generated |
+| `recommended_methods` | `Method: action`, one per line — what makes it actionable |
+
+**The comparison is a column, not an assumption.** A Nutrient threshold fires
+*below* its number — tissue nitrogen under 2.2 % is the finding. A hard-coded
+greater-than would fire on every healthy block and never on a deficient one:
+wrong in both directions at once, and silently.
+
+**Revising retires the old row rather than editing it.** Every observation
+already evaluated points at the row that evaluated it, and an edit in July would
+rewrite what June's scouting was measured against.
+
+#### `create_crop_observation` — MUTATING, default off
+
+One call records the observation, moves the block's `Pest Pressure` for the
+season, and generates an `IPM Recommendation` where the action threshold was
+crossed. A programme that needs three records created in the right order gets one
+created and abandoned.
+
+**Beneficials override the threshold, and this is the point of the pipeline.** A
+count over threshold with predators present at the threshold's ratio generates
+*hold and re-scout* **instead of** a control — the block is already handling
+itself, and the spray that fixes it kills the predators and guarantees a worse
+flare in three weeks. The hold **replaces** the control options rather than
+joining them: presenting both is presenting no recommendation at all.
+
+**A sample too small to say generates nothing.** Two infested leaves out of five
+is not twenty per cent infestation. The observation is recorded in full and the
+pressure still moves; only the recommendation is withheld.
+
+**No threshold on file is an answer, not an error.** It is the ordinary state of
+a first season, and it is named as a gap — the observations already on file are
+how you find out what the number should be.
+
+#### `get_pest_pressure` / `list_pest_pressures`
+
+One row per block, threat and **season year**: a pest that was a problem last
+year and is quiet this year has to be two stories, or the first flare of the new
+season is read against last year's peak and looks like nothing.
+
+**The peak is not the latest.** A pest answered in June and quiet in August still
+peaked in June, and next year's programme is planned off the peak.
+
+**`trend` means deteriorating, not numerically larger.** On a Nutrient threat a
+*dropping* tissue reading is a **rising** pressure. `list_pest_pressures` orders
+by the status ladder rather than by the raw numbers, which are in different units
+across threats and cannot be ranked against one another.
+
+#### `get_ipm_recommendation` / `compute_sustainability_score`
+
+Options are ordered **least chemical first** — the first row is what a person
+reads, and a list opening with the spray would make the ladder decorative.
+Rejected options are kept: a farm that declined the biological option four times
+running has a pattern worth seeing.
+
+The scale is **this app's own 0–100**, and the response says so:
+
+| Method | Weight | |
+| --- | --- | --- |
+| Cultural | 1.00 | prevention — the rung everything else falls back from |
+| No Action | 1.00 | the threshold said act and the beneficials said wait |
+| Biological | 0.90 | a control that persists after you stop paying for it |
+| Mechanical | 0.75 | real intervention, no residue |
+| Behavioral | 0.70 | mating disruption, traps |
+| Unclassified | 0.30 | cannot be shown to have been anything other than a spray |
+| Chemical | 0.20 | the last rung — deliberately **not** zero |
+
+Chemical is not zero because a correctly timed threshold-driven spray *is*
+integrated pest management, and scoring it zero would tell a farm its best
+chemical decision was worth the same as its worst. Unclassified sits *below* it
+so the scale never rewards leaving the field blank.
+
+**Accepted actions displace proposed ones.** Before anything is accepted the
+score describes the options offered; once anything is accepted it describes what
+was **chosen**. Without that switch, a farm offered a release and a spray that
+chose the spray would keep the credit for having been offered the release.
+
+It is **not a certification** — not USDA organic, not Protected Harvest, not
+LIVE, not IPM Institute. What it is good for is a season-over-season number on
+one farm that moves when the programme actually changes.
+
+### The value block lifecycle
+
+#### `create_planting_season` / `list_planting_seasons` / `get_planting_season`
+
+`Field` already carries a crop, a variety and a planting year — that is the
+block's **current** state. `Planting Season` answers what a single set of columns
+structurally cannot: *what was out there in 2023, and what did that year cost,
+and what did it return.*
+
+| Argument | Meaning |
+| --- | --- |
+| `field`, `block_name` | `block_name` is the sub-block where a field is worked as several plantings |
+| `crop`, `variety`, `rootstock` | All `Data`, for the reason `Field.crop` is |
+| `lifecycle` | `Perennial` (default) or `Annual` |
+| `plant_year`, `season_year` | On an Annual they must be the same year |
+| `status` | `Establishing` / `Productive` / `Declining` / `Removed` |
+| `productive_from`, `productive_through` | Estimates, and load-bearing ones |
+| `acres`, `trees_planted`, `spacing_in_row_ft`, `spacing_between_rows_ft` | |
+| `cost_center` | Without one, no ledger cost reaches the block at all |
+
+**An Annual whose two years differ is refused.** An annual *is* its planting.
+Left as written, several years of establishment cost land against one year's
+revenue and the block reads as ruinous in one season and free in the others.
+
+**Status is the lifecycle, not the health**, and it is **not** derived from the
+dates: those are estimates made at planting, and the transition is a judgement
+somebody makes standing in the block. A fourth-leaf planting not yet carrying a
+commercial crop is still Establishing whatever the plan said in 2021.
+
+`leaf_year` is computed, never stored — a stored copy is wrong for eleven months
+of every year.
+
+#### `get_block_cost_summary`
+
+**Cost reaches a block two ways and adding them is wrong.** The ledger, through
+the cost centre, is authoritative. `Block Cost Entry` holds the three things the
+ledger cannot: a shared cost split across blocks, a cost with no ledger entry at
+all (owner labour, an in-kind trade), and the **capitalisation decision per
+cost**.
+
+The double count is **named rather than guessed at**. Rows swept from the ledger
+are excluded, because the ledger is counted directly. Rows carrying a journal- or
+GL-entry reference are *probably* already inside it — they are excluded **and
+listed**, because including them inflates the block's costs and dropping them
+silently understates, and a farm told which rows are in question settles it in a
+minute from the voucher numbers.
+
+#### `get_block_revenue_summary`
+
+**This is an attribution of revenue, not a recognition of it.** The ledger
+records that a settlement paid $84,000; nothing in it records that four blocks
+grew the fruit. The two answer *what did the business earn* and *which ground
+earned it*, and this figure must never be presented as the first.
+
+The **basis** is on every row because it is a judgement: a packing house settles
+on a pool, and splitting it back on delivered weight is right for a single
+variety and wrong the moment two blocks of different grades were pooled. Scale
+Tickets naming the block are listed, with unattributed ones flagged — deliveries
+whose return has not been traced back to the ground that grew them. This tool
+**reads** them and writes nothing; splitting a pool belongs to a person.
+
+#### `get_block_profitability`
+
+**An establishing block's negative margin is not a loss and this refuses to call
+it one.** A fourth-leaf cherry block that spent $180,000 and returned $4,000 has
+not lost $176,000 — it has invested it, and the investment is carried in the
+block's basis. Every figure is still reported, because the numbers are real and
+somebody needs them; what the app will not do is put the word *loss* next to
+them. `is_meaningful_as_profit_and_loss` is the flag and `verdict` says why.
+
+**`cumulative` is the point on a perennial.** A block that takes fifteen years to
+pay back cannot be judged on one of them — and a general ledger can only ever
+show you one of them, because the ledger's period is the fiscal year and the
+block's period is fifteen of them.

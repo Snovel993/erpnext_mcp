@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One thing that could be done about one threat, and which kind of control it is. The CONTROL METHOD is the field that matters: it is what the sustainability score is computed from, and it is what turns 'we do IPM' from a claim into a number a certifier can audit. An action with no method named is scored as Unclassified and drags the score down deliberately — an unclassified answer is one nobody can show was anything other than a spray.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "control_method",
+  "action",
+  "status",
+  "priority",
+  "detail_section",
+  "product",
+  "rate_per_acre",
+  "rate_uom",
+  "detail_col",
+  "due_by",
+  "farm_task",
+  "completed_on",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "default": "Cultural",
+   "description": "Which rung of the IPM ladder this action is on. Cultural and Biological sit above Mechanical, which sits above Behavioral, which sits above Chemical — that ordering is the whole of integrated pest management and it is what the sustainability score reads. 'No Action' is a real and often correct answer: a pest over threshold with its predators eating it is a block already handling itself.",
+   "fieldname": "control_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Control Method",
+   "options": "Cultural\nBiological\nMechanical\nBehavioral\nChemical\nNo Action\nUnclassified",
+   "reqd": 1
+  },
+  {
+   "columns": 4,
+   "description": "What to do, in the words somebody will act on. 'Release Typhlodromus at 2000/acre', not 'consider biological control'.",
+   "fieldname": "action",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Action",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "default": "Proposed",
+   "description": "Proposed is generated and not yet judged. Rejected is kept rather than deleted — a farm that declined the biological option four times running has a pattern worth seeing, and a deleted row hides it.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Proposed\nAccepted\nRejected\nDone"
+  },
+  {
+   "columns": 1,
+   "description": "Lower runs first. The generated order puts the least chemical option at the top, which is the order an IPM programme is supposed to consider them in.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority"
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "description": "The material, where there is one. A Chemical action with no product named is a decision nobody has finished making.",
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "label": "Product",
+   "options": "Item"
+  },
+  {
+   "fieldname": "rate_per_acre",
+   "fieldtype": "Float",
+   "label": "Rate / Acre",
+   "precision": "4"
+  },
+  {
+   "fieldname": "rate_uom",
+   "fieldtype": "Link",
+   "label": "Rate UOM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "detail_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When it stops being useful. Most IPM actions have a window rather than a deadline — a dormant oil applied at pink is not late, it is wrong.",
+   "fieldname": "due_by",
+   "fieldtype": "Date",
+   "label": "Due By"
+  },
+  {
+   "description": "The work order raised for this action, where one was. It is what connects a recommendation to somebody's actual day.",
+   "fieldname": "farm_task",
+   "fieldtype": "Link",
+   "label": "Farm Task",
+   "options": "Farm Task"
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Date",
+   "label": "Completed On"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "IPM Recommendation Action",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

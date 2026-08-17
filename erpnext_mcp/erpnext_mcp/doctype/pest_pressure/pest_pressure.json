@@ -1,0 +1,345 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One threat, tracked on one block, for one season. It is the RUNNING STATE that individual observations do not carry: when it was first seen, where it peaked, whether it is rising or falling, how many times it has crossed threshold, and what is being done about it.\n\nWHY IT IS A RECORD AND NOT A QUERY. 'Codling moth pressure on block 7' could be recomputed from the observation register on every read, and for one block it would be fast. The reason it is stored is that the question is asked the other way round — 'what is under pressure anywhere on this farm right now' — and that read is the board a manager works from on a Monday morning. Against a query it is a scan of every observation of the season, grouped, sorted, and filtered in Python; against this it is one indexed filter on status.\n\nONE ROW PER BLOCK, THREAT AND SEASON YEAR. Not per block and threat: a pest that was a problem in 2025 and is quiet in 2026 has to be two separate stories, or the first flare of the new season is read against a peak from the old one and looks like nothing.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "company",
+  "block_doctype",
+  "block",
+  "identity_col",
+  "threat_category",
+  "threat",
+  "crop",
+  "season_year",
+  "planting_season",
+  "history_section",
+  "first_observed_on",
+  "last_observed_on",
+  "observation_count",
+  "history_col",
+  "latest_value",
+  "peak_value",
+  "peak_on",
+  "sample_unit",
+  "trend_section",
+  "trend",
+  "previous_value",
+  "trend_col",
+  "beneficial_ratio",
+  "threshold_section",
+  "threshold",
+  "threshold_value",
+  "threshold_col",
+  "threshold_exceeded_count",
+  "first_exceeded_on",
+  "last_exceeded_on",
+  "response_section",
+  "open_recommendations",
+  "last_recommendation",
+  "response_col",
+  "last_spray_application",
+  "controlled_on",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Monitoring",
+   "description": "Monitoring is a threat being watched with nothing yet to answer. Watch is the early warning number crossed. Action is the action threshold crossed with a live recommendation against it. Controlled is a threat that was answered and has since fallen back. Closed is the end of the season, or a threat somebody has decided is over. The board a manager reads on a Monday is one filter on this column — see the doctype description for why that is the reason this is a record at all.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Monitoring\nWatch\nAction\nControlled\nClosed",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Field",
+   "fieldname": "block_doctype",
+   "fieldtype": "Link",
+   "label": "Block DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "block",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Block",
+   "options": "block_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "threat_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat Category",
+   "options": "Insect\nDisease\nWeed\nVertebrate\nAbiotic\nNutrient",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "threat",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "label": "Crop"
+  },
+  {
+   "description": "The season this pressure belongs to. Part of the key — see the doctype description for why a pest cannot be one continuous story across years.",
+   "fieldname": "season_year",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Season Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "planting_season",
+   "fieldtype": "Link",
+   "label": "Planting Season",
+   "options": "Planting Season",
+   "search_index": 1
+  },
+  {
+   "fieldname": "history_section",
+   "fieldtype": "Section Break",
+   "label": "History"
+  },
+  {
+   "fieldname": "first_observed_on",
+   "fieldtype": "Date",
+   "label": "First Observed On"
+  },
+  {
+   "fieldname": "last_observed_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Last Observed On",
+   "search_index": 1
+  },
+  {
+   "fieldname": "observation_count",
+   "fieldtype": "Int",
+   "label": "Observations"
+  },
+  {
+   "fieldname": "history_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The most recent count, in the sample unit below.",
+   "fieldname": "latest_value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Latest Value",
+   "precision": "4"
+  },
+  {
+   "description": "The worst reading of the season, which is not always the latest. A pest answered in June and quiet in August still peaked in June, and next year's programme is planned off the peak rather than off the last reading.",
+   "fieldname": "peak_value",
+   "fieldtype": "Float",
+   "label": "Peak Value",
+   "precision": "4"
+  },
+  {
+   "fieldname": "peak_on",
+   "fieldtype": "Date",
+   "label": "Peaked On"
+  },
+  {
+   "description": "The unit every value on this record is in. A pressure record whose observations changed unit mid-season is one whose peak and latest cannot be compared, and the tool refuses to mix them rather than storing two shapes of number in one column.",
+   "fieldname": "sample_unit",
+   "fieldtype": "Data",
+   "label": "Sample Unit"
+  },
+  {
+   "fieldname": "trend_section",
+   "fieldtype": "Section Break",
+   "label": "Trend"
+  },
+  {
+   "description": "Rising means DETERIORATING, not numerically larger. On a Nutrient threat where the finding is a number falling below a floor, a dropping tissue reading is a rising pressure — the column tracks the direction of the problem rather than the direction of the digit, because a manager scanning the board is asking which blocks are getting worse.",
+   "fieldname": "trend",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trend",
+   "options": "Unknown\nRising\nFlat\nFalling"
+  },
+  {
+   "description": "The reading before the latest one, kept so the trend can be recomputed and checked rather than taken on faith.",
+   "fieldname": "previous_value",
+   "fieldtype": "Float",
+   "label": "Previous Value",
+   "precision": "4"
+  },
+  {
+   "fieldname": "trend_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Beneficials over pest at the most recent observation, where both were counted. The number that decides whether a block over threshold is actually in trouble.",
+   "fieldname": "beneficial_ratio",
+   "fieldtype": "Float",
+   "label": "Beneficial Ratio",
+   "precision": "3"
+  },
+  {
+   "fieldname": "threshold_section",
+   "fieldtype": "Section Break",
+   "label": "Threshold"
+  },
+  {
+   "fieldname": "threshold",
+   "fieldtype": "Link",
+   "label": "Threshold",
+   "options": "Pest Action Threshold"
+  },
+  {
+   "fieldname": "threshold_value",
+   "fieldtype": "Float",
+   "label": "Threshold Value",
+   "precision": "4"
+  },
+  {
+   "fieldname": "threshold_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "How many observations this season crossed the action number. A pest that crossed once and fell back and one that has crossed six times running are different problems with the same latest reading.",
+   "fieldname": "threshold_exceeded_count",
+   "fieldtype": "Int",
+   "label": "Times Over Threshold"
+  },
+  {
+   "fieldname": "first_exceeded_on",
+   "fieldtype": "Date",
+   "label": "First Over Threshold"
+  },
+  {
+   "fieldname": "last_exceeded_on",
+   "fieldtype": "Date",
+   "label": "Last Over Threshold"
+  },
+  {
+   "fieldname": "response_section",
+   "fieldtype": "Section Break",
+   "label": "Response"
+  },
+  {
+   "description": "Recommendations still open against this pressure. A pressure at Action with none open is one whose recommendation was declined or closed without the pressure being reassessed, and it is worth seeing.",
+   "fieldname": "open_recommendations",
+   "fieldtype": "Int",
+   "label": "Open Recommendations",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_recommendation",
+   "fieldtype": "Link",
+   "label": "Last Recommendation",
+   "options": "IPM Recommendation"
+  },
+  {
+   "fieldname": "response_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The spray filed against this pressure, where the answer was chemical. It is what closes the loop from the observation that found the problem to the tank that answered it — and it is deliberately not the only kind of answer this record can carry.",
+   "fieldname": "last_spray_application",
+   "fieldtype": "Link",
+   "label": "Last Spray Application",
+   "options": "Spray Application"
+  },
+  {
+   "fieldname": "controlled_on",
+   "fieldtype": "Date",
+   "label": "Controlled On"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Pest Pressure",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "block,threat,status,season_year",
+ "sort_field": "last_observed_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

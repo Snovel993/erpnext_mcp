@@ -1,0 +1,454 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "What was sprayed, where, when, by whom, in what weather. This is the EVENT; Spray Tank Mix is the recipe. It is the record a state pesticide inspector asks for by name, and the shape of it is that question: product and rate, block and acres, applicator and licence, start and finish, and the wind and temperature at the time — which is the half most farms keep on a clipboard and lose.\n\nTHE MIX IS COPIED ONTO THE APPLICATION, NOT JUST LINKED. `products_applied` holds the mix as it stood when the tank was loaded. A mix somebody re-rates in July does not retroactively change what went out in May, and a record that read its rates through a live link would claim exactly that.\n\nIT OPENS RESTRICTED ENTRY AND DOES NOT REPLACE IT. One Spray REI record per block, because 'is block 7 clear' has to be one indexed query at a gate rather than a scan of the application register. This record is where the window came from; Spray REI is what answers for it.\n\nWEATHER IS RECORDED, NOT ENFORCED. Wind outside the label's window and a temperature inversion are advisories on the record rather than refusals. A spray that happened is a fact, and an app that refuses to record it because the wind was 12 mph has not prevented the spray — it has only prevented the record of it, which is the outcome an inspector cares about most and the operator least.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "company",
+  "tank_mix",
+  "identity_col",
+  "applicator",
+  "applicator_license",
+  "sprayer",
+  "source_task",
+  "timing_section",
+  "started_at",
+  "completed_at",
+  "timing_col",
+  "ground_speed_mph",
+  "tanks_used",
+  "blocks_section",
+  "blocks",
+  "total_acres",
+  "product_section",
+  "products_applied",
+  "nozzle_section",
+  "dual_nozzle",
+  "nozzle_set_a",
+  "set_a_purpose",
+  "nozzle_col",
+  "nozzle_set_b",
+  "set_b_purpose",
+  "flip_performed",
+  "flip_at",
+  "gallons_per_acre",
+  "weather_section",
+  "wind_speed_mph",
+  "wind_direction",
+  "temperature_f",
+  "weather_col",
+  "humidity_pct",
+  "sky_conditions",
+  "weather_source",
+  "weather_recorded_at",
+  "advisory_section",
+  "weather_advisories",
+  "interval_section",
+  "rei_hours",
+  "rei_source_item",
+  "rei_expires_at",
+  "interval_col",
+  "phi_days",
+  "phi_source_item",
+  "phi_clears_on",
+  "rei_records_created",
+  "cancel_section",
+  "cancelled_on",
+  "cancellation_reason",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Applied",
+   "description": "Applied is a spray that happened. Planned is one scheduled and not yet made — it opens no restricted entry, because nothing has been put on the ground. Cancelled is a record withdrawn, kept rather than deleted for the same reason a cancelled REI is: a restriction published to a crew and then lifted is itself something an inspector may ask about.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Applied\nPlanned\nCancelled",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "description": "The recipe this tank was loaded from. Optional: a spray mixed at the machine with no recipe on file is still a spray, and refusing to record it would push it onto a clipboard.",
+   "fieldname": "tank_mix",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Tank Mix",
+   "options": "Spray Tank Mix",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "applicator",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Applicator",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "description": "The applicator's licence or certification number as the state issued it. On the record rather than looked up, because the question is always 'who was licensed on that day' and a licence that has since lapsed still licensed this pass.",
+   "fieldname": "applicator_license",
+   "fieldtype": "Data",
+   "label": "Applicator Licence"
+  },
+  {
+   "fieldname": "sprayer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sprayer",
+   "options": "Asset Register",
+   "search_index": 1
+  },
+  {
+   "description": "The Farm Task this spray closed, where it came off one. Empty is legitimate — somebody mixed a tank and drove.",
+   "fieldname": "source_task",
+   "fieldtype": "Link",
+   "label": "Source Task",
+   "options": "Farm Task",
+   "search_index": 1
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Started At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "When the application FINISHED. Every restricted-entry window runs from here (or from a block's own completion, where the pass was long enough for them to differ) and not from when this was filed, so a record entered the next morning does not shut a block for an extra night.",
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Completed At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Ground speed driven. With the nozzle set's flow and spacing this is what gives gallons per acre — the calibration figure, which is the one an inspector recomputes rather than reads.",
+   "fieldname": "ground_speed_mph",
+   "fieldtype": "Float",
+   "label": "Ground Speed (mph)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "tanks_used",
+   "fieldtype": "Float",
+   "label": "Tanks Used",
+   "precision": "2"
+  },
+  {
+   "fieldname": "blocks_section",
+   "fieldtype": "Section Break",
+   "label": "Blocks"
+  },
+  {
+   "description": "Every block this pass reached, with the acres covered on each.",
+   "fieldname": "blocks",
+   "fieldtype": "Table",
+   "label": "Blocks",
+   "options": "Spray Application Block",
+   "reqd": 1
+  },
+  {
+   "description": "Sum of the block acres, rewritten on every save.",
+   "fieldname": "total_acres",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Total Acres",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "product_section",
+   "fieldtype": "Section Break",
+   "label": "Products As Applied"
+  },
+  {
+   "description": "The tank mix AS IT STOOD when this tank was loaded, as JSON — [{item_code, item_name, rate_per_acre, rate_uom, nozzle_set, rei_hours, phi_days, epa_reg_number, total_applied}]. Copied rather than read through the link, because a mix re-rated in July did not change what went out in May.",
+   "fieldname": "products_applied",
+   "fieldtype": "Long Text",
+   "label": "Products Applied"
+  },
+  {
+   "fieldname": "nozzle_section",
+   "fieldtype": "Section Break",
+   "label": "Nozzles"
+  },
+  {
+   "default": "0",
+   "fieldname": "dual_nozzle",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Dual Flip Nozzle"
+  },
+  {
+   "fieldname": "nozzle_set_a",
+   "fieldtype": "Link",
+   "label": "Nozzle Set A",
+   "options": "Spray Nozzle Config"
+  },
+  {
+   "fieldname": "set_a_purpose",
+   "fieldtype": "Data",
+   "label": "Set A Purpose"
+  },
+  {
+   "fieldname": "nozzle_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "nozzle_set_b",
+   "fieldtype": "Link",
+   "label": "Nozzle Set B",
+   "options": "Spray Nozzle Config"
+  },
+  {
+   "fieldname": "set_b_purpose",
+   "fieldtype": "Data",
+   "label": "Set B Purpose"
+  },
+  {
+   "default": "0",
+   "description": "The flip actually happened during this pass. A dual-set machine driven without flipping put only one set's products on the ground, and that is the difference between what was planned and what was applied.",
+   "fieldname": "flip_performed",
+   "fieldtype": "Check",
+   "label": "Flip Performed"
+  },
+  {
+   "fieldname": "flip_at",
+   "fieldtype": "Datetime",
+   "label": "Flipped At"
+  },
+  {
+   "description": "Gallons of finished spray per acre, computed from the nozzle set's flow rate, its spacing and the ground speed where all three are known. Read-only: it is the calibration arithmetic, and a typed figure is one nobody can check.",
+   "fieldname": "gallons_per_acre",
+   "fieldtype": "Float",
+   "label": "Gallons / Acre",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "weather_section",
+   "fieldtype": "Section Break",
+   "label": "Weather At Application"
+  },
+  {
+   "description": "Wind speed at the time of application. Most labels set a window — commonly 3 to 10 mph — and both ends matter: above it is drift, below it is a temperature inversion that holds the spray in a layer and moves it somewhere nobody chose.",
+   "fieldname": "wind_speed_mph",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Wind Speed (mph)",
+   "precision": "1"
+  },
+  {
+   "description": "Direction the wind was FROM, in the compass words a person says — 'WSW'. Free text rather than degrees, because it is written by somebody standing in a block with a hand meter.",
+   "fieldname": "wind_direction",
+   "fieldtype": "Data",
+   "label": "Wind From"
+  },
+  {
+   "fieldname": "temperature_f",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Temperature (F)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "weather_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "humidity_pct",
+   "fieldtype": "Float",
+   "label": "Relative Humidity (%)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "sky_conditions",
+   "fieldtype": "Data",
+   "label": "Sky Conditions"
+  },
+  {
+   "default": "Observed",
+   "description": "Where the reading came from. An inspector treats a hand meter at the block and a station eight miles away differently, and a record that does not say which has made that judgement for them.",
+   "fieldname": "weather_source",
+   "fieldtype": "Select",
+   "label": "Weather Source",
+   "options": "Observed\nOn-Site Station\nNearby Station\nForecast API\nEstimated"
+  },
+  {
+   "description": "When the reading was taken. A reading from three hours before the pass is a different fact from one taken at the block, and the gap is what says which.",
+   "fieldname": "weather_recorded_at",
+   "fieldtype": "Datetime",
+   "label": "Weather Recorded At"
+  },
+  {
+   "fieldname": "advisory_section",
+   "fieldtype": "Section Break",
+   "label": "Advisories"
+  },
+  {
+   "description": "What was outside the ordinary window at application time — wind too high, wind low enough for an inversion, temperature high enough for volatilisation, weather not recorded at all. Written on every save. ADVISORY, NOT A REFUSAL: a spray that happened is a fact, and refusing the record does not undo the pass.",
+   "fieldname": "weather_advisories",
+   "fieldtype": "Small Text",
+   "label": "Weather Advisories",
+   "read_only": 1
+  },
+  {
+   "fieldname": "interval_section",
+   "fieldtype": "Section Break",
+   "label": "Label Intervals"
+  },
+  {
+   "description": "The longest restricted-entry interval in the tank. What actually shut the blocks.",
+   "fieldname": "rei_hours",
+   "fieldtype": "Float",
+   "label": "REI Hours",
+   "precision": "2"
+  },
+  {
+   "fieldname": "rei_source_item",
+   "fieldtype": "Link",
+   "label": "REI From",
+   "options": "Item"
+  },
+  {
+   "description": "When the LAST block of this application clears. Per-block expiry is on each Spray REI record, which is what a gate asks.",
+   "fieldname": "rei_expires_at",
+   "fieldtype": "Datetime",
+   "label": "REI Expires At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "interval_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "phi_days",
+   "fieldtype": "Float",
+   "label": "PHI Days",
+   "precision": "2"
+  },
+  {
+   "fieldname": "phi_source_item",
+   "fieldtype": "Link",
+   "label": "PHI From",
+   "options": "Item"
+  },
+  {
+   "description": "The earliest date this fruit may be harvested. The number that decides whether a block can be picked, which is why it is stored rather than recomputed off a master somebody may correct.",
+   "fieldname": "phi_clears_on",
+   "fieldtype": "Date",
+   "label": "PHI Clears On",
+   "read_only": 1
+  },
+  {
+   "description": "How many Spray REI windows this application opened. Zero on a Planned application, and zero where nothing in the tank has a label interval — which is the ordinary case for a foliar nutrient and is different from a failure.",
+   "fieldname": "rei_records_created",
+   "fieldtype": "Int",
+   "label": "REI Records Created",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancel_section",
+   "fieldtype": "Section Break",
+   "label": "Cancellation"
+  },
+  {
+   "fieldname": "cancelled_on",
+   "fieldtype": "Datetime",
+   "label": "Cancelled On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancellation Reason"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray Application",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "tank_mix,applicator,completed_at,status",
+ "sort_field": "completed_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

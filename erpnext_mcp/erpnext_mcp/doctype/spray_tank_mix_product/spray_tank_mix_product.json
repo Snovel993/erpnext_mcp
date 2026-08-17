@@ -1,0 +1,132 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "One product in one tank, at its own rate per acre. A tank mix is several of these and each carries its own rate, its own label interval and — where the machine flips between two sets mid-pass — its own nozzle set. The label numbers are COPIED here at mix time rather than fetched on every read, because a mix filed in April and read in a hearing in November has to say what the label said in April.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item",
+  "item_name",
+  "rate_per_acre",
+  "rate_uom",
+  "nozzle_set",
+  "label_section",
+  "rei_hours",
+  "phi_days",
+  "label_col",
+  "epa_reg_number",
+  "target",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Product",
+   "options": "Item",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "columns": 2,
+   "description": "The product's name as the register spelled it when the mix was written. Stored rather than fetched so a mix read years later names what actually went in the tank.",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Product Name"
+  },
+  {
+   "columns": 1,
+   "description": "How much of THIS product goes on one acre. Per product rather than per tank: a tank mix is several rates that happen to share a tank, and a single tank figure cannot be checked against a label.",
+   "fieldname": "rate_per_acre",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Rate / Acre",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "rate_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Rate UOM",
+   "options": "UOM"
+  },
+  {
+   "columns": 1,
+   "default": "Both",
+   "description": "Which nozzle set carries this product on a dual-set machine. 'A' and 'B' are the two sets that get flipped mid-pass — a fungicide through the upper tower and an insecticide through the lower, or a band herbicide flipped in at the headland. 'Both' means it goes out through whichever set is running, which is what a single-set machine always means.",
+   "fieldname": "nozzle_set",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nozzle Set",
+   "options": "Both\nA\nB"
+  },
+  {
+   "fieldname": "label_section",
+   "fieldtype": "Section Break",
+   "label": "Label"
+  },
+  {
+   "description": "Restricted-entry interval off this product's own Item record, copied at mix time. The LONGEST of these in the tank is what closes the block — see the Spray Tank Mix description.",
+   "fieldname": "rei_hours",
+   "fieldtype": "Float",
+   "label": "REI Hours",
+   "precision": "2"
+  },
+  {
+   "description": "Pre-harvest interval in days, copied the same way.",
+   "fieldname": "phi_days",
+   "fieldtype": "Float",
+   "label": "PHI Days",
+   "precision": "2"
+  },
+  {
+   "fieldname": "label_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "EPA registration number, copied off the Item where the register carries one. It is what a state inspector asks for by number rather than by name.",
+   "fieldname": "epa_reg_number",
+   "fieldtype": "Data",
+   "label": "EPA Reg. Number"
+  },
+  {
+   "description": "What this product is in the tank for — 'codling moth', 'powdery mildew', 'suppression only'. A mix with a product nobody can say the purpose of is a mix somebody added out of habit.",
+   "fieldname": "target",
+   "fieldtype": "Data",
+   "label": "Target"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Spray Tank Mix Product",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

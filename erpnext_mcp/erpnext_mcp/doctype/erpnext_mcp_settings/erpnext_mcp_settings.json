@@ -857,7 +857,33 @@
   "allow_create_crop",
   "allow_update_crop",
   "allow_create_market",
-  "allow_update_market"
+  "allow_update_market",
+  "spray_program_section",
+  "allow_list_spray_nozzle_configs",
+  "allow_list_spray_applications",
+  "allow_get_spray_application",
+  "spray_program_col",
+  "allow_create_spray_nozzle_config",
+  "allow_create_spray_tank_mix",
+  "allow_create_spray_application",
+  "crop_protection_section",
+  "allow_list_pest_action_thresholds",
+  "allow_list_crop_observations",
+  "allow_get_pest_pressure",
+  "allow_list_pest_pressures",
+  "crop_protection_col",
+  "allow_get_ipm_recommendation",
+  "allow_compute_sustainability_score",
+  "allow_set_pest_action_threshold",
+  "allow_create_crop_observation",
+  "block_lifecycle_section",
+  "allow_list_planting_seasons",
+  "allow_get_planting_season",
+  "allow_get_block_cost_summary",
+  "block_lifecycle_col",
+  "allow_get_block_revenue_summary",
+  "allow_get_block_profitability",
+  "allow_create_planting_season"
  ],
  "fields": [
   {
@@ -6523,6 +6549,176 @@
    "fieldname": "allow_update_market",
    "fieldtype": "Check",
    "label": "Update Market"
+  },
+  {
+   "fieldname": "spray_program_section",
+   "fieldtype": "Section Break",
+   "label": "Spray Program — Tank Mixes, Nozzles and Applications"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every nozzle set on file — tip type, pattern, flow rate per nozzle, rated pressure and ASABE droplet class. Retired sets are hidden unless asked for.",
+   "fieldname": "allow_list_spray_nozzle_configs",
+   "fieldtype": "Check",
+   "label": "List Spray Nozzle Configs"
+  },
+  {
+   "default": "1",
+   "description": "READ. COMPLIANCE-CRITICAL. Spray applications over a window — product and rate, block and acres, applicator and licence, and the weather at the time. This is the pesticide record a state inspector asks for. Names the passes with no wind speed recorded, which cannot be reconstructed afterwards.",
+   "fieldname": "allow_list_spray_applications",
+   "fieldtype": "Check",
+   "label": "List Spray Applications"
+  },
+  {
+   "default": "1",
+   "description": "READ. COMPLIANCE-CRITICAL. One spray in full — the tank as applied, every block and its acres, the weather, the label intervals, and which blocks are still restricted right now. The live restrictions are read through the Spray REI register rather than recomputed, so they stay correct after a window is cancelled.",
+   "fieldname": "allow_get_spray_application",
+   "fieldtype": "Check",
+   "label": "Get Spray Application"
+  },
+  {
+   "fieldname": "spray_program_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Register one nozzle set as it is plumbed on a boom or air-blast tower. Flow rate is per nozzle off the manufacturer's chart, not the boom total.",
+   "fieldname": "allow_create_spray_nozzle_config",
+   "fieldtype": "Check",
+   "label": "Create Spray Nozzle Config"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Write a tank mix — several products in one tank, each at its OWN rate per acre, optionally split across two nozzle sets flipped mid-pass. Computes the longest REI and PHI in the tank and copies each label's numbers off its Item at mix time. Refuses a dual mix with nothing on one side.",
+   "fieldname": "allow_create_spray_tank_mix",
+   "fieldtype": "Check",
+   "label": "Create Spray Tank Mix"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. COMPLIANCE-CRITICAL. File a spray — what went out, over which blocks, when, by whom, in what weather — and open one Spray REI window per block. Unlike Record Spray Application it does NOT refuse a tank with no label interval: a foliar nutrient restricts nobody and is still a real pass, so it records the application and creates zero windows. Weather outside the label range is an advisory on the record, never a refusal.",
+   "fieldname": "allow_create_spray_application",
+   "fieldtype": "Check",
+   "label": "Create Spray Application"
+  },
+  {
+   "fieldname": "crop_protection_section",
+   "fieldtype": "Section Break",
+   "label": "Crop Protection — Observation, Pressure and IPM"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every action threshold on file — how many of a threat, on a crop, at a growth stage, before somebody acts. Names the thresholds with no recommended methods, which generate an alarm rather than something a crew can act on.",
+   "fieldname": "allow_list_pest_action_thresholds",
+   "fieldtype": "Check",
+   "label": "List Pest Action Thresholds"
+  },
+  {
+   "default": "1",
+   "description": "READ. Scouting records over a window, across all six threat categories. Names the observations recorded but never evaluated because no threshold was on file.",
+   "fieldname": "allow_list_crop_observations",
+   "fieldtype": "Check",
+   "label": "List Crop Observations"
+  },
+  {
+   "default": "1",
+   "description": "READ. One tracked threat in full — first seen, peak, latest, trend, times over threshold — with its scouting history and every recommendation raised against it. The peak is not the latest: a pest answered in June still peaked in June, and next year's programme is planned off the peak.",
+   "fieldname": "allow_get_pest_pressure",
+   "fieldtype": "Check",
+   "label": "Get Pest Pressure"
+  },
+  {
+   "default": "1",
+   "description": "READ. The board — every threat being tracked, worst first, ordered by the status ladder rather than by raw numbers that are in different units and cannot be ranked against each other.",
+   "fieldname": "allow_list_pest_pressures",
+   "fieldtype": "Check",
+   "label": "List Pest Pressures"
+  },
+  {
+   "fieldname": "crop_protection_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "READ. One recommendation in full — what was seen, what number it crossed, every option with its control method, least chemical first, and what the mix scores. Rejected options are kept rather than deleted.",
+   "fieldname": "allow_get_ipm_recommendation",
+   "fieldtype": "Check",
+   "label": "Get IPM Recommendation"
+  },
+  {
+   "default": "1",
+   "description": "READ. Score a set of control methods on this app's own 0-100 IPM scale — a hypothetical, one recommendation, or a whole block or season. NOT a certification: not USDA organic, not Protected Harvest, not IPM Institute. Writes nothing.",
+   "fieldname": "allow_compute_sustainability_score",
+   "fieldtype": "Check",
+   "label": "Compute Sustainability Score"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Write or revise a pest action threshold. The comparison is an argument, not an assumption — a Nutrient threshold fires BELOW its number. Revising retires the old row rather than editing it, so observations already evaluated still point at the number that evaluated them.",
+   "fieldname": "allow_set_pest_action_threshold",
+   "fieldtype": "Check",
+   "label": "Set Pest Action Threshold"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File what a scout saw and run the threshold engine on it: records the observation, moves the block's pest pressure, and generates an IPM recommendation where the action threshold was crossed. A count over threshold with beneficials present at the threshold's ratio generates 'hold and re-scout' instead of a control.",
+   "fieldname": "allow_create_crop_observation",
+   "fieldtype": "Check",
+   "label": "Create Crop Observation"
+  },
+  {
+   "fieldname": "block_lifecycle_section",
+   "fieldtype": "Section Break",
+   "label": "Value Block Lifecycle — Plantings, Cost and Revenue"
+  },
+  {
+   "default": "1",
+   "description": "READ. Plantings on file, newest plant year first. Reports establishing acres — the acreage currently consuming money and returning none, which no report built on a fiscal year will show.",
+   "fieldname": "allow_list_planting_seasons",
+   "fieldtype": "Check",
+   "label": "List Planting Seasons"
+  },
+  {
+   "default": "1",
+   "description": "READ. One planting with where it stands in its own life, including leaf year and what the dates and the status say about each other.",
+   "fieldname": "allow_get_planting_season",
+   "fieldtype": "Check",
+   "label": "Get Planting Season"
+  },
+  {
+   "default": "1",
+   "description": "READ. What one planting cost — from the ledger via its cost center, from the attribution register, and the overlap between them. Rows that are probably already inside the ledger figure are excluded from the total and named rather than silently included or dropped.",
+   "fieldname": "allow_get_block_cost_summary",
+   "fieldtype": "Check",
+   "label": "Get Block Cost Summary"
+  },
+  {
+   "fieldname": "block_lifecycle_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "1",
+   "description": "READ. What one planting returned, and on what basis it was attributed. This is an ATTRIBUTION of revenue the ledger already recognised, not a recognition of it — it answers which ground earned the money, not what the business earned. Flags deliveries whose return has not been attributed back.",
+   "fieldname": "allow_get_block_revenue_summary",
+   "fieldtype": "Check",
+   "label": "Get Block Revenue Summary"
+  },
+  {
+   "default": "1",
+   "description": "READ. Cost against return for one planting, read against its own lifecycle. An establishing block's negative margin is reported as investment carried in the block's basis, NOT as a loss. Pass cumulative for a perennial's whole life to date, which is the only honest way to read a block that takes years to pay back.",
+   "fieldname": "allow_get_block_profitability",
+   "fieldtype": "Check",
+   "label": "Get Block Profitability"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Open a planting — the junction between a block and what grows on it for a year. Perennial and annual are different shapes: an Annual whose plant year and season year differ is refused, because several years of establishment cost landing against one year's revenue makes a block read as ruinous in one season and free in the others.",
+   "fieldname": "allow_create_planting_season",
+   "fieldtype": "Check",
+   "label": "Create Planting Season"
   }
  ],
  "index_web_pages_for_search": 0,

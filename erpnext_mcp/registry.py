@@ -54,6 +54,7 @@ from .tools import (
 	badges,
 	banking,
 	banking_bridge,
+	blocklifecycle,
 	breakeven,
 	bucket_log,
 	budget,
@@ -63,6 +64,7 @@ from .tools import (
 	compliance,
 	controls,
 	costing,
+	cropprotect,
 	dimensions,
 	discipline,
 	disclosure,
@@ -123,6 +125,7 @@ from .tools import (
 	signed_documents,
 	signers,
 	signing_evidence,
+	spray,
 	spray_rei,
 	state_tax,
 	stock_inventory,
@@ -23119,7 +23122,1129 @@ TOOLS = {
 			"the Agricultural UOM Conversion DocType, which ships with erpnext_mcp — run `bench migrate`"
 		),
 	),
-}
+	# ── v0.86.0: the spray program ──────────────────────────────────────────
+	"create_spray_nozzle_config": _tool(
+		spray.create_spray_nozzle_config,
+		"MUTATING (default OFF). Register one nozzle set as it is actually "
+		"plumbed on a boom or an air-blast tower — tip type, pattern, flow rate, "
+		"pressure and droplet class.\n\n"
+		"FLOW RATE IS PER NOZZLE, off the manufacturer's chart, not the boom "
+		"total. A record that stored boom flow would be one nobody could check "
+		"against the chart in their hand at the machine, and the only way to "
+		"find the error would be to spray at twice the rate.\n\n"
+		"DROPLET CLASS IS A FIRST-CLASS FIELD because it is the drift control on "
+		"most labels — 'apply as Coarse or coarser' is an instruction about that "
+		"column.\n\n"
+		"Nothing is computed into a rate here. Gallons per acre depends on "
+		"ground speed, which is a property of the pass rather than of the "
+		"nozzle, so it is worked out on the application.",
+		{
+			"nozzle_name": _field(
+				_STRING,
+				"What the crew calls this set — 'Air blast upper', 'Herbicide band 8003'. "
+				"It is the docname and what every application points at.",
+			),
+			"flow_rate_gpm": _field(
+				_NUMBER, "Gallons per minute PER NOZZLE at the rated pressure. Required, and must be > 0."
+			),
+			"nozzle_type": _field(
+				_STRING,
+				"Flat Fan, Hollow Cone, Full Cone, Air Induction, Twin Flat Fan, Disc Core, Flood, "
+				"Stream Bar or Other.",
+			),
+			"pattern": _field(
+				_STRING,
+				"Broadcast, Band, Directed, Air Blast, Canopy Upper, Canopy Lower, Over The Row or "
+				"Soil. The two canopy values are the halves of an air-blast tower and are the "
+				"ordinary case for a dual set on tree fruit.",
+			),
+			"droplet_class": _field(
+				_STRING,
+				"ASABE S572 class — Very Fine through Ultra Coarse. What a label's drift language "
+				"names.",
+			),
+			"rated_pressure_psi": _field(_NUMBER, "The pressure the flow rate was read at."),
+			"spacing_inches": _field(_NUMBER, "Distance between tips along the boom."),
+			"nozzles_active": _field(_INTEGER, "How many tips of this set are open during a pass."),
+			"boom_width_ft": _field(_NUMBER, "Effective swath. Left blank for an air-blast set."),
+			"manufacturer": _field(_STRING, "Optional."),
+			"orifice_color": _field(_STRING, "The ISO colour moulded into the tip."),
+			"disabled": _field(_BOOLEAN, "Register it already retired. Default false."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else about the set."),
+		},
+		required=("nozzle_name", "flow_rate_gpm"),
+		mutating=True,
+		title="Register a nozzle configuration",
+		available=_needs_doctype("Spray Nozzle Config"),
+		requires="the Spray Nozzle Config DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_spray_nozzle_configs": _tool(
+		spray.list_spray_nozzle_configs,
+		"Every nozzle set on file, with flow, pressure, pattern and droplet "
+		"class. Read-only. Disabled sets are hidden unless asked for — a set "
+		"that has come off the machine is kept rather than deleted, because "
+		"applications made through it still have to resolve it.",
+		{
+			"company": _COMPANY,
+			"nozzle_type": _field(_STRING, "Optional. Narrow to one type."),
+			"pattern": _field(_STRING, "Optional. Narrow to one pattern."),
+			"droplet_class": _field(_STRING, "Optional. Narrow to one droplet class."),
+			"include_disabled": _field(_BOOLEAN, "Also show retired sets. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List nozzle configurations",
+		available=_needs_doctype("Spray Nozzle Config"),
+		requires="the Spray Nozzle Config DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_spray_tank_mix": _tool(
+		spray.create_spray_tank_mix,
+		"MUTATING (default OFF). Write a tank mix: several products in one tank, "
+		"EACH AT ITS OWN RATE PER ACRE, optionally split across two nozzle sets "
+		"that get flipped during the pass.\n\n"
+		"PER-PRODUCT RATES, NOT ONE RATE FOR THE TANK. A cover spray is two or "
+		"three answers to two or three different problems, and only a "
+		"per-product rate can be checked against a label.\n\n"
+		"THE LONGEST INTERVAL IN THE TANK IS COMPUTED AND STORED. A four-hour "
+		"product and a twenty-four-hour one restrict a block for twenty-four "
+		"hours; the block does not become half-enterable at hour twelve. The "
+		"same rule gives the pre-harvest interval. Each product's label numbers "
+		"are COPIED off its Item at mix time, so a mix read years later says "
+		"what the label said then rather than what it says now.\n\n"
+		"A DUAL MIX WITH NOTHING ON ONE SIDE IS REFUSED. The point of the flag "
+		"is that an application will ask which set was running where; a mix "
+		"claiming two sets while putting every product on 'Both' cannot answer, "
+		"and is a single-set mix somebody ticked by accident.\n\n"
+		"This is the RECIPE. The event is create_spray_application, which points "
+		"here and copies the mix onto itself.",
+		{
+			"mix_name": _field(
+				_STRING,
+				"What the farm calls it — 'Petal fall cover 1'. The docname, and what every "
+				"application filed against it means.",
+			),
+			"products": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item_code": _field(_STRING, "The product's Item code."),
+						"rate_per_acre": _field(_NUMBER, "How much of THIS product goes on one acre."),
+						"rate_uom": _field(_STRING, "Unit the rate is in."),
+						"nozzle_set": _field(
+							_STRING,
+							"'A', 'B' or 'Both'. A and B are the two sets flipped mid-pass; Both "
+							"means it goes out through whichever set is running.",
+						),
+						"target": _field(_STRING, "What this product is in the tank for."),
+						"epa_reg_number": _field(_STRING, "Optional override of the Item's own."),
+					},
+					"required": ["item_code", "rate_per_acre"],
+				},
+				"description": "The tank. Each product at its own rate per acre. Required.",
+			},
+			"dual_nozzle": _field(
+				_BOOLEAN,
+				"This mix goes out through TWO sets flipped during the pass. Requires a product on "
+				"each of A and B, and both nozzle sets named.",
+			),
+			"nozzle_set_a": _field(_STRING, "Spray Nozzle Config docname for set A."),
+			"nozzle_set_b": _field(_STRING, "Spray Nozzle Config docname for set B."),
+			"set_a_purpose": _field(_STRING, "What set A is for — 'fungicide, upper canopy'."),
+			"set_b_purpose": _field(_STRING, "What set B is for."),
+			"tank_size_gal": _field(_NUMBER, "Working volume of the tank."),
+			"carrier_gpa": _field(
+				_NUMBER,
+				"Total gallons of finished spray per acre. With the tank size this gives acres per "
+				"tank, which is the number the person filling it works with.",
+			),
+			"crop": _field(_STRING, "Optional."),
+			"target_pest": _field(_STRING, "What the tank as a whole is aimed at."),
+			"season_year": _field(_INTEGER, "Optional."),
+			"status": _field(_STRING, "Draft, Approved or Retired. Default Draft."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("mix_name", "products"),
+		mutating=True,
+		title="Create a spray tank mix",
+		available=_needs_doctype("Spray Tank Mix"),
+		requires="the Spray Tank Mix DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_spray_application": _tool(
+		spray.create_spray_application,
+		"MUTATING (default OFF). File a spray — what went out, over which "
+		"blocks, when, by whom, IN WHAT WEATHER — and open the restricted-entry "
+		"windows it creates.\n\n"
+		"THIS IS THE RECORD A STATE PESTICIDE INSPECTOR ASKS FOR. Product and "
+		"rate, block and acres, applicator and licence, start and finish, wind "
+		"and temperature. `record_spray_application` (v0.78.0) remains the "
+		"narrower task-driven path whose only job is the REI window; this is the "
+		"application itself.\n\n"
+		"IT DOES NOT REFUSE A TANK WITH NO LABEL INTERVAL, and that is the one "
+		"deliberate difference from record_spray_application. A tank of foliar "
+		"nitrogen restricts nobody and is still a real pass over real acres. It "
+		"is recorded, ZERO Spray REI records are created, and the response says "
+		"so. record_spray_application refuses in that case because its whole "
+		"purpose is the window, and a zero-hour window reads as 'this block is "
+		"clear'.\n\n"
+		"ONE REI PER BLOCK, from that block's OWN completion time where the pass "
+		"was long enough for them to differ — a block sprayed at eight in the "
+		"morning does not stay shut because the last block finished at two. "
+		"get_active_rei still answers every question about restricted entry.\n\n"
+		"WEATHER IS RECORDED, NOT ENFORCED. Wind above the label window is "
+		"drift; wind BELOW it is a temperature inversion, which is the "
+		"non-obvious half. Both earn an advisory written onto the record. A "
+		"refusal would not prevent the spray — it went out three hours ago — "
+		"only the record of it.\n\n"
+		"THE MIX IS COPIED ONTO THE APPLICATION, not read through the link. A "
+		"recipe re-rated in July did not change what went out in May. Passing "
+		"`products` overrides the mix and the difference is reported rather than "
+		"refused: a crew that dropped a product they ran out of applied "
+		"something other than the recipe, and the record is of what went out.",
+		{
+			"blocks": {
+				"type": "array",
+				"items": {"type": ["string", "object"]},
+				"description": (
+					'Either names — ["Home-7", "Home-8"] — or objects carrying the per-block '
+					'detail: [{"block": "Home-7", "acres": 4.2, "nozzle_set_used": "A then B", '
+					'"completed_at": "2026-05-04 09:40:00"}]. Resolved against Field and Asset '
+					"Register, the same two registers Spray REI uses."
+				),
+			},
+			"block_doctype": _field(
+				_STRING, "'Field' or 'Asset Register'. Only needed where a name exists in both."
+			),
+			"tank_mix": _field(_STRING, "Spray Tank Mix docname. Its products are copied onto the record."),
+			"products": {
+				"type": "array",
+				"items": {"type": "object"},
+				"description": (
+					"The tank as actually loaded, same shape as create_spray_tank_mix's `products`. "
+					"Overrides the mix; use for a tank mixed at the machine with no recipe on file, "
+					"or where the crew departed from one."
+				),
+			},
+			"completed_at": _field(
+				_STRING,
+				"YYYY-MM-DD HH:MM:SS. When the pass FINISHED — every REI window runs from here, so "
+				"a record entered next morning does not shut a block for an extra night. "
+				"Default now.",
+			),
+			"started_at": _field(_STRING, "When it began. Defaults to completed_at."),
+			"status": _field(
+				_STRING,
+				"Applied (default), Planned or Cancelled. A Planned application opens NO "
+				"restricted-entry window — nothing is on the ground yet.",
+			),
+			"applicator": _field(_STRING, "Who applied it. Defaults to the session user."),
+			"applicator_license": _field(
+				_STRING,
+				"The applicator's state licence number. One of the first things asked for in a "
+				"pesticide record inspection.",
+			),
+			"sprayer": _field(_STRING, "Asset Register docname of the machine."),
+			"source_task": _field(_STRING, "Farm Task this spray closed, where it came off one."),
+			"ground_speed_mph": _field(
+				_NUMBER,
+				"Speed driven. With the nozzle set's flow and spacing this gives gallons per acre — "
+				"the calibration figure an inspector recomputes rather than reads.",
+			),
+			"tanks_used": _field(_NUMBER, "How many tank loads the pass took."),
+			"nozzle_set_a": _field(_STRING, "Overrides the mix's set A."),
+			"nozzle_set_b": _field(_STRING, "Overrides the mix's set B."),
+			"dual_nozzle": _field(_BOOLEAN, "Overrides the mix's dual flag."),
+			"flip_performed": _field(
+				_BOOLEAN,
+				"The flip actually happened. A dual machine driven without flipping put only one "
+				"set's products on the ground, which is reported.",
+			),
+			"flip_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS. When the flip was made."),
+			"wind_speed_mph": _field(
+				_NUMBER,
+				"Wind at application. Outside the ordinary 3-10 mph window earns an advisory in "
+				"BOTH directions — below it is an inversion, not calm safety.",
+			),
+			"wind_direction": _field(_STRING, "Direction the wind was FROM — 'WSW'."),
+			"temperature_f": _field(_NUMBER, "Temperature at application."),
+			"humidity_pct": _field(_NUMBER, "Relative humidity."),
+			"sky_conditions": _field(_STRING, "Free text."),
+			"weather_source": _field(
+				_STRING,
+				"Observed, On-Site Station, Nearby Station, Forecast API or Estimated. An inspector "
+				"treats a hand meter at the block and a station eight miles away differently.",
+			),
+			"weather_recorded_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS. When the reading was taken."),
+			"rei_hours": _field(
+				_NUMBER,
+				"Optional. State the restricted-entry interval outright, overriding every label in "
+				"the tank — for a product not yet in the register, or a state interval longer than "
+				"the label. Omit entirely to record a spray that restricts nobody.",
+			),
+			"rei_source_item": _field(_STRING, "Which product a stated rei_hours is attributed to."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else about the pass."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("blocks",),
+		mutating=True,
+		title="Record a spray application",
+		available=_needs_doctype("Spray Application"),
+		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_spray_applications": _tool(
+		spray.list_spray_applications,
+		"Spray applications over a window, newest first. Read-only, and the "
+		"spray record a farm hands to an inspector.\n\n"
+		"`applications_without_wind_recorded` IS THE POINT OF THE SUMMARY. Wind "
+		"at the time of application is the most asked-for line on a state "
+		"pesticide record and it cannot be reconstructed afterwards, so the "
+		"passes missing it are named rather than left to be discovered one at a "
+		"time.\n\n"
+		"Filtering by `block` is done after the query, because the block lives "
+		"on a child table and this app writes no raw SQL.",
+		{
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "YYYY-MM-DD. Earliest completion."),
+			"to_date": _field(_STRING, "YYYY-MM-DD. Latest completion."),
+			"block": _field(_STRING, "Only passes that reached this block."),
+			"tank_mix": _field(_STRING, "Only passes of this mix."),
+			"sprayer": _field(_STRING, "Only passes by this machine."),
+			"applicator": _field(_STRING, "Only passes by this person."),
+			"source_task": _field(_STRING, "Only the pass that closed this Farm Task."),
+			"status": _field(_STRING, "Applied, Planned or Cancelled."),
+			"limit": _LIMIT,
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		title="List spray applications",
+		available=_needs_doctype("Spray Application"),
+		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_spray_application": _tool(
+		spray.get_spray_application,
+		"One spray in full — the tank as applied, every block and its acres, the "
+		"weather, the label intervals, and WHICH BLOCKS ARE STILL RESTRICTED "
+		"RIGHT NOW. Read-only.\n\n"
+		"The live restrictions are read through the Spray REI register rather "
+		"than recomputed from this record's own expiry, so they stay correct "
+		"after a window is cancelled and on a bench whose scheduler has stopped "
+		"— every REI read sweeps expired windows closed before answering.",
+		{
+			"application": _field(_STRING, "The Spray Application docname."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("application",),
+		title="Get a spray application",
+		available=_needs_doctype("Spray Application"),
+		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.86.0: crop protection, observation to IPM ────────────────────────
+	"set_pest_action_threshold": _tool(
+		cropprotect.set_pest_action_threshold,
+		"MUTATING (default OFF). Write or revise the number that turns a count "
+		"into a decision — how many of this threat, on this crop, at this growth "
+		"stage, before somebody has to act.\n\n"
+		"THE COMPARISON IS AN ARGUMENT, NOT AN ASSUMPTION. Most thresholds are "
+		"'act above this', but a Nutrient threshold is 'act BELOW this' — tissue "
+		"nitrogen under 2.2 percent is the finding. A hard-coded greater-than "
+		"would make half the six threat categories unrepresentable, and would "
+		"fail silently in the wrong direction: firing on every healthy block and "
+		"never on a deficient one.\n\n"
+		"A WARNING THRESHOLD HAS TO ARRIVE FIRST and is refused if it does not. "
+		"Which side that is depends on the comparison — below the action number "
+		"going up, above it coming down.\n\n"
+		"REVISING RETIRES THE OLD ROW RATHER THAN EDITING IT. Every observation "
+		"already evaluated points at the row that evaluated it, and a threshold "
+		"edited in July would silently rewrite what June's scouting was measured "
+		"against.\n\n"
+		"`beneficial_ratio_min` IS THE WHOLE OF IPM IN ONE ARGUMENT: a pest over "
+		"threshold with predators eating it at or above this ratio generates a "
+		"'hold and re-scout' recommendation instead of a control.\n\n"
+		"`recommended_methods` is what makes the engine actionable rather than "
+		"an alarm. One action per line, each prefixed with a control method — "
+		"'Biological: release predatory mites'.",
+		{
+			"crop": _field(_STRING, "The crop — 'Cherry', 'Apple'. Matched case-insensitively."),
+			"threat": _field(
+				_STRING, "The threat — 'Codling Moth', 'Powdery Mildew', 'Vole', 'Boron'."
+			),
+			"threat_category": _field(
+				_STRING, "Insect, Disease, Weed, Vertebrate, Abiotic or Nutrient. The six are fixed."
+			),
+			"action_threshold": _field(_NUMBER, "Cross this and a recommendation is generated."),
+			"comparison": _field(
+				_STRING,
+				"Greater Than (default), Greater Than Or Equal, Less Than or Less Than Or Equal. "
+				"Use a Less Than for a nutrient or moisture FLOOR.",
+			),
+			"warning_threshold": _field(
+				_NUMBER,
+				"Optional early number. Crossing it moves the pest to Watch without generating a "
+				"recommendation — a week's notice rather than an alarm.",
+			),
+			"crop_stage": _field(
+				_STRING,
+				"'Petal Fall', 'First Cover', a BBCH code. BLANK MEANS EVERY STAGE and is the "
+				"season-long fallback; a stage-specific row beats it.",
+			),
+			"sample_unit": _field(
+				_STRING,
+				"What the number counts — Per Trap, Percent Infested, PPM, Degree Days and so on. "
+				"An observation in a different unit is NOT evaluated against this threshold.",
+			),
+			"beneficial_ratio_min": _field(
+				_NUMBER,
+				"Predator-to-pest ratio at or above which no control is recommended even over "
+				"threshold. See the description.",
+			),
+			"min_sample_size": _field(
+				_INTEGER,
+				"How many units must be examined for a count to mean anything. Two infested leaves "
+				"out of five is a sample too small to say, and generates nothing.",
+			),
+			"recommended_methods": _field(
+				_STRING,
+				"What to do when crossed, one per line, each optionally 'Method: action'. Methods: "
+				"Cultural, Biological, Mechanical, Behavioral, Chemical, No Action.",
+			),
+			"source": _field(_STRING, "Where the number came from — an extension bulletin, the farm's own record."),
+			"effective_from": _field(_STRING, "YYYY-MM-DD. Default today."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("crop", "threat", "threat_category", "action_threshold"),
+		mutating=True,
+		title="Set a pest action threshold",
+		available=_needs_doctype("Pest Action Threshold"),
+		requires="the Pest Action Threshold DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_pest_action_thresholds": _tool(
+		cropprotect.list_pest_action_thresholds,
+		"Every action threshold on file. Read-only.\n\n"
+		"`thresholds_without_recommended_methods` is the gap worth closing: "
+		"crossing one of those generates a recommendation with a single generic "
+		"option, which is an alarm rather than something a crew can act on.",
+		{
+			"company": _COMPANY,
+			"crop": _field(_STRING, "Optional. Narrow to one crop."),
+			"threat": _field(_STRING, "Optional. Narrow to one threat."),
+			"threat_category": _field(_STRING, "Optional. One of the six."),
+			"include_disabled": _field(_BOOLEAN, "Also show retired thresholds. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List pest action thresholds",
+		available=_needs_doctype("Pest Action Threshold"),
+		requires="the Pest Action Threshold DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"create_crop_observation": _tool(
+		cropprotect.create_crop_observation,
+		"MUTATING (default OFF). File what a scout saw in a block, and RUN THE "
+		"THRESHOLD ENGINE ON IT. One call does three things: records the "
+		"observation, moves the block's Pest Pressure for the season, and — "
+		"where the action threshold was crossed — generates an IPM "
+		"Recommendation with options ordered least-chemical-first.\n\n"
+		"SIX THREAT CATEGORIES: Insect, Disease, Weed, Vertebrate, Abiotic "
+		"(frost, hail, sunburn — damage with no organism behind it, which every "
+		"pest register leaves out and every grower records anyway) and Nutrient.\n\n"
+		"SAMPLE SIZE IS NOT DECORATION. 'Two infested leaves' is not a finding; "
+		"two out of two hundred and two out of five are different findings. An "
+		"observation below the threshold's stated minimum is recorded IN FULL "
+		"and moves the pressure, but generates no recommendation — acting on a "
+		"sample too small to say is how a programme loses a crew's confidence.\n\n"
+		"BENEFICIALS OVERRIDE THE THRESHOLD, and this is the point of the whole "
+		"pipeline. A count over threshold with predators present at the "
+		"threshold's stated ratio generates 'hold and re-scout' INSTEAD of a "
+		"control — the block is already handling itself, and the spray that "
+		"fixes it kills the predators and guarantees a worse flare in three "
+		"weeks.\n\n"
+		"NO THRESHOLD ON FILE IS NOT AN ERROR. It is the ordinary state of a "
+		"first season. The observation is recorded and the gap is named — the "
+		"observations already on file are how you find out what the number "
+		"should be.\n\n"
+		"A UNIT MISMATCH STOPS THE EVALUATION. A count in 'per trap' measured "
+		"against a threshold in 'percent infested' produces a number that is "
+		"arithmetically fine and means nothing.",
+		{
+			"block": _field(
+				_STRING,
+				"The block — a Field docname, or an Asset Register block tag. Resolved against "
+				"both, the same way Spray REI does.",
+			),
+			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'. Only where a name is in both."),
+			"threat": _field(_STRING, "What was seen — 'Codling Moth', 'Powdery Mildew'."),
+			"threat_category": _field(
+				_STRING, "Insect, Disease, Weed, Vertebrate, Abiotic or Nutrient."
+			),
+			"count_observed": _field(
+				_NUMBER,
+				"The number seen, in the sample unit. ZERO IS A REAL OBSERVATION — it is how a "
+				"block is shown to have been walked and found clean.",
+			),
+			"sample_size": _field(_INTEGER, "How many units were examined to get that count."),
+			"sample_unit": _field(
+				_STRING,
+				"Per Trap, Per Leaf, Percent Infested, Degree Days, PPM and so on. Has to agree "
+				"with the threshold's own unit for an evaluation to be made.",
+			),
+			"crop": _field(_STRING, "Inferred from the planting where one is on file."),
+			"crop_stage": _field(_STRING, "'Petal Fall', 'First Cover'. What a threshold is matched on."),
+			"growth_stage_code": _field(_STRING, "The same stage as a BBCH code, where the farm keeps them."),
+			"observed_on": _field(
+				_STRING,
+				"YYYY-MM-DD. The day it was SEEN, not the day it was typed — a round walked Tuesday "
+				"and entered Thursday is a Tuesday observation. Default today.",
+			),
+			"observed_at": _field(_STRING, "YYYY-MM-DD HH:MM:SS, where the time is known."),
+			"observer": _field(_STRING, "Who saw it. Defaults to the session user."),
+			"scouting_method": _field(
+				_STRING,
+				"Visual, Pheromone Trap, Sticky Card, Sweep Net, Beat Tray, Soil Sample, Tissue "
+				"Test, Degree Day Model, Aerial Imagery, Grower Report or Other.",
+			),
+			"beneficials_observed": _field(
+				_NUMBER, "Natural enemies counted in the same sample. See the description."
+			),
+			"beneficial_name": _field(_STRING, "Which beneficial — a ratio against an unnamed predator is uncheckable."),
+			"severity": _field(_STRING, "None, Trace, Low, Moderate, High or Severe — the scout's own judgement."),
+			"percent_affected": _field(_NUMBER, "0 to 100."),
+			"planting_season": _field(
+				_STRING,
+				"Optional. Inferred where the block has exactly one planting on file; a field "
+				"worked as two plantings is left unlinked rather than guessed.",
+			),
+			"season_year": _field(_INTEGER, "Defaults to the observation year."),
+			"photo": _field(_STRING, "Optional file URL."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("block", "threat", "threat_category", "count_observed"),
+		mutating=True,
+		title="Record a crop observation",
+		available=_needs_doctype("Crop Observation"),
+		requires="the Crop Observation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_crop_observations": _tool(
+		cropprotect.list_crop_observations,
+		"Scouting records over a window, newest first. Read-only.\n\n"
+		"`observations_with_no_threshold_on_file` names the counts that were "
+		"recorded but never evaluated, which is the list a farm works from when "
+		"it decides to write its thresholds down.",
+		{
+			"company": _COMPANY,
+			"block": _field(_STRING, "Only observations on this block."),
+			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'."),
+			"threat": _field(_STRING, "Only this threat."),
+			"threat_category": _field(_STRING, "One of the six."),
+			"planting_season": _field(_STRING, "Only observations against this planting."),
+			"only_exceeded": _field(_BOOLEAN, "Only counts that crossed their action threshold."),
+			"from_date": _field(_STRING, "YYYY-MM-DD."),
+			"to_date": _field(_STRING, "YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List crop observations",
+		available=_needs_doctype("Crop Observation"),
+		requires="the Crop Observation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_pest_pressure": _tool(
+		cropprotect.get_pest_pressure,
+		"One tracked threat in full — first seen, peak, latest, trend, how many "
+		"times it crossed threshold — with its whole scouting history and every "
+		"recommendation raised against it. Read-only.\n\n"
+		"THE PEAK IS NOT THE LATEST. A pest answered in June and quiet in August "
+		"still peaked in June, and next year's programme is planned off the peak.\n\n"
+		"`trend` MEANS DETERIORATING, NOT NUMERICALLY LARGER. On a Nutrient "
+		"threat where the finding is a number falling below a floor, a dropping "
+		"tissue reading is a RISING pressure — the column tracks the direction "
+		"of the problem rather than of the digit.",
+		{
+			"pest_pressure": _field(_STRING, "The Pest Pressure docname."),
+			"limit": _field(_INTEGER, "Maximum observations returned. Capped at 200."),
+		},
+		required=("pest_pressure",),
+		title="Get pest pressure",
+		available=_needs_doctype("Pest Pressure"),
+		requires="the Pest Pressure DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_pest_pressures": _tool(
+		cropprotect.list_pest_pressures,
+		"The board: every threat being tracked, WORST FIRST. Read-only, and the "
+		"list a manager reads on a Monday morning.\n\n"
+		"Ordered by the status ladder rather than by the raw numbers, which are "
+		"in different units across threats and cannot be ranked against each "
+		"other. Action beats Watch beats everything else, and inside each band a "
+		"rising trend beats a falling one.\n\n"
+		"Closed pressures are hidden unless asked for.",
+		{
+			"company": _COMPANY,
+			"block": _field(_STRING, "Only threats on this block."),
+			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'."),
+			"threat": _field(_STRING, "Only this threat."),
+			"threat_category": _field(_STRING, "One of the six."),
+			"season_year": _field(_INTEGER, "Only this season."),
+			"status": _field(_STRING, "Monitoring, Watch, Action, Controlled or Closed."),
+			"include_closed": _field(_BOOLEAN, "Also show closed threats. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List pest pressures",
+		available=_needs_doctype("Pest Pressure"),
+		requires="the Pest Pressure DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_ipm_recommendation": _tool(
+		cropprotect.get_ipm_recommendation,
+		"One recommendation in full — what was seen, what number it crossed, "
+		"every option with its control method, and what the mix scores. "
+		"Read-only.\n\n"
+		"The options are ordered LEAST CHEMICAL FIRST, which is the order an IPM "
+		"programme is meant to consider them. Rejected options are kept rather "
+		"than deleted: a farm that declined the biological option four times "
+		"running has a pattern worth seeing, and a deleted row hides it.\n\n"
+		"The response carries the scoring weights and a plain statement of what "
+		"the score is not — it is this app's own 0-100 scale, not organic "
+		"certification, not Protected Harvest, not IPM Institute accreditation.",
+		{
+			"recommendation": _field(_STRING, "The IPM Recommendation docname."),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("recommendation",),
+		title="Get an IPM recommendation",
+		available=_needs_doctype("IPM Recommendation"),
+		requires="the IPM Recommendation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"compute_sustainability_score": _tool(
+		cropprotect.compute_sustainability_score,
+		"Score a set of control methods — a hypothetical, one recommendation, or "
+		"a whole block or season. Read-only; nothing is written.\n\n"
+		"WHAT IT IS: this app's own 0-100 scale over the mix of control methods, "
+		"weighting the IPM ladder — Cultural 1.00, Biological 0.90, Mechanical "
+		"0.75, Behavioral 0.70, Chemical 0.20, No Action 1.00, Unclassified "
+		"0.30. Chemical is deliberately NOT zero: a correctly timed "
+		"threshold-driven spray is integrated pest management, and scoring it "
+		"zero would tell a farm its best chemical decision was worth the same as "
+		"its worst. Unclassified sits BELOW chemical because an action nobody "
+		"categorised cannot be shown to have been anything else.\n\n"
+		"WHAT IT IS NOT: a certification. Not USDA organic, not Protected "
+		"Harvest, not LIVE, not IPM Institute. No standards body has blessed "
+		"these weights and none was asked. What it is good for is a "
+		"season-over-season number on ONE farm that moves when the programme "
+		"actually changes.\n\n"
+		"ACCEPTED ACTIONS DISPLACE PROPOSED ONES once anything has been "
+		"accepted, so the number describes what the farm CHOSE rather than what "
+		"it was offered. Otherwise a farm offered a release and a spray, which "
+		"chose the spray, would keep the credit for having been offered the "
+		"release.\n\n"
+		"A portfolio score is the mean of the per-recommendation scores — one "
+		"vote per decision — rather than a re-score of every action pooled, "
+		"which would let one recommendation with nine cultural rows outvote nine "
+		"that each chose a spray.",
+		{
+			"methods": _field(
+				_STRING_ARRAY,
+				"Score a hypothetical set without writing anything — "
+				'["Cultural", "Biological", "Chemical"]. Takes precedence over every other '
+				"argument.",
+			),
+			"recommendation": _field(_STRING, "Score one IPM Recommendation."),
+			"block": _field(_STRING, "Score every recommendation on this block."),
+			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'."),
+			"season_year": _field(_INTEGER, "Narrow the portfolio to one season."),
+			"threat_category": _field(_STRING, "Narrow the portfolio to one of the six."),
+			"company": _COMPANY,
+		},
+		title="Compute a sustainability score",
+		available=_needs_doctype("IPM Recommendation"),
+		requires="the IPM Recommendation DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.86.0: the value block lifecycle ──────────────────────────────────
+	"create_planting_season": _tool(
+		blocklifecycle.create_planting_season,
+		"MUTATING (default OFF). Open a planting: the junction between a block "
+		"and what is growing on it for one year — crop, variety, rootstock, "
+		"plant year, when it becomes productive, and where it is in its own "
+		"life.\n\n"
+		"WHY THIS EXISTS WHEN `Field` ALREADY HAS A CROP. Those columns are the "
+		"block's CURRENT state and answer 'what is out there now'. This answers "
+		"a question a single set of columns structurally cannot: 'what was out "
+		"there in 2023, and what did that year cost, and what did it return'.\n\n"
+		"PERENNIAL AND ANNUAL ARE DIFFERENT SHAPES. An annual is replanted every "
+		"year — plant year equals season year, always, and an Annual whose two "
+		"years differ is REFUSED, because several years of establishment cost "
+		"landing against one year's revenue makes a block read as ruinous in one "
+		"season and free in the others. A perennial planted in 2021 is one "
+		"planting producing across many seasons, each with its own record.\n\n"
+		"STATUS IS THE LIFECYCLE, NOT THE HEALTH — Establishing, Productive, "
+		"Declining, Removed. `Field.condition` is the health rating and they are "
+		"answers to different questions. Establishing is pre-productive, and "
+		"costs there generally capitalise into the block's basis under IRC 263A "
+		"rather than being expensed against a crop that does not exist yet.\n\n"
+		"It is NOT derived from the dates, deliberately: those are estimates "
+		"made at planting, and the transition is a judgement somebody makes "
+		"standing in the block.",
+		{
+			"field": _field(_STRING, "The Field this planting is on. Required."),
+			"crop": _field(_STRING, "What is planted. Falls back to the Field's own crop."),
+			"plant_year": _field(
+				_INTEGER,
+				"The year the trees went in. On a perennial this never changes and is what block "
+				"age is measured from.",
+			),
+			"lifecycle": _field(
+				_STRING, "Perennial (default) or Annual. See the description for why it matters."
+			),
+			"season_year": _field(
+				_INTEGER,
+				"The production year this record covers. Must equal plant_year on an Annual. Blank "
+				"on a perennial means the record describes the planting rather than one of its "
+				"years.",
+			),
+			"block_name": _field(
+				_STRING,
+				"The sub-block, where a field is worked as several plantings — two varieties in one "
+				"legal block, or a replant strip. Blank means the whole field.",
+			),
+			"variety": _field(_STRING, "Falls back to the Field's own."),
+			"rootstock": _field(
+				_STRING,
+				"Half of what decides a tree fruit block's vigour, spacing and bearing life. "
+				"Meaningless on an annual.",
+			),
+			"status": _field(_STRING, "Establishing (default), Productive, Declining or Removed."),
+			"productive_from": _field(_STRING, "YYYY-MM-DD. First expected commercial crop."),
+			"productive_through": _field(
+				_STRING,
+				"YYYY-MM-DD. Planned end of economic life. An estimate, and what a replant schedule "
+				"and a depreciation life are both built on.",
+			),
+			"acres": _field(
+				_NUMBER,
+				"Acres of THIS planting, which is not necessarily the field's acreage. Every "
+				"per-acre figure divides by it. Falls back to the Field's own.",
+			),
+			"trees_planted": _field(_INTEGER, "Optional."),
+			"spacing_in_row_ft": _field(_NUMBER, "Optional. With the row spacing this gives design density."),
+			"spacing_between_rows_ft": _field(_NUMBER, "Optional."),
+			"cost_center": _field(
+				_STRING,
+				"Where this planting's costs are booked. Falls back to the Field's own. Without "
+				"one, no ledger cost can be attributed to the block at all.",
+			),
+			"expected_yield_per_acre": _field(_NUMBER, "Optional."),
+			"yield_uom": _field(_STRING, "Bins, tons, lugs — the farm's own word."),
+			"company": _COMPANY,
+			"notes": _field(_STRING, "Anything else."),
+		},
+		required=("field", "plant_year"),
+		mutating=True,
+		title="Create a planting season",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_planting_seasons": _tool(
+		blocklifecycle.list_planting_seasons,
+		"Plantings on file, newest plant year first. Read-only.\n\n"
+		"`establishing_acres` is the acreage currently consuming money and "
+		"returning none, which is the number a farm's cash flow turns on and "
+		"which no report built on a fiscal year will show. `without_cost_center` "
+		"names the plantings whose ledger costs cannot be attributed at all. "
+		"Removed plantings are hidden unless asked for.",
+		{
+			"company": _COMPANY,
+			"field": _field(_STRING, "Only plantings on this block."),
+			"crop": _field(_STRING, "Only this crop."),
+			"variety": _field(_STRING, "Only this variety."),
+			"lifecycle": _field(_STRING, "Perennial or Annual."),
+			"status": _field(_STRING, "Establishing, Productive, Declining or Removed."),
+			"plant_year": _field(_INTEGER, "Only plantings put in this year."),
+			"season_year": _field(_INTEGER, "Only records covering this season."),
+			"include_removed": _field(_BOOLEAN, "Also show removed plantings. Default false."),
+			"limit": _LIMIT,
+		},
+		title="List planting seasons",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_planting_season": _tool(
+		blocklifecycle.get_planting_season,
+		"One planting, with where it stands in its own life. Read-only.\n\n"
+		"`leaf_year` is how tree fruit actually talks about block age — the year "
+		"it was planted is first leaf. It is computed rather than stored, "
+		"because a stored copy would be wrong for eleven months of every year.\n\n"
+		"`lifecycle_notes` says what the dates and the status say about each "
+		"other: a block past its planned productive-from date and still marked "
+		"Establishing is a legitimate state AND one where every cost booked is "
+		"still capitalising, which is worth a look.",
+		{
+			"planting_season": _field(
+				_STRING,
+				"The docname, or a readable description matched against the season label — "
+				"'2021 Gala'. Ambiguity is refused with the candidates listed rather than guessed.",
+			),
+			"company": _COMPANY,
+		},
+		required=("planting_season",),
+		title="Get a planting season",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_block_cost_summary": _tool(
+		blocklifecycle.get_block_cost_summary,
+		"What one planting cost over a window — from the LEDGER, from the "
+		"attribution register, and the overlap between them. Read-only.\n\n"
+		"COST REACHES A BLOCK TWO WAYS and adding them is wrong. The ledger, "
+		"through the block's cost center, is authoritative and is where most "
+		"costs already are. `Block Cost Entry` holds the three things the ledger "
+		"cannot: a shared cost split across blocks, a cost with no ledger entry "
+		"at all (owner labour, an in-kind trade), and the capitalisation "
+		"decision per cost.\n\n"
+		"THE DOUBLE COUNT IS NAMED RATHER THAN GUESSED AT. Rows swept from the "
+		"ledger are excluded from the total, which counts the ledger directly. "
+		"Rows carrying a journal-entry or GL-entry reference are PROBABLY "
+		"already inside it — they are excluded and listed, because including "
+		"them inflates the block's costs and dropping them silently understates, "
+		"and a farm told which rows are in question settles it in a minute from "
+		"the voucher numbers.\n\n"
+		"AN ESTABLISHING BLOCK'S COST IS ESTABLISHMENT COST. It generally "
+		"capitalises into the block's basis rather than being a cost of "
+		"production, and the response says so.",
+		{
+			"planting_season": _field(_STRING, "The docname, or a readable description of it."),
+			"from_date": _field(_STRING, "YYYY-MM-DD. With to_date, the window."),
+			"to_date": _field(_STRING, "YYYY-MM-DD."),
+			"season_year": _field(
+				_INTEGER, "Instead of a date pair — the calendar year. Defaults to the planting's own."
+			),
+			"company": _COMPANY,
+		},
+		required=("planting_season",),
+		title="Get block cost summary",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_block_revenue_summary": _tool(
+		blocklifecycle.get_block_revenue_summary,
+		"What one planting returned over a window, and on what basis it was "
+		"attributed. Read-only.\n\n"
+		"THIS IS AN ATTRIBUTION OF REVENUE, NOT A RECOGNITION OF IT. The ledger "
+		"records that a settlement paid $84,000; nothing in the ledger records "
+		"that four blocks grew the fruit. The two answer 'what did the business "
+		"earn' and 'which ground earned it', and this figure must never be "
+		"presented as the first.\n\n"
+		"THE BASIS IS ON EVERY ROW because it is a judgement. A packing house "
+		"settles on a POOL, not a block, and splitting it back is usually done "
+		"on delivered weight — which is right for a single variety and wrong the "
+		"moment two blocks of different grades were pooled. A farm reading its "
+		"per-block returns three years later needs to know which was done.\n\n"
+		"Scale Tickets naming this block in the window are listed, with those "
+		"having no revenue entry pointing at them flagged: those are deliveries "
+		"whose return has not been attributed back to the ground that grew them. "
+		"This tool READS them and writes nothing — splitting a pool is a "
+		"judgement and it belongs to a person.\n\n"
+		"A quantity total summed across MIXED UNITS is called out, because the "
+		"price per unit derived from it means nothing.",
+		{
+			"planting_season": _field(_STRING, "The docname, or a readable description of it."),
+			"from_date": _field(_STRING, "YYYY-MM-DD."),
+			"to_date": _field(_STRING, "YYYY-MM-DD."),
+			"season_year": _field(_INTEGER, "Instead of a date pair. Defaults to the planting's own."),
+			"company": _COMPANY,
+		},
+		required=("planting_season",),
+		title="Get block revenue summary",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_block_profitability": _tool(
+		blocklifecycle.get_block_profitability,
+		"Cost against return for one planting, READ AGAINST ITS OWN LIFECYCLE. "
+		"Read-only.\n\n"
+		"AN ESTABLISHING BLOCK'S NEGATIVE MARGIN IS NOT A LOSS AND THIS REFUSES "
+		"TO CALL IT ONE. A fourth-leaf cherry block that spent $180,000 and "
+		"returned $4,000 has not lost $176,000 — it has invested it, and the "
+		"investment is carried in the block's basis. Every figure is still "
+		"reported, because the numbers are real and somebody needs them; what "
+		"the app will not do is put the word 'loss' next to them. "
+		"`is_meaningful_as_profit_and_loss` is the flag, and `verdict` says why.\n\n"
+		"`cumulative` IS THE POINT ON A PERENNIAL. A block that takes fifteen "
+		"years to pay back cannot be judged on one of them, and every general "
+		"ledger in existence can only show you one of them — the ledger's period "
+		"is the fiscal year and the block's period is fifteen of them. With "
+		"cumulative set, every planting on the same field with the same crop and "
+		"plant year is summed from the plant year to today.\n\n"
+		"Capitalised cost is INCLUDED in the cost figure — the question here is "
+		"what the ground consumed — and reported separately, because for a "
+		"profit-and-loss reading that portion belongs in the basis rather than "
+		"against the season.",
+		{
+			"planting_season": _field(_STRING, "The docname, or a readable description of it."),
+			"cumulative": _field(
+				_BOOLEAN,
+				"Sum the planting's whole life to date rather than one window. Default false, and "
+				"the right answer for almost any question about a perennial.",
+			),
+			"from_date": _field(_STRING, "YYYY-MM-DD. Ignored when cumulative is set."),
+			"to_date": _field(_STRING, "YYYY-MM-DD. Ignored when cumulative is set."),
+			"season_year": _field(_INTEGER, "Instead of a date pair. Defaults to the planting's own."),
+			"company": _COMPANY,
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone — 'America/Los_Angeles'. Every timestamp keeps its stored spelling and gains a `*_local` twin rendered in this zone (the site's own if omitted). Display only: nothing stored moves, and no total changes.",
+			),
+		},
+		required=("planting_season",),
+		title="Get block profitability",
+		available=_needs_doctype("Planting Season"),
+		requires="the Planting Season DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── the breakeven calculator, v0.87.0 ────────────────────────────────────
+	"create_breakeven_analysis": _tool(
+		breakeven.create_breakeven_analysis,
+		"MUTATING (default OFF). Register a crop, a volume and a price to model — "
+		"the record behind 'what price do I need to break even?'\n\n"
+		"NOTHING IS POSTED AND NOTHING IS COMPUTED. A Breakeven Analysis is a "
+		"PERSPECTIVE on the ledger the farm already keeps, not a second set of books: "
+		"no journal entry, no effect on any financial statement. Creation does not "
+		"compute either — `compute_breakeven` has its own switch, and a create that "
+		"ran the computation would hand an operator a tool they had not enabled.\n\n"
+		"ONE UNIT THROUGHOUT, BOTH SIDES OF THE PACKOUT. `expected_harvest_units` is "
+		"what the block makes BEFORE packout, in sellable-equivalents, and "
+		"`packout_pct` is the share that gets there. Bins in and boxes out would mean "
+		"a conversion factor, and a wrong conversion factor is the commonest way a "
+		"farm budget comes out wrong by a multiple while looking reasonable.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "The year whose costs this reads. Also where the cost window defaults from."),
+			"crop_type": _field(
+				_STRING,
+				"What is being grown — 'Gala', 'Bing cherries'. Free text, not a link: a "
+				"breakeven is run on a crop long before that crop is an Item on anybody's site.",
+			),
+			"analysis_name": _field(_STRING, "What to call it. Defaults to '<crop> <fiscal year>'."),
+			"expected_harvest_units": _field(
+				_NUMBER,
+				"What the block is expected to make BEFORE packout, in sellable-equivalent units. "
+				"The gross crop — a field estimate, not a packout figure.",
+			),
+			"packout_pct": _field(
+				_NUMBER,
+				"THE SLIDER. What share of the harvest is sellable as fresh fruit. Default 100. "
+				"Moving it shrinks the revenue, shrinks the packing-basis costs with it, and "
+				"leaves the harvest-basis costs exactly where they were.",
+			),
+			"expected_price": _field(
+				_NUMBER,
+				"The NET price per sellable unit expected — after commission and freight where "
+				"the cost lines do not already carry them. Counting the commission twice is the "
+				"commonest way a breakeven comes out optimistic.",
+			),
+			"cull_credit_per_unit": _field(
+				_NUMBER,
+				"What a culled unit returns — juice, processor, feed. Default 0, and almost never "
+				"truly zero: 30% culls at juice price is not 30% of the crop earning nothing.",
+			),
+			"unit_label": _field(_STRING, "Box (default), Bin, Carton, Ton, Pound, Case or Unit."),
+			"cost_source": _field(
+				_STRING,
+				"Ledger Actuals (default) — posted GL entries in the window, what was actually "
+				"spent. Budget — this app's Budget rows, which is what a season that has not "
+				"happened yet has instead.",
+			),
+			"cost_center": _field(
+				_STRING,
+				"Narrow the cost pull to one cost center AND ITS DESCENDANTS. Blank reads the "
+				"whole company's expense ledger, which is wrong for a farm that also runs a "
+				"cattle operation through the same books.",
+			),
+			"from_date": _field(_STRING, "YYYY-MM-DD. Defaults to the fiscal year's start."),
+			"to_date": _field(_STRING, "YYYY-MM-DD. Defaults to the fiscal year's end."),
+			"usda_commodity": _field(
+				_STRING,
+				"The commodity to read the market in, as USDA AMS names it — 'APPLES'. Blank "
+				"switches the market overlay off; the breakeven does not depend on it.",
+			),
+			"usda_variety": _field(_STRING, "'GALA'. Narrows the overlay."),
+			"usda_market": _field(_STRING, "The shipping point district. Blank takes any."),
+			"currency": _field(_STRING, "Defaults to the company's."),
+			"notes": _field(_STRING, "Anything else about this model."),
+		},
+		required=("fiscal_year", "crop_type", "expected_harvest_units"),
+		mutating=True,
+		title="Create breakeven analysis",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"compute_breakeven": _tool(
+		breakeven.compute_breakeven,
+		"MUTATING (default OFF). Read the company's expense accounts, sort them into "
+		"fixed and variable, and answer the question — breakeven units, breakeven "
+		"revenue, contribution margin per unit, and THE BREAKEVEN PRICE.\n\n"
+		"MUTATING BECAUSE IT STORES, NOT BECAUSE IT POSTS. Nothing touches the "
+		"ledger; what it writes is the cost lines, the results and a standard "
+		"scenario band onto the analysis itself. That storage is the point — a "
+		"breakeven whose intermediates were thrown away can never be compared with "
+		"next season's.\n\n"
+		"THE PACKOUT SLIDER IS THE `packout_pct` ARGUMENT. Pass it and the analysis "
+		"is recomputed at that packout and keeps it. Every packed box carries 1/p "
+		"harvested units of picking with it, so a light packout raises the breakeven "
+		"price faster than it lowers the volume — which a model with one variable "
+		"pile gets directionally right and numerically wrong.\n\n"
+		"IT SAYS WHAT IT GUESSED. Accounts nobody has classified are sorted by a "
+		"heuristic over the account's name and ERPNext type, and every such line is "
+		"labelled `Heuristic` with the count repeated in the result. A breakeven "
+		"resting on forty guesses is a different object from one resting on none.\n\n"
+		"NO BREAKEVEN QUANTITY WHERE THE CONTRIBUTION MARGIN IS NOT POSITIVE — there "
+		"is no such quantity, and the arithmetic limit would read as a hard target. "
+		"The breakeven PRICE is still reported and is the number that matters there.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+			"packout_pct": _field(
+				_NUMBER,
+				"THE SLIDER. Recompute at this packout and keep it. Omit to use the stored figure.",
+			),
+			"expected_price": _field(_NUMBER, "Recompute at this price and keep it."),
+			"expected_harvest_units": _field(_NUMBER, "Recompute at this crop and keep it."),
+			"cull_credit_per_unit": _field(_NUMBER, "Recompute at this cull return and keep it."),
+			"cost_source": _field(_STRING, "Ledger Actuals or Budget. Omit to keep the stored choice."),
+			"rebase_costs": _field(
+				_BOOLEAN,
+				"Re-derive the cost RATES at the current harvest and packout, replacing the "
+				"baseline they were first derived at. Default false, and the default is the "
+				"load-bearing part: rates fixed at a stated volume are what make sliding the "
+				"packout mean 'the same money per carton over fewer cartons', and what makes this "
+				"tool agree with get_breakeven_sensitivity at the same packout. Set it once the "
+				"season's real crop and real packout are known — it changes every per-unit figure "
+				"on the record, so a comparison against an earlier run is then comparing two "
+				"different models.",
+			),
+			"cost_overrides": _field(
+				{"type": "array", "items": {"type": "object"}},
+				'Classify accounts for THIS analysis only, without writing to the Account: '
+				'[{"account": "5110 - Picking - OML", "cost_behavior": "Variable", '
+				'"volume_basis": "Harvested", "variable_pct": 0, "reason": "piece rate"}]. '
+				"Behaviors: Fixed, Variable, Mixed, Excluded. Bases: Harvested (everything off "
+				"the trees) or Sellable (only what packs out). An override naming an account that "
+				"is not an expense account of this company is REFUSED rather than ignored — a "
+				"dropped override leaves the account being guessed at while you believe you "
+				"classified it.",
+			),
+			"market_price": _field(
+				_NUMBER,
+				"A price you were actually quoted, per package. Stored as a quotation of its own "
+				"kind and used for the overlay. A broker's bid in hand is a better number than "
+				"any district average, and it is labelled so nobody mistakes the two.",
+			),
+			"market_price_date": _field(_STRING, "YYYY-MM-DD for that quote. Defaults to today."),
+			"market_package": _field(_STRING, "What that price is FOR — '40 lb carton'. Defaults to the unit label."),
+			"market_price_source": _field(_STRING, "Manual (default) or Broker Quote."),
+			"refresh_usda_prices": _field(
+				_BOOLEAN,
+				"Fetch fresh quotations from USDA AMS Market News before overlaying. Needs a MARS "
+				"API key in settings AND `usda_report_slug`. Default false: the overlay reads the "
+				"quotations already on the site, which is what makes it work in a farm office "
+				"whose internet is down.",
+			),
+			"usda_report_slug": _field(
+				_STRING,
+				"Which AMS report to fetch. This app ships no default slugs — one invented here "
+				"would be right for one district and a 404 everywhere else.",
+			),
+			"usda_commodity": _field(_STRING, "Set or change the overlay's commodity."),
+			"usda_variety": _field(_STRING, "Set or change the overlay's variety."),
+			"usda_market": _field(_STRING, "Set or change the overlay's district."),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Compute breakeven",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"get_breakeven_analysis": _tool(
+		breakeven.get_breakeven_analysis,
+		"One analysis in full: the inputs, every cost line with WHO CLASSIFIED IT, "
+		"the stored scenario band, and the market overlay. Read-only.\n\n"
+		"IT SAYS WHEN ITS NUMBERS ARE NOT ANSWERS. A Draft has never been computed "
+		"and its results are zeros; a STALE one had an input changed after the last "
+		"run, so its results answer the old question. Both carry a full set of "
+		"numeric columns that read exactly like a live result, which is why the "
+		"status is reported rather than left to be noticed.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+		},
+		required=("name",),
+		title="Get breakeven analysis",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"list_breakeven_analyses": _tool(
+		breakeven.list_breakeven_analyses,
+		"The register, with the headline number on every row — breakeven price, "
+		"contribution margin, margin of safety. Names the ones that are NOT answers: "
+		"never computed, stale, and the ones where no volume breaks even at all. "
+		"Read-only.",
+		{
+			"company": _COMPANY,
+			"fiscal_year": _field(_STRING, "One season's analyses."),
+			"crop_type": _field(_STRING, "One crop, across seasons — which is the comparison worth having."),
+			"status": _field(_STRING, "Draft, Computed or Stale."),
+			"cost_source": _field(_STRING, "Ledger Actuals or Budget."),
+			"limit": _LIMIT,
+		},
+		title="List breakeven analyses",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),
+	"get_breakeven_sensitivity": _tool(
+		breakeven.get_breakeven_sensitivity,
+		"What-if over ONE variable across a range: price, yield, packout, fixed cost "
+		"or variable cost. Returns the breakeven and the profit at each point, plus "
+		"HOW FAR THE BREAKEVEN PRICE MOVED across the whole band — which is the "
+		"figure that says whether this is the term worth managing. Read-only.\n\n"
+		"ONE VARIABLE AT A TIME, deliberately: a table that moved two would not say "
+		"which of them the breakeven was sensitive to.\n\n"
+		"STORES NOTHING. `compute_breakeven` writes a standard band onto the record; "
+		"this answers whatever band is asked for and leaves the register alone, so "
+		"what is stored depends on who ran a computation rather than who was "
+		"browsing. It reads the STORED cost piles, so an analysis that has never "
+		"been computed is refused rather than answered from zeros.",
+		{
+			"name": _field(_STRING, "The analysis's docname, or its analysis_name."),
+			"company": _COMPANY,
+			"variable": _field(
+				_STRING,
+				"price, yield, packout, fixed_cost or variable_cost. Default price. NOTE that "
+				"moving the yield scales BOTH variable piles — a bigger crop costs more to pick "
+				"and more to pack — while moving the packout scales only the packing pile.",
+			),
+			"range": _field(
+				{"type": "array", "items": {"type": "number"}},
+				"Percentage changes to model: [-20, -10, 0, 10, 20], which is the default. Up to "
+				"50 points. Zero belongs in the list — the unchanged case is what the rest are "
+				"read against.",
+			),
+		},
+		required=("name",),
+		title="Get breakeven sensitivity",
+		available=_needs_doctype("Breakeven Analysis"),
+		requires=_BREAKEVEN_REQUIRES,
+	),}
 
 #: Tool names in catalogue order, read tools first. Used by the settings doctype
 #: generator and the docs to stay in step with this file.

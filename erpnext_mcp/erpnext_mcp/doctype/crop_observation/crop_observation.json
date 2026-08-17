@@ -1,0 +1,384 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "What a scout actually saw in one block on one day: how many of what, out of how many examined, at what growth stage, and how many of its natural enemies were there too. It is the ENTRY POINT of the crop protection pipeline — an observation raises the block's Pest Pressure, and where it crosses that pest's action threshold it generates an IPM Recommendation. Nothing downstream is typed by hand.\n\nSAMPLE SIZE IS A FIRST-CLASS FIELD, NOT A NOTE. 'Two infested leaves' is not a finding; 'two out of two hundred' and 'two out of five' are two different findings, and only one of them is a number. A count with no sample size behind it is recorded and flagged rather than refused, because a scout who saw something worth writing down should never be arguing with a form — but it is not allowed to silently drive a spray decision.\n\nBENEFICIALS ARE COUNTED BESIDE THE PEST because that is what makes this integrated pest management rather than pest counting. A mite population over threshold with predators eating it is a block already handling itself, and the spray that 'fixes' it kills the predators and guarantees the second flare three weeks later.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "block_doctype",
+  "block",
+  "observed_on",
+  "identity_col",
+  "observed_at",
+  "observer",
+  "planting_season",
+  "scouting_method",
+  "threat_section",
+  "threat_category",
+  "threat",
+  "crop",
+  "threat_col",
+  "crop_stage",
+  "growth_stage_code",
+  "measure_section",
+  "sample_unit",
+  "count_observed",
+  "sample_size",
+  "measure_col",
+  "percent_affected",
+  "severity",
+  "beneficials_observed",
+  "beneficial_name",
+  "evaluation_section",
+  "threshold",
+  "threshold_value",
+  "threshold_comparison",
+  "evaluation_col",
+  "threshold_exceeded",
+  "warning_exceeded",
+  "sample_below_minimum",
+  "evaluation_note",
+  "downstream_section",
+  "pest_pressure",
+  "ipm_recommendation",
+  "evidence_section",
+  "photo",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "default": "Field",
+   "description": "'Field' for a planted block, 'Asset Register' for a block-shaped asset tag — the same pair Spray REI, Farm Task and Spray Application use, so a restriction, a task, a spray and an observation on one block all key alike.",
+   "fieldname": "block_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Block DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "block",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Block",
+   "options": "block_doctype",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The day it was seen — not the day it was entered. A scouting round walked Tuesday and typed up Thursday is a Tuesday observation, and the pressure trend is wrong by two days otherwise.",
+   "fieldname": "observed_on",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Observed On",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "observed_at",
+   "fieldtype": "Datetime",
+   "label": "Observed At"
+  },
+  {
+   "fieldname": "observer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Observer",
+   "options": "User",
+   "search_index": 1
+  },
+  {
+   "description": "The planting this observation belongs to, where the block has one on file for the year. It is what lets a season's scouting be read against the block's own lifecycle — pressure on a first-leaf planting is a different decision from the same count on a mature one.",
+   "fieldname": "planting_season",
+   "fieldtype": "Link",
+   "label": "Planting Season",
+   "options": "Planting Season",
+   "search_index": 1
+  },
+  {
+   "description": "How it was looked for. A trap count and a visual walk are not interchangeable numbers even for the same insect, which is why the method sits next to the count rather than in a note.",
+   "fieldname": "scouting_method",
+   "fieldtype": "Select",
+   "label": "Scouting Method",
+   "options": "Visual\nPheromone Trap\nSticky Card\nSweep Net\nBeat Tray\nSoil Sample\nTissue Test\nDegree Day Model\nAerial Imagery\nGrower Report\nOther"
+  },
+  {
+   "fieldname": "threat_section",
+   "fieldtype": "Section Break",
+   "label": "Threat"
+  },
+  {
+   "description": "Which of the six kinds of threat this is. Abiotic covers frost, hail, sunburn, wind and salt — damage with no organism behind it, which every pest register leaves out and every grower has to record anyway. Nutrient covers a deficiency read off a tissue or soil test.",
+   "fieldname": "threat_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat Category",
+   "options": "Insect\nDisease\nWeed\nVertebrate\nAbiotic\nNutrient",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "threat",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threat",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Free text rather than a link, for the reason Field.crop is: a block of table grapes should not be a schema change.",
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Crop"
+  },
+  {
+   "fieldname": "threat_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The growth stage in the words the farm uses — 'Petal Fall', 'First Cover'. This is what a threshold is matched on, and a stage-specific threshold beats the season-long fallback.",
+   "fieldname": "crop_stage",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Crop Stage"
+  },
+  {
+   "description": "The same stage as a BBCH code, where the farm keeps them. Recorded beside the words rather than instead of them: the code is what an agronomist and a certifier can both read, and the words are what the crew says.",
+   "fieldname": "growth_stage_code",
+   "fieldtype": "Data",
+   "label": "BBCH Code"
+  },
+  {
+   "fieldname": "measure_section",
+   "fieldtype": "Section Break",
+   "label": "Measurement"
+  },
+  {
+   "description": "What the count counts. It has to agree with the threshold's own unit or the two numbers are not comparable — 'two per trap' against 'two percent infested' is the kind of mismatch that reads as fine and decides a spray.",
+   "fieldname": "sample_unit",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Sample Unit",
+   "options": "\nPer Trap\nPer Trap Per Week\nPer Leaf\nPer Shoot\nPer Branch\nPer Tree\nPer 100 Fruit\nPer Sq Ft\nPercent Infested\nPercent Defoliation\nDegree Days\nPercent Dry Weight\nPPM\nCount"
+  },
+  {
+   "description": "The number seen, in the sample unit above.",
+   "fieldname": "count_observed",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Count Observed",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "description": "How many units were examined to get that count. See the doctype description: this is the difference between a finding and an anecdote, and an observation below the threshold's own minimum is flagged rather than acted on.",
+   "fieldname": "sample_size",
+   "fieldtype": "Int",
+   "label": "Sample Size"
+  },
+  {
+   "fieldname": "measure_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "percent_affected",
+   "fieldtype": "Float",
+   "label": "Percent Affected",
+   "precision": "2"
+  },
+  {
+   "description": "The scout's own judgement, kept beside the count rather than derived from it. A count of four means different things on a first-leaf block and a mature one, and the person standing there knows which.",
+   "fieldname": "severity",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Severity",
+   "options": "\nNone\nTrace\nLow\nModerate\nHigh\nSevere"
+  },
+  {
+   "description": "Natural enemies counted in the same sample. See the doctype description — this is the column that makes the pipeline integrated pest management rather than pest counting.",
+   "fieldname": "beneficials_observed",
+   "fieldtype": "Float",
+   "label": "Beneficials Observed",
+   "precision": "4"
+  },
+  {
+   "description": "Which beneficial — 'Typhlodromus pyri', 'lacewing', 'parasitised mummies'. A ratio computed against an unnamed predator is a ratio nobody can check.",
+   "fieldname": "beneficial_name",
+   "fieldtype": "Data",
+   "label": "Beneficial"
+  },
+  {
+   "fieldname": "evaluation_section",
+   "fieldtype": "Section Break",
+   "label": "Threshold Evaluation"
+  },
+  {
+   "description": "The threshold this observation was measured against, resolved at save time — most specific stage first, then the crop's season-long fallback. Stored so the decision can be re-read years later against the number that actually made it, even if the threshold has since been revised.",
+   "fieldname": "threshold",
+   "fieldtype": "Link",
+   "label": "Threshold Applied",
+   "options": "Pest Action Threshold",
+   "read_only": 1
+  },
+  {
+   "description": "The action number as it stood when this observation was evaluated. Copied for the same reason the label intervals are copied onto a spray.",
+   "fieldname": "threshold_value",
+   "fieldtype": "Float",
+   "label": "Threshold Value",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "description": "Which direction counted as exceeding. Stored because 'over 2.0' and 'under 2.0' are opposite findings from the same pair of numbers.",
+   "fieldname": "threshold_comparison",
+   "fieldtype": "Data",
+   "label": "Comparison",
+   "read_only": 1
+  },
+  {
+   "fieldname": "evaluation_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "The action threshold was crossed. This is what generates an IPM Recommendation.",
+   "fieldname": "threshold_exceeded",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Threshold Exceeded",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "The early warning number was crossed but the action number was not. Raises the block's pressure to Watch and generates nothing — a week's notice rather than an alarm.",
+   "fieldname": "warning_exceeded",
+   "fieldtype": "Check",
+   "label": "Warning Exceeded",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "The sample was smaller than the threshold's stated minimum. The observation is kept in full and the pressure record still moves, but no recommendation is generated off it: acting on a sample too small to say is how a programme loses the crew's confidence.",
+   "fieldname": "sample_below_minimum",
+   "fieldtype": "Check",
+   "label": "Sample Below Minimum",
+   "read_only": 1
+  },
+  {
+   "description": "Why the evaluation reached what it reached, in words — including 'no threshold on file for this crop and threat', which is the ordinary state of a farm's first season and is a gap to close rather than an error.",
+   "fieldname": "evaluation_note",
+   "fieldtype": "Small Text",
+   "label": "Evaluation Note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "downstream_section",
+   "fieldtype": "Section Break",
+   "label": "Downstream"
+  },
+  {
+   "description": "The tracked threat this observation fed. One per block, threat and season — see Pest Pressure.",
+   "fieldname": "pest_pressure",
+   "fieldtype": "Link",
+   "label": "Pest Pressure",
+   "options": "Pest Pressure",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The recommendation this observation generated, where it crossed the action threshold.",
+   "fieldname": "ipm_recommendation",
+   "fieldtype": "Link",
+   "label": "IPM Recommendation",
+   "options": "IPM Recommendation",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "evidence_section",
+   "fieldtype": "Section Break",
+   "label": "Evidence"
+  },
+  {
+   "fieldname": "photo",
+   "fieldtype": "Attach Image",
+   "label": "Photo"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Crop Observation",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "block,threat,threat_category,observed_on",
+ "sort_field": "observed_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

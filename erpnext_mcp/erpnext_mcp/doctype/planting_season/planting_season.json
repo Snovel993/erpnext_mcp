@@ -1,0 +1,329 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 09:00:00.000000",
+ "description": "The junction between a block and what is growing on it for one year. `Field` already carries a crop, a variety and a planting year, and those columns are the block's CURRENT state — they answer 'what is out there now'. This record answers a different question that a single set of columns structurally cannot: 'what was out there in 2023, and what did that year cost, and what did it return'.\n\nPERENNIAL AND ANNUAL ARE GENUINELY DIFFERENT SHAPES and this is the record that holds the difference. An annual is replanted every year: one Planting Season per year, plant year equals season year, and the whole cost of establishing it belongs to that year's crop. A perennial planted in 2021 is ONE planting that produces across many seasons — it spends three or four years costing money and returning none, then a decade returning more than it costs, then a decline somebody has to decide the end of. Reading a fourth-leaf cherry block's profit and loss as if it were a field of onions is the single most common way a tree fruit operation misreads its own numbers.\n\nSTATUS IS THE LIFECYCLE, NOT THE HEALTH. Establishing is pre-productive — costs here are capitalised into the block's basis rather than expensed against a crop that does not exist yet, which is what IRC 263A requires and what makes an establishing block's 'loss' not a loss. Productive is bearing. Declining is bearing less than it costs to keep, which is a judgement somebody makes and this record holds the date of. Removed is pulled.\n\nTITLE FIELD, NOT DOCNAME. The docname is a hash because the readable key — block, crop, year — is three columns that a farm splits and renames, and a docname built from them is a docname that goes stale the first time a block is split in two.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "season_label",
+  "status",
+  "company",
+  "field",
+  "block_name",
+  "identity_col",
+  "lifecycle",
+  "crop",
+  "variety",
+  "rootstock",
+  "cost_center",
+  "timing_section",
+  "plant_year",
+  "season_year",
+  "timing_col",
+  "productive_from",
+  "productive_through",
+  "planting_section",
+  "acres",
+  "trees_planted",
+  "planting_col",
+  "spacing_in_row_ft",
+  "spacing_between_rows_ft",
+  "trees_per_acre",
+  "yield_section",
+  "expected_yield_per_acre",
+  "yield_uom",
+  "yield_col",
+  "actual_yield",
+  "removal_section",
+  "removed_on",
+  "removal_reason",
+  "replaced_by",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Block, crop and year in one readable line, rewritten on every save. It is the title rather than the docname — see the doctype description for why.",
+   "fieldname": "season_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Season",
+   "read_only": 1
+  },
+  {
+   "default": "Establishing",
+   "description": "The lifecycle stage. Establishing is pre-productive and its costs capitalise; Productive is bearing; Declining is bearing less than it costs to keep; Removed is pulled. This is NOT a health or condition rating — Field.condition is that, and a Good block and a Declining block are answers to different questions.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Establishing\nProductive\nDeclining\nRemoved",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "search_index": 1
+  },
+  {
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Field",
+   "options": "Field",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The sub-block within the field, where a farm works one field as several plantings — two varieties in one legal block, or a replant strip through the middle of an older one. Blank means the whole field is one planting, which is the ordinary case.",
+   "fieldname": "block_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Block Name",
+   "search_index": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "Perennial",
+   "description": "Perennial is one planting producing across many seasons — tree fruit, vines, cane. Annual is replanted every year. This is what decides whether a plant year and a season year may differ, and whether pre-productive costs capitalise at all. See the doctype description.",
+   "fieldname": "lifecycle",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lifecycle",
+   "options": "Perennial\nAnnual",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Free text rather than a link, for the reason Field.crop is: a block of table grapes should not be a schema change.",
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Crop",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Variety"
+  },
+  {
+   "description": "The rootstock, which on tree fruit is half of what decides the block's vigour, its spacing and how long it will bear. Meaningless on an annual and left blank there.",
+   "fieldname": "rootstock",
+   "fieldtype": "Data",
+   "label": "Rootstock"
+  },
+  {
+   "description": "Where this planting's costs are booked. Defaults from the Field's own cost center — a block that already has one does not get a second answer here. It is what the block cost roll-up sweeps the ledger on.",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "search_index": 1
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Years"
+  },
+  {
+   "description": "The year the trees went in the ground. For a perennial this stays fixed across every season the planting produces; it is what block age is measured from, and leaf-year arithmetic reads it.",
+   "fieldname": "plant_year",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Plant Year",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The production year this record covers. On an annual it equals the plant year, always. On a perennial it is the season being tracked — so one 2021 planting has a 2021 season record, a 2022 one, a 2023 one, each carrying its own costs and returns. Blank means the record describes the planting rather than one of its years.",
+   "fieldname": "season_year",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Season Year",
+   "search_index": 1
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The first date this planting is expected to bear a commercial crop. On a perennial it is years after the plant year, and the gap is the establishment period whose costs capitalise.",
+   "fieldname": "productive_from",
+   "fieldtype": "Date",
+   "label": "Productive From"
+  },
+  {
+   "description": "The last date it is expected to bear commercially — the planned end of the block's economic life. An estimate, and one worth recording: it is what a replant schedule and a depreciation life are both built on, and a farm that has never written it down replants by surprise.",
+   "fieldname": "productive_through",
+   "fieldtype": "Date",
+   "label": "Productive Through"
+  },
+  {
+   "fieldname": "planting_section",
+   "fieldtype": "Section Break",
+   "label": "Planting"
+  },
+  {
+   "description": "Acres of this planting. Not necessarily the whole field's acreage — a field worked as two plantings has two smaller numbers, and the per-acre figures every summary reports divide by this one.",
+   "fieldname": "acres",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Acres",
+   "precision": "3"
+  },
+  {
+   "fieldname": "trees_planted",
+   "fieldtype": "Int",
+   "label": "Trees Planted"
+  },
+  {
+   "fieldname": "planting_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "spacing_in_row_ft",
+   "fieldtype": "Float",
+   "label": "In-Row Spacing (ft)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "spacing_between_rows_ft",
+   "fieldtype": "Float",
+   "label": "Between-Row Spacing (ft)",
+   "precision": "2"
+  },
+  {
+   "description": "Computed on every save — from the two spacings where both are given, otherwise from trees planted over acres. Never typed: a density a person can edit independently of the spacing it comes from is a density that will disagree with it, and the disagreement is discovered by a nursery order.",
+   "fieldname": "trees_per_acre",
+   "fieldtype": "Float",
+   "label": "Trees / Acre",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "fieldname": "yield_section",
+   "fieldtype": "Section Break",
+   "label": "Yield"
+  },
+  {
+   "fieldname": "expected_yield_per_acre",
+   "fieldtype": "Float",
+   "label": "Expected Yield / Acre",
+   "precision": "3"
+  },
+  {
+   "description": "The unit yield is measured in — bins, tons, lugs. Free text because a farm's own word for its unit is the one its crew uses.",
+   "fieldname": "yield_uom",
+   "fieldtype": "Data",
+   "label": "Yield UOM"
+  },
+  {
+   "fieldname": "yield_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "What it actually produced, filled in after harvest.",
+   "fieldname": "actual_yield",
+   "fieldtype": "Float",
+   "label": "Actual Yield",
+   "precision": "3"
+  },
+  {
+   "fieldname": "removal_section",
+   "fieldtype": "Section Break",
+   "label": "Removal"
+  },
+  {
+   "fieldname": "removed_on",
+   "fieldtype": "Date",
+   "label": "Removed On"
+  },
+  {
+   "description": "Why it came out — 'replant to Cosmic Crisp', 'fire blight', 'no longer packing out'. The reason is what makes a removal history worth keeping: a farm that has pulled four blocks for the same disease has a problem the individual removals do not show.",
+   "fieldname": "removal_reason",
+   "fieldtype": "Small Text",
+   "label": "Removal Reason"
+  },
+  {
+   "description": "The planting that took this one's ground. It is what makes a block's history a chain rather than a set of unrelated records, and it is how the cost of the ground rather than of the trees can be followed across a replant.",
+   "fieldname": "replaced_by",
+   "fieldtype": "Link",
+   "label": "Replaced By",
+   "options": "Planting Season"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Planting Season",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "field,crop,variety,plant_year,status",
+ "sort_field": "plant_year",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "season_label",
+ "track_changes": 1
+}
