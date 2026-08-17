@@ -7230,7 +7230,6 @@ Partially compliant means *holds some and lacks some*; non-compliant means
 *holds none of them*.
 
 ### The curriculum and the group session
-### The curriculum and the group session
 
 *Eight tools that close both ends of the training loop.* At one end a
 `Training Type` was a name and a regime tag, so the matrix could name a gap and
