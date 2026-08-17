@@ -342,6 +342,37 @@ class DeductionItemisation(unittest.TestCase):
 		)]
 		self.assertNotIn("State income tax", labels)
 
+	def test_a_partly_withheld_garnishment_prints_at_the_reduced_amount(self):
+		"""A CCPA ceiling can cut an order without blocking it, and what came out
+		of the worker's pay is what the statement has to show. ORS 652.610(1)(b)
+		asks for the amount and purpose of each deduction MADE; $250 was made.
+
+		Pinned as its own claim because the rule that produces it is the same
+		`if amount` that skips a zero line below, and a future edit tightening one
+		would silently take the other with it — leaving a real withholding off a
+		wage statement, which is the failure the statute exists to prevent."""
+		lines = pay_stub_pdf.deduction_lines(a_stub(
+			total_deductions=626.17,
+			deduction_lines=[{"label": "Child Support", "amount": 250.0, "shortfall": 250.0}],
+		))
+		self.assertIn(("Child Support", 250.0), [(line["label"], line["amount"]) for line in lines])
+
+	def test_a_fully_shortfalled_garnishment_is_omitted_rather_than_printed_as_zero(self):
+		"""Nothing was withheld, so nothing was deducted, so the statement says
+		nothing — a `0.00` beside "Child Support" reads as money that went
+		somewhere and invites exactly the wrong conclusion.
+
+		The duty a total shortfall DOES create runs employer to issuing agency,
+		not employer to worker: a federal Income Withholding Order requires the
+		employer to notify the issuer when the CCPA limit prevents full
+		withholding. That is the payroll clerk's action and the clerk's view is
+		`deduction_shortfalls` on the slip, not this page."""
+		labels = [line["label"] for line in pay_stub_pdf.deduction_lines(a_stub(
+			total_deductions=376.17,
+			deduction_lines=[{"label": "Child Support", "amount": 0.0, "shortfall": 300.0}],
+		))]
+		self.assertNotIn("Child Support", labels)
+
 	def test_a_stub_with_no_deductions_itemises_nothing(self):
 		self.assertEqual(
 			pay_stub_pdf.deduction_lines(a_stub(
