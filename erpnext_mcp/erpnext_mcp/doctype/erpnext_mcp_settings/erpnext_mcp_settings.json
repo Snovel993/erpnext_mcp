@@ -318,6 +318,7 @@
   "training_section",
   "allow_list_trainings",
   "allow_get_training",
+  "allow_get_training_compliance_report",
   "training_col",
   "allow_record_training",
   "allow_sign_training_supervisor_review",
@@ -726,6 +727,8 @@
   "allow_close_accident_investigation",
   "allow_get_accident_report",
   "allow_list_accident_reports",
+  "allow_get_osha_300_log",
+  "allow_get_osha_300a_summary",
   "allow_get_wizard_definition",
   "allow_list_wizard_definitions",
   "trade_section",
@@ -864,6 +867,7 @@
   "allow_list_spray_nozzle_configs",
   "allow_list_spray_applications",
   "allow_get_spray_application",
+  "allow_get_spray_application_report",
   "spray_program_col",
   "allow_create_spray_nozzle_config",
   "allow_create_spray_tank_mix",
@@ -2939,6 +2943,13 @@
    "fieldname": "allow_get_training",
    "fieldtype": "Check",
    "label": "Get Training"
+  },
+  {
+   "default": "1",
+   "description": "READ. The training compliance MATRIX: every active employee against every curriculum this operation runs, as of a date, each cell current, due soon, expired or MISSING. The register can only report records that exist, so the person with no WPS training at all appears there as no row; here they have a cell, which is the one an inspector finds first.",
+   "fieldname": "allow_get_training_compliance_report",
+   "fieldtype": "Check",
+   "label": "Get Training Compliance Report"
   },
   {
    "fieldname": "training_col",
@@ -5649,6 +5660,20 @@
   },
   {
    "default": "1",
+   "description": "READ. The 29 CFR 1904 Form 300 log for one calendar year — one line per recordable case, numbered in the order they happened, each classified once at its most severe outcome. Reports of the year whose recordability nobody has determined are named separately rather than omitted silently: a log that hid them would present a partial year as a finished one.",
+   "fieldname": "allow_get_osha_300_log",
+   "fieldtype": "Check",
+   "label": "Get OSHA 300 Log"
+  },
+  {
+   "default": "1",
+   "description": "READ. The Form 300A annual summary and the three rates computed from it — TRIR, DART and LTIR, each cases times 200,000 over hours worked. The hours come off the shift register or off the caller; where neither supplies them the rates are null rather than 0.0, because a zero rate reads as a perfect safety year.",
+   "fieldname": "allow_get_osha_300a_summary",
+   "fieldtype": "Check",
+   "label": "Get OSHA 300A Summary"
+  },
+  {
+   "default": "1",
    "description": "READ. One wizard's spec for a handset to render, resolved into the caller's language. Adding a flow is adding a record, not shipping an app.",
    "fieldname": "allow_get_wizard_definition",
    "fieldtype": "Check",
@@ -6591,6 +6616,13 @@
    "fieldname": "allow_get_spray_application",
    "fieldtype": "Check",
    "label": "Get Spray Application"
+  },
+  {
+   "default": "1",
+   "description": "READ. Chemical usage over a period, grouped by product and then by block: total quantity per product, which blocks received it, on what dates, by which applicator, and the label intervals it carried. The pesticide use report a state asks for. Quantities are summed per unit and never across units.",
+   "fieldname": "allow_get_spray_application_report",
+   "fieldtype": "Check",
+   "label": "Get Spray Application Report"
   },
   {
    "fieldname": "spray_program_col",

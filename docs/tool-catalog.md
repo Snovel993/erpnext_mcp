@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 695 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 699 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 345 read tools are **on** by default and can be switched off individually. A
+All 349 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -7196,6 +7196,39 @@ Refuses a self-review, a supervisor from another entity, a review dated before t
 training, and — without `replace_reviewer=true` — overwriting a signature already
 on the record.
 
+### The training compliance matrix
+
+#### `get_training_compliance_report`
+
+**Read-only.** Every active employee on one axis, every curriculum this operation
+runs on the other, each cell one of **`current`**, **`due_soon`**, **`expired`**
+or **`missing`**. Takes `company` (required), `regime` or `training_type` to
+narrow, and `as_of_date`.
+
+**`missing` is why this is not `list_trainings`.** A register can only report
+records that exist, so the person with no WPS training at all appears there as no
+row — which is to say nowhere. Putting the roster on one axis and the
+`Training Type` master on the other gives an absence a cell of its own, and it is
+the cell an inspector finds first.
+
+**As of a date, not as of today.** `as_of_date` reaches both the record selection
+and the expiry arithmetic: a report run in January for last year's audit does not
+know about training completed since, so it says what was true then rather than
+what is true now. The two halves cannot disagree because they are given the same
+date.
+
+**It does not know who needed what, and says so.** This site has no per-role
+training requirement table, so the matrix holds the whole active roster against
+every active curriculum. That over-reports — a bookkeeper is not a pesticide
+handler — so `requirement_basis` states the basis in the response rather than
+presenting the over-report as a finding. `regime` and `training_type` are how a
+caller asks the question they actually mean.
+
+Returns the matrix, `by_requirement` counts per curriculum, and a `summary` of
+`total_employees` / `fully_compliant` / `partially_compliant` / `non_compliant`.
+Partially compliant means *holds some and lacks some*; non-compliant means
+*holds none of them*.
+
 ## The twelfth alert rule and the packet section
 
 `training_expiring` fires on the record's own `expires_date`: **Warning** at 90
@@ -13745,6 +13778,46 @@ closing things. `outstanding` is on every read, not just the close: an
 investigation that tells you on day three what it is waiting for is one somebody
 finishes.
 
+### The OSHA 300 log and its 300A summary
+
+#### `get_osha_300_log` / `get_osha_300a_summary`
+
+**Read-only.** Both take `company` and a four-digit **calendar** `year` — 1904.4
+keeps the log by calendar year, and a fiscal year or a season is a different
+document.
+
+**The filter is the whole difference from the register.** Only cases determined
+recordable appear on the log. A near miss is not a case; a first-aid-only injury
+is not a case. That determination is a person's and this app never inferred it.
+
+**The log reports its own incompleteness.** `undetermined_cases` names every
+report of the year whose recordability nobody has decided. They cannot be on the
+log — the determination is what puts them there — but a log that omitted them
+silently would present a partial year as a finished one, which is the shape of a
+document somebody signs without noticing.
+
+**Every case is counted once**, at its most severe outcome: death → days away →
+restricted → other recordable. Adding the columns of a correct 300A gives the
+case count, and it only does that if the classification is exclusive. Day counts
+are capped at 180 for the totals per 1904.7(b)(3)(viii), with the raw figures
+reported beside them.
+
+**The rates need hours and will not invent them.** TRIR, DART and LTIR are all
+`cases × 200,000 / hours worked`. The denominator comes off the Farm Shift
+register through the same span arithmetic payroll runs on — which counts only
+people who clocked through this app, so it is a **floor**, and every rate built
+on it is therefore a **ceiling**. `total_hours_worked` and `average_employees`
+override it, which is the right answer where payroll lives elsewhere. Where
+neither supplies it the rates come back `null` **with a note**, never `0.0`: a
+zero rate reads on every screen as a perfect safety year.
+
+**Privacy cases are not applied.** 1904.29(b)(7) withholds the name from the
+posted log for six categories plus any case the employee asks be kept private,
+none of which this app can determine. Every name comes back and a person
+withholds them before posting. Posting between 1 February and 30 April and the
+executive certification are likewise acts a tool cannot perform, and neither has
+happened because one of these ran.
+
 ### Wizards as data
 
 **The problem is the App Store.** A flow compiled into Swift needs a release to
@@ -15036,6 +15109,38 @@ reconstructed afterwards. `get_spray_application` reports which blocks are
 **still restricted right now**, read through the `Spray REI` register rather than
 recomputed, so it stays correct after a window is cancelled and on a bench whose
 scheduler has stopped.
+
+#### `get_spray_application_report`
+
+**Read-only.** Chemical usage over a period, grouped by **product** and then by
+**block**: total quantity per product, which blocks received it, on what dates,
+by which applicator, and the label intervals it carried. Takes `company`
+(required), `date_from`/`date_to` (defaulting to the calendar year to date),
+`block` and `product`.
+
+**This is the pesticide use report.** Oregon's PARC reporting, California's
+monthly PUR and Washington's WPS records all ask a version of the same question,
+and all of them want it summed by product and located on the ground.
+`list_spray_applications` answers *what did we spray on the 14th*; this answers
+*how much captan went onto Block 7 this season*.
+
+**The per-block quantity is rate × that block's acres**, never the tank total
+spread evenly — the same doctrine `get_active_rei` applies to restrictions, for
+the same reason. What a regulator asks about a block is what went onto that
+ground, and an even split across blocks of unequal size is a number that was
+never true of any of them.
+
+**Quantities are summed per unit and never across units.** A product recorded at
+lb/acre on one pass and qt/acre on another has two totals here, not one, and
+`mixed_unit_products` names it. Adding pounds to quarts needs a density this app
+does not have, and a wrong total on a use report is the kind of wrong an
+inspector finds rather than an auditor.
+
+**Applied only.** A planned application is a plan and a cancelled one did not
+happen; both are counted in `excluded` so the report cannot be mistaken for the
+whole register. An application naming no block is reported against
+`(no block recorded)` using its own acres rather than dropped — the product total
+stays right, and `applications_without_blocks` says the map is not.
 
 ### Crop protection: observation → pressure → IPM
 

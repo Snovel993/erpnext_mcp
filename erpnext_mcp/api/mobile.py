@@ -9176,3 +9176,139 @@ def render_pay_stub(
 		"replaced": data.get("replaced"),
 		"note": data.get("note"),
 	}
+# ── The three compliance reports ─────────────────────────────────────────────
+#
+# ALL THREE ARE AGGREGATES, WHICH IS WHY THEY ARE HERE AT ALL. Every other read
+# on this transport answers a question about one document or one person's own
+# work; these answer a question about a whole crew, a whole year or a whole
+# season, and they are on the handset because the person who needs them is
+# standing in front of the inspector asking. A foreman who can pull the training
+# matrix in a shed has answered "is your crew trained" in the room rather than
+# by promising to email it.
+#
+# THE NUMBERING SKIPS 113 AND 114 DELIBERATELY: two other sessions were
+# appending to this file at the same time and had taken them. A gap costs a
+# reader nothing; two blocks sharing a number costs them the assumption that the
+# number identifies a method.
+#
+# NONE OF THE FOUR DECLARES AN ARGUMENT THAT CHOOSES ITS OWN DENOMINATOR OR ITS
+# OWN SUBJECT. `get_osha_300a_summary` takes `total_hours_worked` and
+# `average_employees` as a desk override and NEITHER IS DECLARED BELOW, so
+# `routes.bind` cannot pass them: the rate a regulator reads is not a figure
+# that gets typed into a phone in a field, and a handset that could set the
+# denominator could set the rate.
+
+
+# ── 115. get_training_compliance_report ──────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_training_compliance_report", limit=guard.READ_LIMIT)
+def get_training_compliance_report(
+	user: str,
+	company=None,
+	regime=None,
+	training_type=None,
+	as_of_date=None,
+) -> dict:
+	"""Every active employee against every curriculum, with the gaps named.
+
+	AN HR READ, GATED LIKE ONE. A training matrix is a personnel document: it
+	says by name who has had what and who has had nothing, which is a register a
+	perfectly good field credential has no business reading. `require_hr_role`
+	is called here as well as one layer down, for the same reason the five
+	discipline routes call it — the refusal should happen before the roster is
+	read, not after.
+	"""
+	personnel.require_hr_role()
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {"company": entity}
+	for key, value in (
+		("regime", regime),
+		("training_type", training_type),
+		("as_of_date", as_of_date),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return training_tools.get_training_compliance_report(inner).data
+
+
+# ── 116. get_osha_300_log ────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_osha_300_log", limit=guard.READ_LIMIT)
+def get_osha_300_log(user: str, company=None, year=None) -> dict:
+	"""The Form 300 log for one calendar year, one line per recordable case.
+
+	THE DISPATCH GATE, matching `list_accident_reports` and for the same reason:
+	creating a report is open to whoever finds somebody on the ground, but the
+	INVESTIGATION and its register are somebody's job. A log is the register in
+	its most concentrated form — every recordable injury on the operation, named
+	— so it takes the same role the register does.
+	"""
+	guard.require_dispatch_role(user, "Reading the OSHA 300 log")
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	return accident_tools.get_osha_300_log({"company": entity, "year": year}).data
+
+
+# ── 117. get_osha_300a_summary ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_osha_300a_summary", limit=guard.READ_LIMIT)
+def get_osha_300a_summary(user: str, company=None, year=None) -> dict:
+	"""The annual summary and its three rates, for one calendar year.
+
+	`total_hours_worked` AND `average_employees` ARE NOT DECLARED. The tool takes
+	both as a desk override for an operation whose payroll lives outside this
+	app, and a handset that could supply the denominator could supply the rate —
+	which is the number that goes on a posted form. Omitted from the signature,
+	they are unreachable through `routes.bind` whatever a body carries, so what
+	comes back here is always computed from the shift register or is null.
+	"""
+	guard.require_dispatch_role(user, "Reading the OSHA 300A summary")
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	return accident_tools.get_osha_300a_summary({"company": entity, "year": year}).data
+
+
+# ── 118. get_spray_application_report ────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_spray_application_report", limit=guard.READ_LIMIT)
+def get_spray_application_report(
+	user: str,
+	company=None,
+	date_from=None,
+	date_to=None,
+	block=None,
+	product=None,
+) -> dict:
+	"""Chemical usage over a period, by product and then by block.
+
+	THE DISPATCH GATE. What went onto which ground over a season is the
+	operation's pesticide use record, not a worker's own view of their work —
+	`get_active_rei` is the read a picker needs and it is already routed. This
+	is the one somebody answers a state inspector from.
+
+	`field` AND `item_code` ARE NOT DECLARED even though the tool accepts both as
+	aliases. One spelling per argument on this transport: two names for one
+	filter is two things a client can get subtly wrong, and the tool's aliases
+	exist for callers who came from the Desk's vocabulary rather than for this
+	one.
+	"""
+	guard.require_dispatch_role(user, "Reading the spray application report")
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {"company": entity}
+	for key, value in (
+		("date_from", date_from),
+		("date_to", date_to),
+		("block", block),
+		("product", product),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+
+	return spray_tools.get_spray_application_report(inner).data

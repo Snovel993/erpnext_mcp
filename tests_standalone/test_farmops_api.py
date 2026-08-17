@@ -469,6 +469,15 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# it.
 		"/mobile/get_payroll_register",
 		"/mobile/render_pay_stub",
+		# The three compliance reports — the only aggregate reads on the table.
+		# `get_osha_300a_summary` is the one whose ABSENT arguments matter:
+		# `total_hours_worked` and `average_employees` are on the tool and not on
+		# the wrapper, so `bind` drops them and a handset cannot choose the
+		# denominator of a rate a regulator reads.
+		"/mobile/get_training_compliance_report",
+		"/mobile/get_osha_300_log",
+		"/mobile/get_osha_300a_summary",
+		"/mobile/get_spray_application_report",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
 	}

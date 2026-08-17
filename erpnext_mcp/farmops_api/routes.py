@@ -624,6 +624,32 @@ ROUTES = (
 	# checkbox on the phone of whoever printed it.
 	Route("/mobile", mobile_api.get_payroll_register),
 	Route("/mobile", mobile_api.render_pay_stub),
+	# The three compliance reports, and the only AGGREGATE reads on this table.
+	# Everything above answers a question about one document or about the
+	# caller's own work; these answer one about a whole crew, a whole calendar
+	# year or a whole season. They are here because the person who needs them is
+	# usually standing in front of the person asking for them, and "I will email
+	# it when I am back at the office" is the answer that becomes a finding.
+	#
+	# ALL FOUR TAKE A ROLE; none is open on enrolment alone. The training matrix
+	# is a personnel document — it names who has had no training at all — and
+	# carries the HR gate in its own body like the five discipline routes above.
+	# The two OSHA reads take the dispatch role for the same reason
+	# `list_accident_reports` does: filing a report is open to whoever finds
+	# somebody on the ground, but the register is somebody's job. The spray
+	# report is the operation's pesticide use record; `get_active_rei` is
+	# already the read a picker actually needs.
+	#
+	# `get_osha_300a_summary`'s TWO OVERRIDE ARGUMENTS ARE UNREACHABLE HERE. The
+	# tool takes `total_hours_worked` and `average_employees` so a desk can
+	# supply a denominator from payroll; the wrapper declares neither, so this
+	# table's argument filter drops both — a handset that could set the
+	# denominator of a TRIR could set the TRIR, and that number goes on a form a
+	# regulator reads.
+	Route("/mobile", mobile_api.get_training_compliance_report),
+	Route("/mobile", mobile_api.get_osha_300_log),
+	Route("/mobile", mobile_api.get_osha_300a_summary),
+	Route("/mobile", mobile_api.get_spray_application_report),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
 )

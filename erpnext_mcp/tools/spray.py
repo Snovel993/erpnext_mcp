@@ -1173,3 +1173,370 @@ def get_spray_application(args: dict) -> ToolResult:
 			f"{described['total_acres']:g} ac, {len(restricted)} still restricted"
 		),
 	)
+
+
+# ── get_spray_application_report ────────────────────────────────────────────
+#
+# WHAT WENT OUT, PER PRODUCT, PER BLOCK, OVER A SEASON. Every state that
+# regulates pesticide use asks a version of the same question — Oregon's PARC
+# reporting, California's monthly PUR, Washington's WPS records under WAC
+# 16-233 — and all of them want it summed by product and located on the ground.
+# Until this existed the data was here one application at a time and the sum was
+# somebody's spreadsheet, which is the shape of a number nobody can reproduce
+# twelve months later in front of the person asking.
+#
+# THE PER-BLOCK QUANTITY IS RATE × THAT BLOCK'S ACRES, never the tank total
+# spread evenly. `_rei_products` settled this doctrine for restrictions and it
+# is the same doctrine here: what a regulator asks about a block is what went
+# onto THAT ground, and an even split across blocks of unequal size is a number
+# that was never true of any of them.
+#
+# QUANTITIES ARE SUMMED PER UNIT AND NEVER ACROSS UNITS. One product recorded at
+# lb/acre on one pass and qt/acre on another has two totals here, not one, and
+# the response says the units are mixed. A single figure would require a density
+# this app does not have, and a wrong total on a pesticide use report is the
+# kind of wrong that gets discovered by an inspector rather than by an auditor.
+
+#: Most applications one report reads. A season on a large operation is
+#: hundreds; this is generous and the report says when it bit.
+REPORT_CAP = 1000
+
+#: Most block rows the report joins in one go, sized off the application cap.
+_REPORT_BLOCK_CAP = REPORT_CAP * BLOCK_CAP
+
+
+def _report_window(args: dict) -> tuple[str, str, bool]:
+	"""The reporting period. Defaults to the calendar year in progress.
+
+	A DEFAULT RATHER THAN A REQUIREMENT, because the question is almost always
+	"this season", and a report that refused to run without dates would be run
+	with whatever dates got typed first. `defaulted` comes back so the response
+	can say the window was chosen rather than given.
+	"""
+	from_date = as_date(args, "date_from") or as_date(args, "from_date")
+	to_date = as_date(args, "date_to") or as_date(args, "to_date")
+	defaulted = not (from_date or to_date)
+	today = str(frappe.utils.today())
+	if not from_date:
+		from_date = f"{today[:4]}-01-01"
+	if not to_date:
+		to_date = today
+	if str(to_date) < str(from_date):
+		raise ToolError(
+			f"date_to ({to_date}) is before date_from ({from_date}). Nothing was reported."
+		)
+	return str(from_date), str(to_date), defaulted
+
+
+def _blocks_by_application(names: list) -> dict:
+	"""`{application: [block rows]}` for a batch, in one query."""
+	if not names or not compat.doctype_exists("Spray Application Block"):
+		return {}
+	found: dict = {}
+	for row in (
+		frappe.db.get_all(
+			"Spray Application Block",
+			filters={"parent": ("in", names)},
+			fields=["parent", "block", "block_doctype", "acres", "started_at", "completed_at"],
+			limit=_REPORT_BLOCK_CAP,
+		)
+		or []
+	):
+		entry = dict(row)
+		found.setdefault(str(entry.get("parent") or ""), []).append(entry)
+	return found
+
+
+def _product_lines(row: dict) -> list[dict]:
+	"""The products on one application, off the stored JSON snapshot.
+
+	READ OFF THE APPLICATION, NOT OFF THE TANK MIX AND NOT OFF THE ITEM. The mix
+	says what was planned and the Item says what the label says today; the
+	snapshot says what went out, at the rate it went out at, with the label
+	numbers as they read on the day. A use report assembled from a live join
+	would answer a question about now, and the question is about April.
+	"""
+	raw = row.get("products_applied")
+	if not raw:
+		return []
+	try:
+		parsed = json.loads(raw) if isinstance(raw, str) else raw
+	except (json.JSONDecodeError, ValueError, TypeError):
+		return []
+	return [dict(line) for line in parsed if isinstance(line, dict)] if isinstance(parsed, list) else []
+
+
+def _blank_product(line: dict) -> dict:
+	return {
+		"product": line.get("item"),
+		"product_name": line.get("item_name") or line.get("item"),
+		"epa_reg_number": line.get("epa_reg_number") or None,
+		"rei_hours": _number(line.get("rei_hours")) or None,
+		"phi_days": _number(line.get("phi_days")) or None,
+		"targets": [],
+		"total_by_uom": {},
+		"total_acres_treated": 0.0,
+		"application_count": 0,
+		"blocks": {},
+		"applications": [],
+		"applicators": [],
+		"first_application": None,
+		"last_application": None,
+	}
+
+
+def get_spray_application_report(args: dict) -> ToolResult:
+	"""Chemical usage over a period, grouped by product and then by block.
+
+	THE REPORT A REGULATOR ASKS FOR. `list_spray_applications` answers "what did
+	we spray on the 14th"; this answers "how much captan went onto Block 7 this
+	season, on what dates, by whom, and what did it close" — which is the
+	question every pesticide use reporting scheme is a form of, and which no
+	amount of reading the register one row at a time answers reliably.
+
+	APPLIED ONLY. A planned application is a plan and a cancelled one did not
+	happen; neither belongs in a total of what went onto the ground. Both are
+	counted in `excluded` so the report cannot be mistaken for the whole
+	register.
+
+	REI IS THE LABEL FIGURE OFF THE APPLICATION, not a live window. Whether a
+	block is closed right now is `get_active_rei`'s question and this is a
+	historical report — the hours here say what the restriction WAS, which is
+	what a records inspection asks about.
+	"""
+	_require(APPLICATION)
+	company = resolve_company(as_str(args, "company", required=True), required=True)
+	from_date, to_date, defaulted = _report_window(args)
+
+	block_filter = as_str(args, "block") or as_str(args, "field")
+	product_filter = as_str(args, "product") or as_str(args, "item_code")
+
+	rows = (
+		frappe.db.get_all(
+			APPLICATION,
+			filters={
+				"company": company,
+				"completed_at": ("between", [f"{from_date} 00:00:00", f"{to_date} 23:59:59"]),
+			},
+			fields=compat.existing_fields(APPLICATION, _APPLICATION_FIELDS),
+			order_by="completed_at asc",
+			limit=REPORT_CAP + 1,
+		)
+		or []
+	)
+	truncated = len(rows) > REPORT_CAP
+	rows = [dict(row) for row in rows[:REPORT_CAP]]
+
+	applied = [row for row in rows if str(row.get("status") or "") == APPLIED]
+	excluded = {
+		"planned": len([row for row in rows if str(row.get("status") or "") == PLANNED]),
+		"cancelled": len([row for row in rows if str(row.get("status") or "") == CANCELLED]),
+	}
+
+	blocks_by_app = _blocks_by_application([str(row.get("name")) for row in applied])
+
+	by_product: dict = {}
+	by_block: dict = {}
+	mixed_units: list = []
+	no_uom: list = []
+	unblocked: list = []
+	counted_applications: set = set()
+
+	for row in applied:
+		name = str(row.get("name"))
+		lines = _product_lines(row)
+		if product_filter:
+			lines = [line for line in lines if str(line.get("item") or "") == product_filter]
+		if not lines:
+			continue
+
+		block_rows = blocks_by_app.get(name) or []
+		if block_filter:
+			block_rows = [entry for entry in block_rows if str(entry.get("block") or "") == block_filter]
+			if not block_rows:
+				continue
+
+		# An application with no block rows still put product on the ground —
+		# `total_acres` is what it says. It is reported against the sentinel
+		# rather than dropped, because a use report that silently omitted it
+		# would understate the total, and understating is the direction that
+		# gets an operation in trouble.
+		if not block_rows:
+			block_rows = [{"block": None, "block_doctype": None, "acres": _number(row.get("total_acres"))}]
+			unblocked.append(name)
+
+		applicator = row.get("applicator") or None
+		completed = str(row.get("completed_at") or "")
+		date_only = completed[:10] or None
+
+		for line in lines:
+			product = str(line.get("item") or "")
+			if not product:
+				continue
+			entry = by_product.setdefault(product, _blank_product(line))
+			uom = str(line.get("rate_uom") or "").strip() or "(no unit recorded)"
+			if uom == "(no unit recorded)" and name not in no_uom:
+				no_uom.append(name)
+			rate = _number(line.get("rate_per_acre"))
+			if line.get("target") and line["target"] not in entry["targets"]:
+				entry["targets"].append(line["target"])
+
+			for block_row in block_rows:
+				block = block_row.get("block")
+				acres = _number(block_row.get("acres"))
+				quantity = round(rate * acres, 4)
+
+				entry["total_by_uom"][uom] = round(entry["total_by_uom"].get(uom, 0.0) + quantity, 4)
+				entry["total_acres_treated"] = round(entry["total_acres_treated"] + acres, 3)
+
+				key = str(block) if block else "(no block recorded)"
+				cell = entry["blocks"].setdefault(
+					key,
+					{
+						"block": block,
+						"block_doctype": block_row.get("block_doctype"),
+						"acres_treated": 0.0,
+						"quantity_by_uom": {},
+						"application_count": 0,
+						"dates": [],
+						"applicators": [],
+					},
+				)
+				cell["acres_treated"] = round(cell["acres_treated"] + acres, 3)
+				cell["quantity_by_uom"][uom] = round(cell["quantity_by_uom"].get(uom, 0.0) + quantity, 4)
+				cell["application_count"] += 1
+				if date_only and date_only not in cell["dates"]:
+					cell["dates"].append(date_only)
+				if applicator and applicator not in cell["applicators"]:
+					cell["applicators"].append(applicator)
+
+				block_entry = by_block.setdefault(
+					key,
+					{
+						"block": block,
+						"block_doctype": block_row.get("block_doctype"),
+						"products": [],
+						"acres_treated": 0.0,
+						"application_count": 0,
+					},
+				)
+				if product not in block_entry["products"]:
+					block_entry["products"].append(product)
+				block_entry["acres_treated"] = round(block_entry["acres_treated"] + acres, 3)
+
+			entry["application_count"] += 1
+			entry["applications"].append(
+				{
+					"application": name,
+					"completed_at": completed or None,
+					"date": date_only,
+					"applicator": applicator,
+					"applicator_license": row.get("applicator_license") or None,
+					"rate_per_acre": rate,
+					"rate_uom": line.get("rate_uom") or None,
+					"blocks": [block_row.get("block") for block_row in block_rows],
+					"acres": round(sum(_number(b.get("acres")) for b in block_rows), 3),
+					"rei_hours": _number(line.get("rei_hours")) or None,
+				}
+			)
+			if applicator and applicator not in entry["applicators"]:
+				entry["applicators"].append(applicator)
+			if date_only:
+				if entry["first_application"] is None or date_only < entry["first_application"]:
+					entry["first_application"] = date_only
+				if entry["last_application"] is None or date_only > entry["last_application"]:
+					entry["last_application"] = date_only
+			counted_applications.add(name)
+
+		for key in {str(b.get("block")) if b.get("block") else "(no block recorded)" for b in block_rows}:
+			if key in by_block:
+				by_block[key]["application_count"] += 1
+
+	for product, entry in by_product.items():
+		entry["blocks"] = dict(sorted(entry["blocks"].items()))
+		entry["units"] = sorted(entry["total_by_uom"])
+		if len(entry["units"]) > 1:
+			mixed_units.append(product)
+
+	products = [by_product[key] for key in sorted(by_product)]
+	blocks = {key: by_block[key] for key in sorted(by_block)}
+
+	notes = []
+	if defaulted:
+		notes.append(
+			f"No dates were given, so the window is the calendar year to date — {from_date} to "
+			f"{to_date}. A state use report is usually filed on the calendar year; a season that "
+			"crosses new year needs the dates stated."
+		)
+	if excluded["planned"] or excluded["cancelled"]:
+		notes.append(
+			f"{excluded['planned']} planned and {excluded['cancelled']} cancelled application(s) "
+			"in this window are NOT in these totals. A plan is not an application and a cancelled "
+			"one did not happen."
+		)
+	if mixed_units:
+		notes.append(
+			f"{len(mixed_units)} product(s) were recorded in more than one unit and their totals "
+			"are reported per unit rather than summed: "
+			f"{', '.join(sorted(mixed_units))}. Adding pounds to quarts needs a density this app "
+			"does not have, and a wrong total on a use report is found by an inspector."
+		)
+	if no_uom:
+		notes.append(
+			f"{len(no_uom)} application(s) carry a rate with no unit, so their quantity is "
+			"totalled under '(no unit recorded)'. A regulator's form has a units column and this "
+			"is the one number nobody can supply afterwards from memory."
+		)
+	if unblocked:
+		notes.append(
+			f"{len(unblocked)} application(s) name no block and are reported against '(no block "
+			"recorded)' using their own total acres. The product total is right; the map is not, "
+			"and a use report that cannot locate an application is one that gets sent back."
+		)
+	if truncated:
+		notes.append(
+			f"The read stopped at {REPORT_CAP} applications in this window. Narrow the dates — "
+			"the totals above are of that subset only."
+		)
+	if not products:
+		notes.append(
+			"No applied spray applications matched. Check the window and the filters before "
+			"reading this as a season with no spraying in it."
+		)
+
+	# The REI table is per product rather than per application, because the
+	# question a records inspection asks — "what interval did this product
+	# carry" — is a fact about the label and repeating it per row would invite
+	# the reader to average it.
+	rei_by_product = {
+		entry["product"]: {"rei_hours": entry["rei_hours"], "phi_days": entry["phi_days"]}
+		for entry in products
+	}
+
+	return ToolResult(
+		data={
+			"company": company,
+			"date_from": from_date,
+			"date_to": to_date,
+			"window_defaulted": defaulted,
+			"block": block_filter or None,
+			"product": product_filter or None,
+			"products": products,
+			"product_count": len(products),
+			"by_block": blocks,
+			"block_count": len(blocks),
+			"rei_by_product": rei_by_product,
+			"application_count": len(counted_applications),
+			"applications_in_window": len(rows),
+			"excluded": excluded,
+			"truncated": truncated,
+			"mixed_unit_products": sorted(mixed_units),
+			"applications_without_blocks": unblocked,
+			"applications_without_units": no_uom,
+			"notes": notes,
+		},
+		summary=(
+			f"{len(products)} product(s) over {len(counted_applications)} applied application(s) "
+			f"on {len(blocks)} block(s), {from_date} to {to_date}"
+		),
+	)

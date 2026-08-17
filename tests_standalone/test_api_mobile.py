@@ -557,6 +557,23 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# either ever appears in an app build — see `ThePayrollRoutesAreHROnly`.
 		"get_payroll_register",
 		"render_pay_stub",
+		# The three compliance reports: the training matrix, the OSHA 300 log
+		# with its 300A summary, and the spray application report. HERE FOR THIS
+		# SET'S ORDINARY REASON — `MobileAPI.swift` names none of the four yet,
+		# there being no compliance-report screen in the app — and the server
+		# half is published first so the iOS half is a client change rather than
+		# a release of both.
+		#
+		# THEY ARE NOT IN `MOBILE` AND THAT IS DELIBERATE rather than pending
+		# paperwork: `test_ios_contract` requires a mirror of the Swift Codable
+		# for everything in that set, and there is no Codable to mirror. Writing
+		# one here would invent the contract rather than transcribe it, and an
+		# invented contract is worse than an absent one — the app would be built
+		# against a shape nothing on either side agreed to.
+		"get_training_compliance_report",
+		"get_osha_300_log",
+		"get_osha_300a_summary",
+		"get_spray_application_report",
 	}
 
 	def _whitelisted(self, module):

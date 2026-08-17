@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, timezones
+from .. import compat, payroll_integration, timezones
 from ..args import as_bool, as_date, as_int, as_limit, as_str, resolve_company
 from ..erpnext_mcp.doctype.accident_report.accident_report import (
 	CLOSED,
@@ -853,5 +853,532 @@ def list_accident_reports(args: dict) -> ToolResult:
 			f"{len(reports)} accident report(s), {len(open_reports)} open, "
 			f"{len(recordables)} OSHA-recordable"
 			+ (f", {len(undetermined)} undetermined" if undetermined else "")
+		),
+	)
+
+
+# ── The OSHA 300 log and its 300A summary ───────────────────────────────────
+#
+# THIS IS THE OTHER HALF OF `create_accident_report`. Investigations have been
+# recorded here since v0.55.0 and 29 CFR 1904.4 asks for a LOG — one line per
+# recordable case, kept for the calendar year, posted every February. Until this
+# pair existed the data went in and no aggregate came out, so the log was being
+# assembled by hand from the register at exactly the moment nobody has time.
+#
+# THE LOG IS NOT THE REGISTER, AND THE FILTER IS THE WHOLE DIFFERENCE. Only
+# `osha_recordable == Yes` appears. A near miss is not a case; a first-aid-only
+# injury is not a case; and 1904.7's line is medical treatment BEYOND first aid,
+# which is a determination a person made and this app never inferred. What the
+# app CAN say is which determinations have not been made, and it says so loudly:
+# `undetermined_cases` is named, counted and carried into the 300A, because a log
+# that quietly omitted them would read as complete while an inspector's copy is
+# not.
+#
+# EVERY CASE IS COUNTED ONCE, AT ITS MOST SEVERE OUTCOME. That is the 1904.29
+# column rule — a fatality is not also a days-away case, and a case with both
+# days away and restricted days is a days-away case. Adding the columns of a
+# correct 300A gives the total case count, and it only does that if the
+# classification is exclusive.
+
+#: The four 1904.29 outcome columns, in the order severity resolves them.
+OSHA_DEATH = "death"
+OSHA_DAYS_AWAY = "days_away"
+OSHA_RESTRICTED = "restricted"
+OSHA_OTHER = "other_recordable"
+
+#: The `severity` values that mean the person died. `Fatality` is the option the
+#: doctype ships; the tuple is a membership test so a site that added its own
+#: wording keeps working rather than filing a death as "other recordable".
+_FATAL_SEVERITIES = ("Fatality", "Fatal", "Death")
+
+#: 1904.7(b)(3)(viii): day counts stop at 180 for the log, whatever the actual
+#: absence. The raw figure is still reported beside the capped one — the cap is
+#: how the case is COUNTED, not a claim about how long somebody was away.
+OSHA_DAY_CAP = 180
+
+#: The standard base for an incidence rate: 100 full-time equivalents working
+#: 2,000 hours each. `cases × 200,000 / hours` is the formula every one of the
+#: three rates below uses; only the numerator changes.
+OSHA_RATE_BASE = 200_000
+
+#: Most cases one log renders. A calendar year on an operation that reached this
+#: has a bigger problem than a truncated report, but the cap is honest anyway.
+LOG_CAP = 500
+
+
+def _log_year(args: dict) -> int:
+	"""The calendar year, validated. 1904 keeps the log by calendar year only."""
+	raw = args.get("year")
+	if raw in (None, ""):
+		raise ToolError(
+			"year is required. 29 CFR 1904.4 keeps the log by CALENDAR year — a fiscal year, a "
+			"season or a rolling twelve months is a different document, and the one an "
+			"inspector asks for is the calendar one."
+		)
+	try:
+		year = int(str(raw).strip())
+	except (TypeError, ValueError):
+		raise ToolError(f"year must be a four-digit calendar year, got {raw!r}.") from None
+	if not 1970 <= year <= 2200:
+		raise ToolError(f"year must be a four-digit calendar year, got {year}.")
+	return year
+
+
+def _classify(row: dict) -> str:
+	"""Which 1904.29 column this case belongs in. Exactly one of the four.
+
+	THE ORDER IS THE RULE, not a preference. A fatality is recorded as a death
+	and not also as the days away that preceded it; a case with both days away
+	and restricted duty is a days-away case. Counting one case in two columns is
+	the single most common error on a hand-kept 300A, and it shows up as a
+	column total that exceeds the case count.
+	"""
+	if str(row.get("severity") or "").strip() in _FATAL_SEVERITIES:
+		return OSHA_DEATH
+	if int(row.get("days_away_from_work") or 0) > 0:
+		return OSHA_DAYS_AWAY
+	if int(row.get("days_restricted_duty") or 0) > 0:
+		return OSHA_RESTRICTED
+	return OSHA_OTHER
+
+
+def _job_title(employee: str) -> str:
+	"""The injured person's job title, for column C. Blank where unknown."""
+	if not employee or not compat.doctype_exists(EMPLOYEE):
+		return ""
+	if not compat.has_field(EMPLOYEE, "designation"):
+		return ""
+	try:
+		return str(frappe.db.get_value(EMPLOYEE, employee, "designation") or "")
+	except Exception:  # pragma: no cover - an Employee register shaped differently
+		return ""
+
+
+def _where(row: dict) -> str:
+	"""Column F, 'where the event occurred'. The description, then the link.
+
+	The free-text `location_description` is preferred over the Dynamic Link
+	because the column asks for a place a reader can picture — 'loading dock,
+	Block 14' — and a docname is not that. The link is appended where both
+	exist so the row stays traceable.
+	"""
+	described = str(row.get("location_description") or "").strip()
+	link = str(row.get("location") or "").strip()
+	if described and link and link not in described:
+		return f"{described} ({link})"
+	return described or link
+
+
+def _case_rows(company: str, year: int) -> tuple[list[dict], list[dict], bool]:
+	"""The recordable cases of one year, the undetermined ones, and truncation.
+
+	Both halves come out of the same read, in `occurred_at` order, because the
+	log is chronological and the case numbers below are positional — a second
+	query for the undetermined set could return them interleaved differently and
+	the two lists would describe different orderings of the same year.
+	"""
+	rows = (
+		frappe.db.get_all(
+			ACCIDENT,
+			filters={
+				"company": company,
+				"occurred_at": ("between", [f"{year}-01-01 00:00:00", f"{year}-12-31 23:59:59"]),
+			},
+			fields=compat.existing_fields(ACCIDENT, _FIELDS),
+			order_by="occurred_at asc",
+			limit=LOG_CAP + 1,
+		)
+		or []
+	)
+	truncated = len(rows) > LOG_CAP
+	rows = [dict(row) for row in rows[:LOG_CAP]]
+	recordable = [row for row in rows if str(row.get("osha_recordable") or "") == "Yes"]
+	undetermined = [row for row in rows if str(row.get("osha_recordable") or UNDETERMINED) == UNDETERMINED]
+	return recordable, undetermined, truncated
+
+
+def _log_line(index: int, row: dict) -> dict:
+	"""One case as a row of the 300 log."""
+	classification = _classify(row)
+	away = int(row.get("days_away_from_work") or 0)
+	restricted = int(row.get("days_restricted_duty") or 0)
+	occurred = str(row.get("occurred_at") or "")
+	return {
+		"case_number": index,
+		"report": row.get("name"),
+		"employee": row.get("injured_person") or None,
+		"employee_name": row.get("injured_person_name") or row.get("injured_person") or None,
+		"job_title": _job_title(str(row.get("injured_person") or "")) or None,
+		"date_of_injury": occurred[:10] or None,
+		"occurred_at": occurred or None,
+		"where_event_occurred": _where(row) or None,
+		"description": row.get("incident_description") or None,
+		"injury_type": row.get("injury_type") or None,
+		"body_part": row.get("body_part") or None,
+		"classify": classification,
+		"days_away_from_work": away,
+		"days_on_restriction": restricted,
+		"days_away_counted": min(away, OSHA_DAY_CAP),
+		"days_on_restriction_counted": min(restricted, OSHA_DAY_CAP),
+		"determination_basis": row.get("osha_determination_basis") or None,
+		"determined_by": row.get("osha_determined_by") or None,
+		"determined_on": str(row.get("osha_determined_on") or "") or None,
+		"form_301_filed": bool(frappe.utils.cint(row.get("osha_form_301_filed"))),
+		"investigation_status": row.get("status") or OPEN,
+		"still_open": str(row.get("status") or OPEN) != CLOSED,
+	}
+
+
+def _log_notes(lines: list[dict], undetermined: list[dict], truncated: bool) -> list[str]:
+	"""What a person about to sign this log has to be told, in priority order."""
+	notes = []
+	if undetermined:
+		notes.append(
+			f"{len(undetermined)} report(s) in this year are still Undetermined under 1904.7 and "
+			"are NOT on the log. Every one is either a missing line or correctly absent, and "
+			"nobody can say which until somebody determines it — which is why they are named "
+			"rather than counted. This log is incomplete until that list is empty."
+		)
+	still_open = [line["report"] for line in lines if line["still_open"]]
+	if still_open:
+		notes.append(
+			f"{len(still_open)} case(s) on this log come from investigations that are still open, "
+			"so their day counts are still accruing. 1904.33 requires the log to be updated for "
+			"five years as cases develop — these are the lines that will change."
+		)
+	capped = [
+		line["report"]
+		for line in lines
+		if line["days_away_from_work"] > OSHA_DAY_CAP or line["days_on_restriction"] > OSHA_DAY_CAP
+	]
+	if capped:
+		notes.append(
+			f"{len(capped)} case(s) exceed the {OSHA_DAY_CAP}-day cap in 1904.7(b)(3)(viii). The "
+			"`*_counted` fields carry the capped figure the log uses and the raw ones carry what "
+			"actually happened; the 300A totals below are built from the capped figures."
+		)
+	unnamed = [line["report"] for line in lines if not line["employee_name"]]
+	if unnamed:
+		notes.append(
+			f"{len(unnamed)} case(s) name nobody in column B. A recordable injury happened to "
+			"somebody, and a log line with no name is one an inspector asks about first."
+		)
+	if truncated:
+		notes.append(
+			f"The read stopped at {LOG_CAP} reports for this year and the log may be missing "
+			"lines it cannot name."
+		)
+	notes.append(
+		"PRIVACY CASES ARE NOT APPLIED. 1904.29(b)(7) requires the name to be withheld from the "
+		"posted log for six categories — injury to an intimate body part, sexual assault, mental "
+		"illness, HIV, hepatitis or tuberculosis, needlestick — plus any case the employee asks "
+		"be kept private. None of those is a determination this app makes, so every name is "
+		"reported here and a person has to withhold them before the log is posted."
+	)
+	return notes
+
+
+# ── get_osha_300_log ────────────────────────────────────────────────────────
+def get_osha_300_log(args: dict) -> ToolResult:
+	"""The 29 CFR 1904 Form 300 log for one company and one calendar year.
+
+	One line per recordable case, in the order they happened, numbered from one.
+	Read-only, and it writes no form: what comes back is the content of the log,
+	which somebody still reviews, applies 1904.29(b)(7) to, and signs.
+
+	IT REPORTS ITS OWN INCOMPLETENESS. `undetermined_cases` names every report
+	of the year whose recordability nobody has decided. They are not on the log
+	— they cannot be, the determination is what puts them there — but a log that
+	did not mention them would present a partial year as a finished one.
+	"""
+	_require()
+	company = resolve_company(as_str(args, "company", required=True), required=True)
+	year = _log_year(args)
+
+	recordable, undetermined, truncated = _case_rows(company, year)
+	lines = [_log_line(index, row) for index, row in enumerate(recordable, start=1)]
+
+	by_classification = {
+		OSHA_DEATH: [line["case_number"] for line in lines if line["classify"] == OSHA_DEATH],
+		OSHA_DAYS_AWAY: [line["case_number"] for line in lines if line["classify"] == OSHA_DAYS_AWAY],
+		OSHA_RESTRICTED: [line["case_number"] for line in lines if line["classify"] == OSHA_RESTRICTED],
+		OSHA_OTHER: [line["case_number"] for line in lines if line["classify"] == OSHA_OTHER],
+	}
+
+	clock = timezones.Renderer(args)
+	for line in lines:
+		clock.add(line, "occurred_at")
+
+	return ToolResult(
+		data={
+			"company": company,
+			"year": year,
+			"establishment": company,
+			"cases": lines,
+			"case_count": len(lines),
+			"by_classification": {key: len(value) for key, value in by_classification.items()},
+			"case_numbers_by_classification": by_classification,
+			"undetermined_cases": [
+				{
+					"report": row.get("name"),
+					"occurred_at": str(row.get("occurred_at") or "") or None,
+					"severity": row.get("severity") or None,
+					"injured_person_name": row.get("injured_person_name") or None,
+					"status": row.get("status") or OPEN,
+				}
+				for row in undetermined
+			],
+			"undetermined_count": len(undetermined),
+			"truncated": truncated,
+			"notes": _log_notes(lines, undetermined, truncated),
+			"next_step": (
+				"get_osha_300a_summary totals this same year for the annual summary that gets "
+				"posted from 1 February to 30 April."
+			),
+			**clock.block(),
+		},
+		summary=(
+			f"OSHA 300 log for {company}, {year}: {len(lines)} recordable case(s) "
+			f"({len(by_classification[OSHA_DEATH])} death, "
+			f"{len(by_classification[OSHA_DAYS_AWAY])} days away, "
+			f"{len(by_classification[OSHA_RESTRICTED])} restricted, "
+			f"{len(by_classification[OSHA_OTHER])} other)"
+			+ (f"; {len(undetermined)} undetermined" if undetermined else "")
+		),
+	)
+
+
+def _hours_and_headcount(company: str, year: int) -> dict:
+	"""Hours worked and average employment for one year, off the shift register.
+
+	THE DENOMINATOR IS THE HALF THAT GETS FABRICATED, and this function exists so
+	it is not. A TRIR is `cases × 200,000 / hours`, it goes on a form a regulator
+	reads, and a plausible-looking guess at the hours produces a plausible-looking
+	rate that is wrong in the direction nobody checks. So the hours come from the
+	Farm Shift register through `payroll_integration` — the same span arithmetic
+	payroll runs on, not a second copy of it — and where there is no shift data
+	the answer is `None` and the rates are not computed at all.
+
+	IT UNDERSTATES, AND SAYS SO. Anybody who does not clock through this app —
+	salaried office staff, an owner, a contract crew paid by the bin — has no
+	shift rows, so their hours are missing and their heads are uncounted. That is
+	why both figures can be overridden by the caller: an operation with payroll
+	records outside this system has a better number than this one.
+	"""
+	from . import payroll as payroll_tools
+
+	start, end = f"{year}-01-01", f"{year}-12-31"
+	out: dict = {
+		"total_hours_worked": None,
+		"average_employees": None,
+		"source": None,
+		"provenance": {},
+	}
+	try:
+		shifts, provenance = payroll_tools._load_period_shifts(company, start, end)
+	except Exception:  # pragma: no cover - a site without the shift register
+		return out
+
+	out["provenance"] = provenance
+	if not shifts:
+		return out
+
+	aggregates = payroll_integration.aggregate_shifts_for_period(shifts, start, end)
+	if not aggregates:
+		return out
+
+	hours = sum(float(entry.get("total_hours") or 0) for entry in aggregates.values())
+
+	# OSHA's own method for the annual average is the sum of the employees paid
+	# in every pay period divided by the number of pay periods. There are no pay
+	# periods here, so MONTHS stand in: the count of distinct people who worked
+	# in each of the twelve, averaged. It is the same shape of arithmetic and it
+	# is labelled an estimate, which a headcount taken on one day in June is not.
+	by_month: dict = {}
+	for shift in shifts:
+		month = str(shift.get("start_datetime") or "")[:7]
+		if not month:
+			continue
+		for member in shift.get("crew") or []:
+			employee = str(member.get("employee") or "")
+			if employee:
+				by_month.setdefault(month, set()).add(employee)
+
+	out["total_hours_worked"] = round(hours, 2)
+	out["average_employees"] = round(sum(len(v) for v in by_month.values()) / 12.0, 1) if by_month else None
+	out["months_with_work"] = len(by_month)
+	out["headcount_by_month"] = {month: len(people) for month, people in sorted(by_month.items())}
+	out["distinct_employees"] = len({e for people in by_month.values() for e in people})
+	out["source"] = "Farm Shift register"
+	return out
+
+
+def _rate(cases: int, hours) -> float | None:
+	"""`cases × 200,000 / hours`, or None where the hours are not known.
+
+	NEVER ZERO FOR UNKNOWN. A rate of 0.0 reads on every screen as a perfect
+	safety year, and it is the answer this would give for an operation that
+	simply has no hours recorded. None reads as what it is.
+	"""
+	try:
+		worked = float(hours or 0)
+	except (TypeError, ValueError):
+		return None
+	if worked <= 0:
+		return None
+	return round(cases * OSHA_RATE_BASE / worked, 2)
+
+
+# ── get_osha_300a_summary ───────────────────────────────────────────────────
+def get_osha_300a_summary(args: dict) -> ToolResult:
+	"""The Form 300A annual summary, and the three rates computed from it.
+
+	The totals are the 300 log's own, so the two tools cannot disagree: this
+	calls the same case selection and the same classification, then adds the
+	columns. Every case counts once, which is what makes deaths + days away +
+	restricted + other equal the case total.
+
+	THE RATES NEED HOURS AND WILL NOT INVENT THEM. TRIR, DART and LTIR are all
+	`cases × 200,000 / hours worked`, and the denominator comes off the shift
+	register or off the caller — `total_hours_worked` and `average_employees`
+	override it, which is the right answer for an operation whose payroll lives
+	somewhere else. Where neither supplies it the rates come back None with a
+	note, rather than a zero that reads as a perfect year.
+	"""
+	_require()
+	company = resolve_company(as_str(args, "company", required=True), required=True)
+	year = _log_year(args)
+
+	recordable, undetermined, truncated = _case_rows(company, year)
+	lines = [_log_line(index, row) for index, row in enumerate(recordable, start=1)]
+
+	counts = {OSHA_DEATH: 0, OSHA_DAYS_AWAY: 0, OSHA_RESTRICTED: 0, OSHA_OTHER: 0}
+	for line in lines:
+		counts[line["classify"]] += 1
+
+	days_away = sum(line["days_away_counted"] for line in lines)
+	days_restricted = sum(line["days_on_restriction_counted"] for line in lines)
+
+	by_injury_type: dict = {}
+	for line in lines:
+		key = line["injury_type"] or "(unrecorded)"
+		by_injury_type[key] = by_injury_type.get(key, 0) + 1
+
+	measured = _hours_and_headcount(company, year)
+	stated_hours = args.get("total_hours_worked")
+	stated_heads = args.get("average_employees")
+
+	hours = measured["total_hours_worked"]
+	hours_source = measured["source"]
+	if stated_hours not in (None, ""):
+		try:
+			hours = float(stated_hours)
+		except (TypeError, ValueError):
+			raise ToolError(
+				f"total_hours_worked must be a number of hours, got {stated_hours!r}."
+			) from None
+		if hours < 0:
+			raise ToolError("total_hours_worked cannot be negative.")
+		hours_source = "supplied by the caller"
+
+	heads = measured["average_employees"]
+	heads_source = measured["source"]
+	if stated_heads not in (None, ""):
+		try:
+			heads = float(stated_heads)
+		except (TypeError, ValueError):
+			raise ToolError(
+				f"average_employees must be a number, got {stated_heads!r}."
+			) from None
+		if heads < 0:
+			raise ToolError("average_employees cannot be negative.")
+		heads_source = "supplied by the caller"
+
+	total_cases = len(lines)
+	dart_cases = counts[OSHA_DAYS_AWAY] + counts[OSHA_RESTRICTED]
+
+	notes = []
+	if undetermined:
+		notes.append(
+			f"{len(undetermined)} report(s) in {year} are still Undetermined under 1904.7 and are "
+			"in none of these totals. Every rate below is a floor until that list is empty — "
+			"determinations only ever ADD cases to a log."
+		)
+	if hours in (None, 0, 0.0):
+		notes.append(
+			"No hours worked could be established for this year, so TRIR, DART and LTIR are None "
+			"rather than zero. Pass `total_hours_worked` — a rate of 0.0 reads as a perfect "
+			"safety year and this is not that."
+		)
+	elif hours_source == measured["source"]:
+		notes.append(
+			f"Hours came from the {measured['source']} and count only people who clocked through "
+			"this app. Salaried staff, owners and contract crews paid by the bin have no shift "
+			"rows, so this denominator is a FLOOR and every rate built on it is therefore a "
+			"ceiling. Pass `total_hours_worked` from payroll where the two differ."
+		)
+	for entry in measured.get("provenance", {}).get("notes") or []:
+		notes.append(entry)
+	if truncated:
+		notes.append(f"The read stopped at {LOG_CAP} reports for this year; totals may be short.")
+	notes.append(
+		"The summary is posted from 1 February to 30 April of the following year (1904.32(b)(6)) "
+		"and is certified by a company executive (1904.32(b)(3)). Neither is something a tool "
+		"can do, and neither has happened because this ran."
+	)
+
+	return ToolResult(
+		data={
+			"company": company,
+			"establishment": company,
+			"year": year,
+			"total_cases": total_cases,
+			"total_deaths": counts[OSHA_DEATH],
+			"total_days_away_cases": counts[OSHA_DAYS_AWAY],
+			"total_restricted_cases": counts[OSHA_RESTRICTED],
+			"total_other_recordable": counts[OSHA_OTHER],
+			"total_days_away": days_away,
+			"total_days_restricted": days_restricted,
+			"by_injury_type": dict(sorted(by_injury_type.items())),
+			"average_employees": heads,
+			"average_employees_source": heads_source,
+			"total_hours_worked": hours,
+			"total_hours_worked_source": hours_source,
+			"headcount_by_month": measured.get("headcount_by_month") or {},
+			"rates": {
+				"TRIR": _rate(total_cases, hours),
+				"DART": _rate(dart_cases, hours),
+				"LTIR": _rate(counts[OSHA_DAYS_AWAY], hours),
+			},
+			"rate_definitions": {
+				"TRIR": (
+					f"Total Recordable Incident Rate — every recordable case × {OSHA_RATE_BASE:,} "
+					"/ hours worked. Deaths are recordable cases and are in it."
+				),
+				"DART": (
+					"Days Away, Restricted or Transferred — cases with days away PLUS cases with "
+					f"restriction × {OSHA_RATE_BASE:,} / hours worked. Fatalities are not in DART; "
+					"they are in TRIR."
+				),
+				"LTIR": (
+					f"Lost Time Incident Rate — cases with days away only × {OSHA_RATE_BASE:,} / "
+					"hours worked."
+				),
+			},
+			"undetermined_count": len(undetermined),
+			"undetermined_cases": [row.get("name") for row in undetermined],
+			"truncated": truncated,
+			"notes": notes,
+		},
+		summary=(
+			f"OSHA 300A for {company}, {year}: {total_cases} case(s) "
+			f"({counts[OSHA_DEATH]} death, {counts[OSHA_DAYS_AWAY]} days away, "
+			f"{counts[OSHA_RESTRICTED]} restricted, {counts[OSHA_OTHER]} other), "
+			f"{days_away} days away, {days_restricted} restricted"
+			+ (
+				f"; TRIR {_rate(total_cases, hours)}, DART {_rate(dart_cases, hours)}"
+				if hours
+				else "; rates not computed — no hours worked"
+			)
 		),
 	)

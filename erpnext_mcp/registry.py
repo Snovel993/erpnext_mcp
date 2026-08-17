@@ -13875,6 +13875,49 @@ TOOLS = {
 		available=_needs_doctype("Employee Training Record"),
 		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"get_training_compliance_report": _tool(
+		training.get_training_compliance_report,
+		"The training compliance MATRIX: every active employee against every "
+		"curriculum this operation runs, as of a date, with each cell current, "
+		"due_soon, expired or missing. Read-only.\n\n"
+		"`missing` IS WHY THIS IS NOT list_trainings. A register can only report "
+		"records that exist, so the person with no WPS training at all appears "
+		"there as no row — which is to say nowhere. This puts the roster on one "
+		"axis and the Training Type master on the other, so an absence has a "
+		"cell of its own. It is the cell an inspector finds first.\n\n"
+		"AS OF A DATE, NOT AS OF TODAY. `as_of_date` reaches both the record "
+		"selection and the expiry arithmetic: a report run now for last year's "
+		"audit does not know about training completed since, so it says what was "
+		"true then rather than what is true now.\n\n"
+		"IT DOES NOT KNOW WHO NEEDED WHAT. This site has no per-role training "
+		"requirement table, so every active employee is held against every "
+		"active curriculum — which over-reports, because a bookkeeper is not a "
+		"pesticide handler. `requirement_basis` says so in the response. Narrow "
+		"with `regime` or `training_type` to ask the question you mean.\n\n"
+		"Scoped to the companies the calling account may actually reach.",
+		{
+			"company": _COMPANY,
+			"regime": _field(
+				_STRING,
+				"Hold the crew against only the curricula tagged FSMA, GAP, GlobalGAP, "
+				"PrimusGFS, NOP, WPS, OR-OSHA or Other. Matched by TAG, never by substring.",
+			),
+			"training_type": _field(
+				_STRING,
+				"One curriculum by name — 'WPS Handler Training'. A single-column matrix, which "
+				"is the honest shape for 'who is missing this'.",
+			),
+			"as_of_date": _field(
+				_STRING,
+				"YYYY-MM-DD. Statuses are computed as of this date and training completed after "
+				"it is not counted. Defaults to today.",
+			),
+		},
+		required=("company",),
+		title="Training compliance matrix",
+		available=_needs_doctype("Employee Training Record"),
+		requires="the Employee Training Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"sign_training_supervisor_review": _tool(
 		training.sign_training_supervisor_review,
 		"MUTATING (default OFF). Record the FSMA §112.161(b) supervisor review on one "
@@ -18378,6 +18421,85 @@ TOOLS = {
 			"limit": _field(_INTEGER, "Maximum rows. Capped at 200."),
 		},
 		title="List accident reports",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_osha_300_log": _tool(
+		accidents.get_osha_300_log,
+		"The 29 CFR 1904 Form 300 log for one company and one calendar year: one "
+		"line per recordable case, in the order they happened, numbered from "
+		"one. Read-only, and it files nothing.\n\n"
+		"THE FILTER IS THE WHOLE DIFFERENCE FROM THE REGISTER. Only cases "
+		"determined recordable appear. A near miss is not a case and a "
+		"first-aid-only injury is not a case — 1904.7's line is medical "
+		"treatment beyond first aid, and this app never inferred that "
+		"determination.\n\n"
+		"IT REPORTS ITS OWN INCOMPLETENESS. `undetermined_cases` names every "
+		"report of the year whose recordability nobody has decided. They cannot "
+		"be on the log — the determination is what puts them there — but a log "
+		"that omitted them silently would present a partial year as a finished "
+		"one.\n\n"
+		"EVERY CASE IS COUNTED ONCE, at its most severe outcome: death, then "
+		"days away, then restricted, then other recordable. Adding the columns "
+		"of a correct log gives the case count, and it only does that if the "
+		"classification is exclusive.\n\n"
+		"PRIVACY CASES ARE NOT APPLIED. 1904.29(b)(7) withholds the name for six "
+		"categories plus any case the employee asks be kept private, none of "
+		"which this app can determine — so every name comes back and a person "
+		"withholds them before the log is posted.",
+		{
+			"company": _COMPANY,
+			"year": _field(
+				_INTEGER,
+				"The CALENDAR year, four digits. 1904.4 keeps the log by calendar year only — a "
+				"fiscal year or a season is a different document.",
+			),
+			"timezone": _field(
+				_STRING,
+				"Optional IANA zone. Each `occurred_at` gains a `*_local` twin; nothing stored moves.",
+			),
+		},
+		required=("company", "year"),
+		title="OSHA 300 log",
+		available=_needs_doctype("Accident Report"),
+		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_osha_300a_summary": _tool(
+		accidents.get_osha_300a_summary,
+		"The Form 300A annual summary for one company and one calendar year, "
+		"with TRIR, DART and LTIR. Read-only.\n\n"
+		"THE TOTALS ARE THE 300 LOG'S OWN — same case selection, same "
+		"classification — so the two tools cannot disagree. Deaths plus days "
+		"away plus restricted plus other equals the case total, because every "
+		"case is counted once.\n\n"
+		"THE RATES NEED HOURS AND WILL NOT INVENT THEM. All three are "
+		"`cases × 200,000 / hours worked`. The denominator comes off the Farm "
+		"Shift register, which counts only people who clocked through this app — "
+		"so it is a FLOOR, and the rates built on it are therefore a ceiling. "
+		"`total_hours_worked` and `average_employees` override it, which is the "
+		"right answer where payroll lives elsewhere. Where neither supplies it "
+		"the rates come back null WITH A NOTE, never 0.0: a zero rate reads on "
+		"every screen as a perfect safety year.\n\n"
+		"Day counts are capped at 180 per 1904.7(b)(3)(viii) for the totals, "
+		"with the raw figures reported beside them. Posting from 1 February to "
+		"30 April and executive certification are acts a tool cannot perform, "
+		"and neither has happened because this ran.",
+		{
+			"company": _COMPANY,
+			"year": _field(_INTEGER, "The CALENDAR year, four digits."),
+			"total_hours_worked": _field(
+				_NUMBER,
+				"Hours worked by all employees in the year, if payroll knows better than the "
+				"shift register. The denominator of all three rates.",
+			),
+			"average_employees": _field(
+				_NUMBER,
+				"Annual average employment for the 300A. Estimated from the shift register "
+				"month by month when omitted.",
+			),
+		},
+		required=("company", "year"),
+		title="OSHA 300A summary",
 		available=_needs_doctype("Accident Report"),
 		requires="the Accident Report DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
@@ -23348,6 +23470,41 @@ TOOLS = {
 		},
 		required=("application",),
 		title="Get a spray application",
+		available=_needs_doctype("Spray Application"),
+		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_spray_application_report": _tool(
+		spray.get_spray_application_report,
+		"Chemical usage over a period, grouped by PRODUCT and then by BLOCK: "
+		"total quantity per product, which blocks received it, on what dates, by "
+		"which applicator, and the label intervals it carried. Read-only.\n\n"
+		"THIS IS THE PESTICIDE USE REPORT. Oregon's PARC reporting, California's "
+		"monthly PUR and Washington's WPS records all ask a version of the same "
+		"question, and all of them want it summed by product and located on the "
+		"ground. `list_spray_applications` answers 'what did we spray on the "
+		"14th'; this answers 'how much captan went onto Block 7 this season'.\n\n"
+		"THE PER-BLOCK QUANTITY IS RATE × THAT BLOCK'S ACRES, never the tank "
+		"total spread evenly. What a regulator asks about a block is what went "
+		"onto that ground, and an even split across blocks of unequal size is a "
+		"number that was never true of any of them.\n\n"
+		"QUANTITIES ARE SUMMED PER UNIT AND NEVER ACROSS UNITS. A product "
+		"recorded at lb/acre on one pass and qt/acre on another has two totals "
+		"here, not one, and `mixed_unit_products` names it. Adding pounds to "
+		"quarts needs a density this app does not have.\n\n"
+		"APPLIED ONLY. A planned application is a plan and a cancelled one did "
+		"not happen; both are counted in `excluded` so this cannot be mistaken "
+		"for the whole register.",
+		{
+			"company": _COMPANY,
+			"date_from": _field(_STRING, "YYYY-MM-DD. Defaults to 1 January of the current year."),
+			"date_to": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"block": _field(_STRING, "One block or field, by docname. Everything else is dropped."),
+			"field": _field(_STRING, "Alias for block."),
+			"product": _field(_STRING, "One Item code. The single-product report a label query asks for."),
+			"item_code": _field(_STRING, "Alias for product."),
+		},
+		required=("company",),
+		title="Spray application report",
 		available=_needs_doctype("Spray Application"),
 		requires="the Spray Application DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

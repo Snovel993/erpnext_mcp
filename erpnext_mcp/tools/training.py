@@ -78,6 +78,26 @@ DOCTYPE = training.DOCTYPE
 #: should narrow by company and period.
 RECORD_CAP = 500
 
+#: Status vocabulary of the compliance matrix, which is NOT `training.STATUS_*`.
+#: Those three describe a RECORD that exists; these four describe a CELL, and the
+#: fourth — `missing` — is the one an auditor opens the binder to find. Mapping
+#: Expiring onto `due_soon` rather than reusing the word keeps the two
+#: vocabularies from being confused where they meet in one response.
+CELL_CURRENT = "current"
+CELL_DUE_SOON = "due_soon"
+CELL_EXPIRED = "expired"
+CELL_MISSING = "missing"
+
+#: Most curricula one matrix holds people against, and most people it holds. The
+#: product is what gets rendered, so both are capped rather than the total: a
+#: caller who narrows by regime gets more of the roster, not fewer columns.
+REQUIREMENT_CAP = 40
+EMPLOYEE_CAP = 400
+
+#: Most training records one matrix reads. Generous for a register that only ever
+#: needs the latest record per person per curriculum.
+MATRIX_RECORD_CAP = 5000
+
 
 def _require() -> None:
 	compat.require_doctype(
@@ -255,6 +275,317 @@ def record_training(args: dict) -> ToolResult:
 			+ f") as {doc.name}"
 		),
 		docstatus_delta="none → 0 (created)",
+	)
+
+
+def _requirements(regime: str, one_type: str) -> list[dict]:
+	"""The curricula this report holds every employee against.
+
+	THE REQUIREMENT AXIS IS THE `Training Type` MASTER, and saying so is half the
+	point of this function. There is no per-role training requirement anywhere on
+	this site — no "every handler needs WPS, every supervisor needs OSHA 30"
+	table — so a matrix cannot compute what an individual person owes. What it
+	CAN do is hold the whole crew against the curricula this operation says it
+	runs, which is the register a WPS or GAP auditor works from anyway: they ask
+	whether the people who needed the training have it, and the honest answer
+	starts with who does not have it at all.
+
+	`active` IS THE FILTER, not a date. A curriculum somebody unticked is one this
+	operation no longer runs, and reporting the whole crew non-compliant on a
+	course that was retired in 2019 is how a compliance report gets ignored.
+	"""
+	if not compat.doctype_exists(training.TYPE_DOCTYPE):
+		return []
+
+	filters: dict = {}
+	if compat.has_field(training.TYPE_DOCTYPE, "active"):
+		filters["active"] = 1
+	if one_type:
+		filters["name"] = one_type
+
+	rows = (
+		frappe.db.get_all(
+			training.TYPE_DOCTYPE,
+			filters=filters,
+			fields=compat.existing_fields(
+				training.TYPE_DOCTYPE, ("name", "active", "retention_years", "description")
+			),
+			order_by="name asc",
+			limit=REQUIREMENT_CAP + 1,
+		)
+		or []
+	)
+	names = [str(dict(row).get("name")) for row in rows]
+	tags = training.rows_for_parents(training.TYPE_DOCTYPE, names, "regimes")
+
+	found = []
+	for row in rows:
+		entry = dict(row)
+		name = str(entry.get("name"))
+		regimes = tags.get(name, [])
+		if regime and regime not in regimes:
+			continue
+		found.append(
+			{
+				"training_type": name,
+				"regimes": regimes,
+				"retention_years": int(entry.get("retention_years") or 0) or None,
+				"description": entry.get("description") or None,
+			}
+		)
+	return found
+
+
+def _employees_for(company: str) -> tuple[list[dict], bool]:
+	"""The active roster of one company, and whether the cap bit."""
+	rows = (
+		frappe.db.get_all(
+			"Employee",
+			filters={"company": company, "status": "Active"},
+			fields=compat.existing_fields(
+				"Employee", ("name", "employee_name", "designation", "date_of_joining", "department")
+			),
+			order_by="employee_name asc",
+			limit=EMPLOYEE_CAP + 1,
+		)
+		or []
+	)
+	truncated = len(rows) > EMPLOYEE_CAP
+	return [dict(row) for row in rows[:EMPLOYEE_CAP]], truncated
+
+
+def _cell(record: dict | None, as_of: str) -> dict:
+	"""One employee's standing on one curriculum, as of a date.
+
+	AS OF A DATE, NOT AS OF TODAY, and the whole function turns on it. A report
+	run in January for last year's audit must not know about the training
+	somebody did in March — a matrix that showed the crew compliant on a date
+	when they were not is a document that says the opposite of what happened.
+	The caller's `as_of_date` reaches both the record selection and the expiry
+	arithmetic, so the two cannot disagree.
+	"""
+	if record is None:
+		return {
+			"status": CELL_MISSING,
+			"record": None,
+			"completed_date": None,
+			"expires_date": None,
+			"days_until_expiry": None,
+		}
+	expires = str(record.get("expires_date") or "") or None
+	stored = training.status_for(expires, as_of)
+	status = {
+		training.STATUS_ACTIVE: CELL_CURRENT,
+		training.STATUS_EXPIRING: CELL_DUE_SOON,
+		training.STATUS_EXPIRED: CELL_EXPIRED,
+	}[stored]
+	return {
+		"status": status,
+		"record": record.get("name"),
+		"completed_date": str(record.get("completed_date") or "") or None,
+		"expires_date": expires,
+		"days_until_expiry": training.days_until(as_of, expires),
+		"one_time": expires is None,
+		"supervisor_reviewed": bool(record.get("supervisor_reviewed_by")),
+	}
+
+
+# ── 5. get_training_compliance_report ───────────────────────────────────────
+def get_training_compliance_report(args: dict) -> ToolResult:
+	"""Every employee against every curriculum, as one matrix, as of a date.
+
+	THE BLACK HOLE THIS CLOSES. `record_training` files what a person was taught
+	and `list_trainings` reads the register back, and between them there was no
+	call that answered the question an auditor actually asks: *is the crew
+	trained*. A register lists what exists; a compliance matrix reports what does
+	NOT, and the difference is the person with no WPS record at all — who appears
+	in `list_trainings` as no row, which is to say nowhere.
+
+	MISSING IS A STATUS, AND IT IS THE POINT. The other three cells describe a
+	record; `missing` describes its absence, and it is the one an inspector
+	finds first. It cannot be computed from the training register alone — it
+	needs the roster on one axis and the curriculum master on the other, which
+	is why this is a report rather than a filter.
+
+	IT DOES NOT KNOW WHO NEEDED WHAT. See `_requirements`: this site has no
+	per-role requirement table, so the matrix holds the whole active roster
+	against every curriculum the operation says it runs. That over-reports — an
+	office bookkeeper is not a pesticide handler — and the response says so in
+	`requirement_basis` rather than quietly presenting the over-report as a
+	finding. Narrowing by `regime` or `training_type` is how a caller asks the
+	question they actually mean.
+	"""
+	_require()
+	compat.require_doctype("Employee", "It comes with the Frappe HR (hrms) app.")
+	actor = employee_tool.require_hr_role()
+	company = resolve_company(as_str(args, "company", required=True), required=True)
+	employee_tool.require_company_scope(actor, company)
+
+	as_of = as_date(args, "as_of_date") or frappe.utils.today()
+
+	regime = as_str(args, "regime")
+	if regime:
+		canonical = training.canon(regime)
+		if not canonical:
+			raise ToolError(f"regime {regime!r} is not one this app knows. {training.vocabulary_note()}")
+		regime = canonical
+
+	one_type = as_str(args, "training_type")
+	if one_type and not frappe.db.exists(training.TYPE_DOCTYPE, one_type):
+		raise ToolError(
+			f"no {training.TYPE_DOCTYPE} called {one_type!r} on this site. A curriculum is "
+			"created the first time somebody records a session of it, so a name nobody has "
+			"filed against does not exist yet — and holding the crew against it would report "
+			"every one of them non-compliant on a course this operation has never run."
+		)
+
+	requirements = _requirements(regime, one_type)
+	roster, roster_truncated = _employees_for(company)
+
+	records = training.rows(
+		{"company": company, "completed_date": ("<=", as_of)},
+		limit=MATRIX_RECORD_CAP,
+		order_by="completed_date desc",
+	)
+	# Latest record per (person, curriculum). `rows` came back newest first, so
+	# the first one seen is the one that governs — a renewal supersedes without
+	# either record being edited, which is what `_superseded` exists to preserve.
+	latest: dict = {}
+	for row in records:
+		key = (str(row.get("employee") or ""), str(row.get("training_type") or ""))
+		latest.setdefault(key, row)
+
+	matrix = []
+	fully = partially = non = 0
+	by_requirement: dict = {
+		entry["training_type"]: {
+			CELL_CURRENT: 0,
+			CELL_DUE_SOON: 0,
+			CELL_EXPIRED: 0,
+			CELL_MISSING: 0,
+		}
+		for entry in requirements
+	}
+
+	for person in roster:
+		employee = str(person.get("name"))
+		cells = {}
+		for entry in requirements:
+			curriculum = entry["training_type"]
+			cell = _cell(latest.get((employee, curriculum)), as_of)
+			cells[curriculum] = cell
+			by_requirement[curriculum][cell["status"]] += 1
+
+		statuses = [cell["status"] for cell in cells.values()]
+		held = [status for status in statuses if status in (CELL_CURRENT, CELL_DUE_SOON)]
+		gaps = [status for status in statuses if status in (CELL_EXPIRED, CELL_MISSING)]
+		if not statuses:
+			standing = "no_requirements"
+		elif not gaps:
+			standing = "fully_compliant"
+			fully += 1
+		elif held:
+			standing = "partially_compliant"
+			partially += 1
+		else:
+			standing = "non_compliant"
+			non += 1
+
+		matrix.append(
+			{
+				"employee": employee,
+				"employee_name": person.get("employee_name") or employee,
+				"job_title": person.get("designation") or None,
+				"department": person.get("department") or None,
+				"date_of_joining": str(person.get("date_of_joining") or "") or None,
+				"standing": standing,
+				"requirements": cells,
+				"missing": sorted(name for name, cell in cells.items() if cell["status"] == CELL_MISSING),
+				"expired": sorted(name for name, cell in cells.items() if cell["status"] == CELL_EXPIRED),
+				"due_soon": sorted(name for name, cell in cells.items() if cell["status"] == CELL_DUE_SOON),
+			}
+		)
+
+	data = {
+		"company": company,
+		"as_of_date": as_of,
+		"regime": regime or None,
+		"training_type": one_type or None,
+		"requirements": requirements,
+		"requirement_count": len(requirements),
+		"matrix": matrix,
+		"by_requirement": by_requirement,
+		"summary": {
+			"total_employees": len(matrix),
+			"fully_compliant": fully,
+			"partially_compliant": partially,
+			"non_compliant": non,
+			"without_requirements": len(matrix) - fully - partially - non,
+		},
+		"expiring_window_days": training.EXPIRING_WINDOW_DAYS,
+		"status_vocabulary": {
+			CELL_CURRENT: "A record exists and has not lapsed as of this date.",
+			CELL_DUE_SOON: (
+				f"Inside the {training.EXPIRING_WINDOW_DAYS}-day renewal window. Still valid — "
+				"this is the schedule, not the finding."
+			),
+			CELL_EXPIRED: "A record exists and its expiry date has passed as of this date.",
+			CELL_MISSING: (
+				"No record of this curriculum for this person at any date. The one an inspector "
+				"finds first, and the one a register alone cannot report."
+			),
+		},
+		"requirement_basis": (
+			f"{len(requirements)} active {training.TYPE_DOCTYPE}(s)"
+			+ (f" tagged {regime}" if regime else "")
+			+ ". THIS SITE HAS NO PER-ROLE REQUIREMENT TABLE, so every active employee is held "
+			"against every one of them. That over-reports — a bookkeeper is not a pesticide "
+			"handler and does not need WPS — so read `non_compliant` as 'has none of these', "
+			"not as a citation. Narrow with `regime` or `training_type` to ask the question you "
+			"actually mean."
+		),
+		"actor": actor,
+	}
+
+	if not requirements:
+		data["note"] = (
+			f"No active {training.TYPE_DOCTYPE} matched, so the matrix has no columns and every "
+			"employee is reported with no requirements. A curriculum is created the first time "
+			"somebody records a session of it — if this operation has trained nobody, that is "
+			"the finding."
+		)
+	elif not roster:
+		data["note"] = (
+			f"{company} has no Active employees, so the matrix has no rows. A seasonal operation "
+			"between crews reads this way legitimately; one mid-season does not."
+		)
+	else:
+		data["note"] = (
+			f"{non} of {len(matrix)} employee(s) hold none of the {len(requirements)} "
+			f"curriculum(s) reported, and {partially} hold some. Both counts are as of {as_of} — "
+			"a record completed after that date is deliberately not counted, so this report run "
+			"for a past audit says what was true then."
+		)
+	if roster_truncated:
+		data["truncation_note"] = (
+			f"{company} has more than {EMPLOYEE_CAP} Active employees and this is the first "
+			f"{EMPLOYEE_CAP} by name. The summary counts describe THAT subset, not the company."
+		)
+		data["truncated"] = True
+	else:
+		data["truncated"] = False
+	if len(requirements) >= REQUIREMENT_CAP:
+		data["requirement_truncation_note"] = (
+			f"{REQUIREMENT_CAP} curricula is the cap and it was reached. Narrow by `regime` or "
+			"`training_type`, or the matrix is missing columns it does not name."
+		)
+
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{len(matrix)} employee(s) against {len(requirements)} curriculum(s) as of {as_of}: "
+			f"{fully} fully compliant, {partially} partially, {non} non-compliant"
+		),
 	)
 
 
