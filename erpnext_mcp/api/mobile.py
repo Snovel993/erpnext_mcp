@@ -131,6 +131,7 @@ from ..tools import shipments as shipment_tools
 from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
 from ..tools import spray as spray_tools
+from ..tools import ach as ach_tools
 from . import fallback_auth, guard, rectify, shape
 
 ALERT = "Compliance Alert"
@@ -9312,3 +9313,130 @@ def get_spray_application_report(
 			inner[key] = str(value).strip()
 
 	return spray_tools.get_spray_application_report(inner).data
+
+
+# ── Direct deposit: a worker's own bank details, and nobody else's ──────────
+#
+# THESE THREE TAKE NO `employee` ARGUMENT, and that is the entire security
+# design rather than an omission. Every other write in this file that names a
+# person takes an Employee docname from the body and checks it with
+# `_employee_argument`, which proves the record belongs to an entity the CALLER
+# CAN REACH — the right test for onboarding, where a foreman is acting on
+# somebody else's record on purpose.
+#
+# It is the wrong test here. Company scope is shared by everybody enrolled at
+# that company, so an `employee` argument checked only that way would let any
+# picker with a handset repoint a colleague's wages at their own account. So
+# these resolve the subject with `_employee(user)` — the caller's OWN Employee
+# record, from their login — and there is no argument that can widen it. A
+# foreman who genuinely needs to enter somebody else's details uses the MCP
+# tool, which is gated, audited, and not on a phone in an orchard.
+#
+# The full account number never comes back out. `list_my_bank_accounts` returns
+# what every other read of this register returns: the masked last four.
+
+
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_my_bank_accounts", limit=guard.READ_LIMIT)
+def list_my_bank_accounts(user: str) -> dict:
+	"""Where this worker's own wages are being deposited. Masked."""
+	guard.require_scope(user)
+	person = _employee(user)
+	return ach_tools.get_employee_bank_account({"employee": person}).data
+
+
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_my_bank_account", mutating=True, limit=guard.WRITE_LIMIT)
+def add_my_bank_account(
+	user: str,
+	bank_name=None,
+	routing_number=None,
+	account_number=None,
+	account_type=None,
+	allocation_type=None,
+	allocation_amount=None,
+) -> dict:
+	"""A worker enters their own direct deposit details from the handset.
+
+	`employee`, `company` and `status` ARE NOT ACCEPTED. The first is the point
+	of the module comment above; the second follows from it, because the company
+	is read off the worker's own Employee record and a body that could name one
+	would be naming somebody else's entity; and the third because a phone that
+	could set an account Inactive could switch a colleague's deposit off if the
+	first rule ever slipped. A new account is always Active.
+
+	The prenote is NOT sent from here. Asking the bank to confirm an account is a
+	file somebody transmits, and it is batched — `generate_prenote_file` is where
+	that happens, and this account will be in the next one.
+	"""
+	guard.require_scope(user)
+	person = _employee(user)
+
+	inner = {
+		"employee": person,
+		"bank_name": bank_name,
+		"routing_number": routing_number,
+		"account_number": account_number,
+	}
+	for key, value in (
+		("account_type", account_type),
+		("allocation_type", allocation_type),
+		("allocation_amount", allocation_amount),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return ach_tools.create_employee_bank_account(inner).data
+
+
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("update_my_bank_account", mutating=True, limit=guard.WRITE_LIMIT)
+def update_my_bank_account(
+	user: str,
+	name=None,
+	bank_name=None,
+	routing_number=None,
+	account_number=None,
+	account_type=None,
+	allocation_type=None,
+	allocation_amount=None,
+	status=None,
+) -> dict:
+	"""Correct one of this worker's own accounts, proved to be theirs first.
+
+	`name` IS A DOCNAME FROM THE BODY, so it is checked before it is used — not
+	against company scope, which everybody at the company shares, but against the
+	caller's own Employee record. A docname belonging to somebody else reads as
+	not found rather than as refused, so the register cannot be mapped by
+	watching which error comes back.
+
+	`status` IS accepted here and not on the create above: retiring an account
+	you own is an ordinary thing to do from a phone when you change banks, and
+	the row it applies to has already been proved yours.
+	"""
+	guard.require_scope(user)
+	person = _employee(user)
+
+	docname = str(name or "").strip()
+	if not docname:
+		frappe.throw("name is required.", frappe.ValidationError)
+	owner = frappe.db.get_value("Employee Bank Account", docname, "employee")
+	if not owner or str(owner) != person:
+		frappe.throw(
+			f"No bank account called {docname} belongs to you.", frappe.DoesNotExistError,
+		)
+
+	inner: dict = {"name": docname}
+	for key, value in (
+		("bank_name", bank_name),
+		("routing_number", routing_number),
+		("account_number", account_number),
+		("account_type", account_type),
+		("allocation_type", allocation_type),
+		("allocation_amount", allocation_amount),
+		("status", status),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	return ach_tools.update_employee_bank_account(inner).data

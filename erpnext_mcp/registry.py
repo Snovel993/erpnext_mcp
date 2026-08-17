@@ -44,6 +44,7 @@ from .tools import (
 	abc,
 	accidents,
 	accounts,
+	ach,
 	advisory,
 	agronomy,
 	anchors,
@@ -398,6 +399,14 @@ _STANDARD_REQUIRES = (
 _BREAKEVEN_REQUIRES = (
 	"the Breakeven Analysis doctype, which ships with erpnext_mcp — run `bench migrate` after "
 	"installing v0.87.0"
+)
+#: Direct deposit. The gate names Employee Bank Account rather than the pair,
+#: because ACH Originator Configuration is a company's bank agreement and a site
+#: can reasonably have the register migrated and the agreement not yet entered —
+#: which the generators refuse with their own sentence, naming the company.
+_ACH_REQUIRES = (
+	"the Employee Bank Account doctype, which ships with erpnext_mcp — run `bench migrate` after "
+	"installing this release"
 )
 #: v0.84.0, split three ways for the reason the phase-3 registers are. The
 #: activity register is usable on its own — an operation can write down what it
@@ -24304,6 +24313,205 @@ TOOLS = {
 		title="Get breakeven sensitivity",
 		available=_needs_doctype("Breakeven Analysis"),
 		requires=_BREAKEVEN_REQUIRES,
+	),
+	# ── Direct deposit: the register, and the file that pays it ──────────
+	"get_employee_bank_account": _tool(
+		ach.get_employee_bank_account,
+		"READ. One employee bank account by name, or every account belonging to "
+		"one employee. THE FULL ACCOUNT NUMBER IS NEVER RETURNED — it is stored "
+		"encrypted and this returns only the last four digits, masked as ****1234.",
+		{
+			"name": _field(_STRING, "The Employee Bank Account docname."),
+			"employee": _field(
+				_STRING,
+				"Employee ID or name. Returns every account for that employee, active "
+				"or not. Ignored when `name` is given.",
+			),
+		},
+		title="Get employee bank account",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
+	),
+	"list_employee_bank_accounts": _tool(
+		ach.list_employee_bank_accounts,
+		"READ. Employee bank accounts across the company, filtered by employee, "
+		"status, or whether a prenote is still outstanding. THE FULL ACCOUNT "
+		"NUMBER IS NEVER RETURNED — only the masked last four.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Restrict to one employee."),
+			"status": _field(_STRING, "Active or Inactive."),
+			"prenote_pending": _field(
+				_BOOLEAN,
+				"True returns only accounts that have never been prenoted — the "
+				"work list for generate_prenote_file.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List employee bank accounts",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
+	),
+	"create_employee_bank_account": _tool(
+		ach.create_employee_bank_account,
+		"MUTATING (default OFF). Register where one employee's wages are "
+		"deposited. The routing number is checked against the ABA check digit, "
+		"which catches a mistyped digit and a transposed pair. The account number "
+		"is stored ENCRYPTED and no tool reads it back. An employee splitting "
+		"their pay has several rows: Fixed Amount and Percentage rows are "
+		"satisfied first and exactly one Full row takes the remainder.",
+		{
+			"employee": _field(_STRING, "Employee ID or name."),
+			"company": _COMPANY,
+			"bank_name": _field(_STRING, "The bank holding the account."),
+			"routing_number": _field(
+				_STRING,
+				"Nine digits. Refused if it fails the ABA check-digit test.",
+			),
+			"account_number": _field(
+				_STRING,
+				"The account number, up to 17 characters. Stored encrypted; never "
+				"returned by any read tool.",
+			),
+			"account_type": _field(_STRING, "Checking or Savings. Default Checking."),
+			"allocation_type": _field(
+				_STRING,
+				"Full (takes the remainder — at most one per employee), Fixed Amount, "
+				"or Percentage. Default Full.",
+			),
+			"allocation_amount": _field(
+				_NUMBER,
+				"Dollars for Fixed Amount, a percentage 0-100 for Percentage. "
+				"Ignored for Full.",
+			),
+			"priority": _field(
+				_INTEGER,
+				"Order the fixed and percentage allocations are taken in. Lower "
+				"first. The Full account is always last regardless.",
+			),
+			"status": _field(_STRING, "Active or Inactive. Default Active."),
+		},
+		required=("employee", "bank_name", "routing_number", "account_number"),
+		mutating=True,
+		title="Create employee bank account",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
+	),
+	"update_employee_bank_account": _tool(
+		ach.update_employee_bank_account,
+		"MUTATING (default OFF). Change one employee bank account. CHANGING THE "
+		"ROUTING OR ACCOUNT NUMBER CLEARS THE PRENOTE FLAG, because the bank "
+		"confirmed the old number and not the new one. Re-validates the "
+		"employee's whole allocation set, not just this row.",
+		{
+			"name": _field(_STRING, "The Employee Bank Account docname."),
+			"bank_name": _field(_STRING, "New bank name."),
+			"routing_number": _field(_STRING, "New nine-digit routing number."),
+			"account_number": _field(_STRING, "New account number. Stored encrypted."),
+			"account_type": _field(_STRING, "Checking or Savings."),
+			"allocation_type": _field(_STRING, "Full, Fixed Amount, or Percentage."),
+			"allocation_amount": _field(_NUMBER, "Dollars, or a percentage 0-100."),
+			"priority": _field(_INTEGER, "Order fixed and percentage allocations are taken in."),
+			"status": _field(
+				_STRING,
+				"Active or Inactive. Deactivating retires an account without "
+				"deleting the evidence of where past payroll was sent.",
+			),
+		},
+		required=("name",),
+		mutating=True,
+		idempotent=True,
+		title="Update employee bank account",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
+	),
+	"generate_nacha_file": _tool(
+		ach.generate_nacha_file,
+		"MUTATING (default OFF). Build a NACHA-format ACH file from a calculated "
+		"Farm Payroll Entry and attach it, PRIVATELY, to that entry. One batch, "
+		"Standard Entry Class PPD, one entry detail record per DEPOSIT — an "
+		"employee splitting their cheque produces several. Employees with no "
+		"active bank account are skipped and reported (they are paid by cheque); "
+		"an employee whose allocations do not add up REFUSES THE WHOLE FILE, "
+		"because a payroll file that shorted one person would still balance "
+		"internally. Warns about accounts that were never prenoted.",
+		{
+			"payroll_entry": _field(
+				_STRING,
+				"The Farm Payroll Entry docname. Must be Calculated or Submitted — "
+				"net pay is not final on a draft.",
+			),
+			"effective_entry_date": _field(
+				_STRING,
+				"The day the money should land, YYYY-MM-DD. Defaults to today plus "
+				"the originator configuration's settlement days.",
+			),
+			"entry_description": _field(
+				_STRING,
+				"Ten characters printed on the employee's bank statement. Default "
+				"PAYROLL, or whatever the originator configuration says.",
+			),
+			"file_id_modifier": _field(
+				_STRING,
+				"One character, A-Z or 0-9, distinguishing two files sent to the "
+				"same bank on the same day. Default A.",
+			),
+			"mark_deposited": _field(
+				_BOOLEAN,
+				"Stamp last_deposit_date on every account paid. Default false — the "
+				"file has been generated, not yet transmitted.",
+			),
+			"output_path": _field(
+				_STRING,
+				"Also write the file here, under the site's private/files. The "
+				"attachment is the durable copy either way.",
+			),
+			"overwrite": _field(_BOOLEAN, "Allow output_path to replace an existing file."),
+		},
+		required=("payroll_entry",),
+		mutating=True,
+		title="Generate NACHA ACH file",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
+	),
+	"generate_prenote_file": _tool(
+		ach.generate_prenote_file,
+		"MUTATING (default OFF). Build a NACHA prenotification file — ZERO-DOLLAR "
+		"entries with their own transaction codes (23 checking, 33 savings) that "
+		"ask the receiving banks to confirm the accounts exist before real wages "
+		"are sent. Defaults to every active account for the company that has "
+		"never been prenoted, and marks them sent. NACHA gives the receiving bank "
+		"three banking days to return one.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Restrict to one employee's accounts."),
+			"accounts": _field(
+				_STRING,
+				"Comma-separated Employee Bank Account docnames, to prenote an "
+				"explicit set rather than everything outstanding.",
+			),
+			"resend": _field(
+				_BOOLEAN,
+				"Include accounts already prenoted. Default false, which sends only "
+				"the outstanding ones.",
+			),
+			"effective_entry_date": _field(
+				_STRING, "YYYY-MM-DD. Defaults to today plus the settlement days.",
+			),
+			"entry_description": _field(_STRING, "Ten characters. Default PRENOTE."),
+			"file_id_modifier": _field(_STRING, "One character, A-Z or 0-9. Default A."),
+			"mark_sent": _field(
+				_BOOLEAN,
+				"Tick prenote_sent and stamp prenote_date on the accounts written. "
+				"Default TRUE — generating the file is the act being recorded.",
+			),
+			"output_path": _field(_STRING, "Also write the file under the site's private/files."),
+			"overwrite": _field(_BOOLEAN, "Allow output_path to replace an existing file."),
+		},
+		mutating=True,
+		title="Generate ACH prenote file",
+		available=_needs_doctype("Employee Bank Account"),
+		requires=_ACH_REQUIRES,
 	),
 }
 

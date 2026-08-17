@@ -889,7 +889,14 @@
   "block_lifecycle_col",
   "allow_get_block_revenue_summary",
   "allow_get_block_profitability",
-  "allow_create_planting_season"
+  "allow_create_planting_season",
+  "direct_deposit_section",
+  "allow_get_employee_bank_account",
+  "allow_list_employee_bank_accounts",
+  "allow_create_employee_bank_account",
+  "allow_update_employee_bank_account",
+  "allow_generate_nacha_file",
+  "allow_generate_prenote_file"
  ],
  "fields": [
   {
@@ -6767,6 +6774,53 @@
    "fieldname": "allow_create_planting_season",
    "fieldtype": "Check",
    "label": "Create Planting Season"
+  },
+  {
+   "fieldname": "direct_deposit_section",
+   "fieldtype": "Section Break",
+   "label": "Direct Deposit and ACH"
+  },
+  {
+   "default": "1",
+   "description": "READ. One employee bank account, or all of one employee's. Returns only the masked last four digits — never the full account number.",
+   "fieldname": "allow_get_employee_bank_account",
+   "fieldtype": "Check",
+   "label": "Get Employee Bank Account"
+  },
+  {
+   "default": "1",
+   "description": "READ. Employee bank accounts across the company, filtered by employee, status, or outstanding prenote. Returns only the masked last four digits.",
+   "fieldname": "allow_list_employee_bank_accounts",
+   "fieldtype": "Check",
+   "label": "List Employee Bank Accounts"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Register where an employee's wages are deposited. The routing number is ABA check-digit validated; the account number is stored encrypted.",
+   "fieldname": "allow_create_employee_bank_account",
+   "fieldtype": "Check",
+   "label": "Create Employee Bank Account"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Change one employee bank account. Changing the routing or account number clears the prenote flag.",
+   "fieldname": "allow_update_employee_bank_account",
+   "fieldtype": "Check",
+   "label": "Update Employee Bank Account"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Build a NACHA ACH file from a calculated Farm Payroll Entry and attach it privately to that entry. THIS IS THE TOOL THAT MOVES WAGES.",
+   "fieldname": "allow_generate_nacha_file",
+   "fieldtype": "Check",
+   "label": "Generate NACHA File"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Build a zero-dollar NACHA prenotification file so the receiving banks can confirm the accounts exist before real wages are sent.",
+   "fieldname": "allow_generate_prenote_file",
+   "fieldtype": "Check",
+   "label": "Generate Prenote File"
   }
  ],
  "index_web_pages_for_search": 0,

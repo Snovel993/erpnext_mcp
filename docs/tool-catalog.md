@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 699 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 705 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 349 read tools are **on** by default and can be switched off individually. A
+All 351 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -15437,3 +15437,105 @@ employee-scoped, so a docname outside the caller's own crew reads as not found.
 `show_employer_contributions` is not on the mobile signature: whether a farm
 shows its own FICA on a worker's statement is one operator policy, not a checkbox
 on the handset of whoever printed it.
+
+
+## Direct deposit and ACH (v0.91.0)
+
+Six tools: a register of where each worker's wages go, and the two generators
+that turn a calculated payroll run into a file a bank will accept.
+
+### The account number leaves this site in exactly one direction
+
+`account_number` is a **Password** field, which Frappe stores in its encrypted
+`__Auth` table rather than in a column. **No read tool returns it.**
+`get_employee_bank_account` and `list_employee_bank_accounts` return
+`account_number_last_four` and a masked `****1234`, and the mobile route returns
+the same. The one place the full number is materialised is inside a generated
+ACH file — and that file is written as a **private** attachment, the same rule a
+1099 gets.
+
+The field list those reads use is a module constant that does not contain
+`account_number`, and a masking step strips it again on the way out. Two locks
+on the one field that would matter.
+
+### `create_employee_bank_account` / `update_employee_bank_account` — MUTATING, default off
+
+`routing_number` is validated against the **ABA check digit** — a 3-7-1 weighted
+sum over the nine digits — which catches every single-digit typo and every
+transposition of an adjacent pair. Between them that is very nearly every way a
+routing number gets copied wrong off a cheque, and the failure it prevents is
+somebody's wages arriving at another bank.
+
+**Changing the routing or account number clears `prenote_sent`.** The bank
+confirmed the old number; a flag that survived the edit would let a
+never-verified account past the warning in `generate_nacha_file` on the strength
+of a test run against different digits.
+
+**Split deposits are rows, not fields.** An employee paying $200 to savings and
+the rest to checking has two rows: one `Fixed Amount` of 200 and one `Full`. At
+most one `Full` per employee, and percentages across an employee's active rows
+may not exceed 100 — both checked against the employee's whole set rather than
+the row being written, because a row that is individually valid can still make
+the set unpayable.
+
+**A percentage is taken of the original net pay, not of the running remainder.**
+"20% to savings" means a fifth of the cheque. The other reading makes the amount
+depend on the order two sibling rows happened to be created in.
+
+### `generate_nacha_file` — MUTATING, default off
+
+Takes a **Calculated or Submitted** Farm Payroll Entry — never a draft, because
+net pay is not final until the run is calculated — and attaches a NACHA file to
+it privately. One batch, Standard Entry Class **PPD**, one Entry Detail record
+per **deposit** rather than per employee.
+
+**An employee with no active bank account is skipped and reported.** They are
+paid by cheque, which is ordinary on a farm, and a file that refused to exist
+because one picker has no bank account would be useless.
+
+**An employee whose allocations do not add up refuses the entire file.** This is
+the asymmetry worth understanding: a half-allocated cheque is not a smaller
+payment, it is a wrong one, and it is wrong *silently* — the batch total is
+computed from the entries actually written, so the file balances against itself
+while shorting somebody. There is no partially-correct payroll file.
+
+The result reports `employees_paid`, `employees_skipped` with a reason each, and
+`warnings` for accounts that were never prenoted or are still inside the
+three-banking-day return window. The prenote warning does **not** refuse: the
+waiting period is a convention between a company and its bank, not something
+this app should enforce against a payroll that has to go out on Friday.
+
+### `generate_prenote_file` — MUTATING, default off
+
+Zero-dollar entries carrying their own transaction codes — **23** checking,
+**33** savings, against 22 and 32 for a live credit — which ask the receiving
+banks to confirm the accounts exist. A $0.00 entry under an ordinary credit code
+is not a prenote; it is a payment of nothing.
+
+Defaults to every active account for the company that has never been prenoted,
+and marks them sent. `resend=true` includes ones already done.
+
+### ACH Originator Configuration
+
+The company's own identity in the ACH network, one row per company: the
+originating routing number, the ten-character company identification its bank
+issued, and the names that appear in the file header. **None of it can be
+inferred from anything else on the site** — it all comes from the origination
+agreement — which is why the generators refuse, naming the company, rather than
+guessing.
+
+`settlement_days` is what the default effective entry date is computed from.
+
+### The format is exact, and the tests are about that
+
+Every NACHA record is **94 characters** — not 94 fields with a delimiter, 94
+character positions each belonging to one field. A field written one character
+short does not produce a short field; it shifts every field after it and the
+file still looks like a file. The builder concatenates fixed-width pieces and
+asserts the total is 94 before returning, and the test suite pins every field's
+offset and width against the spec, both control records' totals, the entry hash,
+and the ten-record blocking.
+
+**The entry hash is not a checksum of the file.** It is the sum of the
+*eight-digit* routing prefixes of every entry — the check digit deliberately
+excluded — truncated to its rightmost ten digits.

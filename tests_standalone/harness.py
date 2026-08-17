@@ -1646,6 +1646,13 @@ APP_DOCTYPES = {
 	"Planting Season": "planting_season",
 	"Block Cost Entry": "block_cost_entry",
 	"Block Revenue Entry": "block_revenue_entry",
+	# v0.91.0 — direct deposit. Employee Bank Account is the reason
+	# `account_number` had to be a real Password field in this double rather
+	# than a Data one: the tools' whole promise is that the number goes in and
+	# never comes back out, and a double that kept it as an ordinary column
+	# would let a read tool return it and the test still pass.
+	"Employee Bank Account": "employee_bank_account",
+	"ACH Originator Configuration": "ach_originator_configuration",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

@@ -750,3 +750,280 @@ class CombinedPreview(StateTaxTestCase):
         })
         self.assertEqual(data["state"], "OR")
         self.assertGreater(data["total_or_employee"], 0)
+
+
+# ── Claim 11: The Oregon brackets are data, not constants ─────────────
+
+
+class SeededOregonBrackets(StateTaxTestCase):
+    """`seed_or_brackets` produces what the engine actually reads.
+
+    v0.91.0. Until this release the seeder divided every bracket by every entry
+    in PERIODS_PER_YEAR and emitted a row per pay frequency — but State Tax Table
+    has no `payroll_period` column to tell them apart, and the engine annualizes
+    gross before looking a bracket up. Both halves are asserted here, because
+    either one alone would have let the bug back in: the shape of the rows, and
+    the tax they produce once they are the table.
+    """
+
+    def test_seed_is_annual_not_per_period(self):
+        """One row per bracket per filing status. No period fan-out."""
+        rows = seed_or_brackets()
+        expected = sum(len(b) for b in OR_ANNUAL_BRACKETS.values())
+        self.assertEqual(len(rows), expected)
+        # The old seeder produced this many, which is the number to stay away from.
+        self.assertNotEqual(len(rows), expected * len(PERIODS_PER_YEAR))
+
+    def test_seeded_floors_are_the_annual_floors(self):
+        """A seeded floor is the statutory annual figure, undivided."""
+        rows = seed_or_brackets()
+        single = sorted(
+            (r for r in rows if r["filing_status"] == "Single"),
+            key=lambda r: r["bracket_floor"],
+        )
+        self.assertEqual(
+            [r["bracket_floor"] for r in single],
+            [b["bracket_floor"] for b in OR_ANNUAL_BRACKETS["Single"]],
+        )
+        self.assertEqual(
+            [r["base_tax"] for r in single],
+            [b["base_tax"] for b in OR_ANNUAL_BRACKETS["Single"]],
+        )
+
+    def test_top_bracket_stays_open(self):
+        """The open-ended top bracket survives seeding as a real None."""
+        rows = seed_or_brackets()
+        for status in OR_ANNUAL_BRACKETS:
+            group = [r for r in rows if r["filing_status"] == status]
+            open_top = [r for r in group if r["bracket_ceiling"] is None]
+            self.assertEqual(len(open_top), 1, f"{status}: {open_top}")
+
+    def test_no_duplicate_keys(self):
+        """No two seeded rows share (filing_status, bracket_floor).
+
+        This is the assertion the old seeder failed. `_load_state_table` filters
+        on state + tax_year + filing_status and nothing else, so two rows with the
+        same floor are two brackets the walk cannot choose between.
+        """
+        rows = seed_or_brackets()
+        keys = [(r["filing_status"], r["bracket_floor"]) for r in rows]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_seed_year_is_stamped(self):
+        rows = seed_or_brackets(2027)
+        self.assertTrue(all(r["tax_year"] == 2027 for r in rows))
+        self.assertTrue(all(r["state"] == "OR" for r in rows))
+
+    def test_seeded_table_matches_the_constants_through_the_engine(self):
+        """Seeded rows and the constants withhold the same amount.
+
+        The end-to-end claim: whatever the seeder writes, an Oregon cheque comes
+        out the same as it would from the in-module brackets. A per-period seed
+        failed this by roughly the period count.
+        """
+        config = self._default_or_config()
+        seeded = [r for r in seed_or_brackets() if r["filing_status"] == "Single"]
+        for gross, period in ((1000, "Biweekly"), (3000, "Monthly"), (60000, "Annual")):
+            from_seed = calculate_oregon_withholding(gross, period, "Single", config, seeded)
+            from_const = calculate_oregon_withholding(
+                gross, period, "Single", config, OR_ANNUAL_BRACKETS["Single"],
+            )
+            self.assertEqual(
+                from_seed["or_income_tax"], from_const["or_income_tax"],
+                f"{gross} {period}",
+            )
+            self.assertGreater(from_seed["or_income_tax"], 0, f"{gross} {period}")
+
+    def test_seed_passes_its_own_import_validation(self):
+        """The shipped brackets satisfy the rules the import tool enforces.
+
+        A seeder that wrote rows `import_state_tax_table` would reject would mean
+        the app disagreed with itself about what a valid bracket table is.
+        """
+        data = self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2031,
+            "brackets": [
+                {k: v for k, v in row.items() if k not in ("state", "tax_year")}
+                for row in seed_or_brackets()
+            ],
+        })
+        self.assertEqual(data["created"], len(seed_or_brackets()))
+
+
+class ImportStateTaxTable(StateTaxTestCase):
+    """Claim 12: a new tax year loads without a release, and safely."""
+
+    SINGLE_2026 = [
+        {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 4300,
+         "base_tax": 0, "marginal_rate": 4.75},
+        {"filing_status": "Single", "bracket_floor": 4300, "bracket_ceiling": None,
+         "base_tax": 204.25, "marginal_rate": 6.75},
+    ]
+
+    def test_import_then_reimport_refuses(self):
+        """A second import of the same year is refused, not duplicated."""
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": self.SINGLE_2026,
+        })
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": self.SINGLE_2026,
+        })
+        self.assertIn("already exist", text)
+        self.assertIn("replace=true", text)
+        rows = STORE.rows("State Tax Table")
+        self.assertEqual(len([r for r in rows if r.get("tax_year") == 2026]), 2)
+
+    def test_replace_rewrites_the_year(self):
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": self.SINGLE_2026,
+        })
+        revised = [
+            {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 4400,
+             "base_tax": 0, "marginal_rate": 4.75},
+            {"filing_status": "Single", "bracket_floor": 4400, "bracket_ceiling": None,
+             "base_tax": 209.0, "marginal_rate": 6.75},
+        ]
+        data = self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": revised, "replace": True,
+        })
+        self.assertEqual(data["deleted"], 2)
+        self.assertEqual(data["created"], 2)
+        self.assertTrue(data["replaced"])
+        rows = [r for r in STORE.rows("State Tax Table") if r.get("tax_year") == 2026]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted(float(r["bracket_floor"]) for r in rows), [0.0, 4400.0])
+
+    def test_replace_leaves_other_years_alone(self):
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": self.SINGLE_2026, "replace": True,
+        })
+        before = len([r for r in STORE.rows("State Tax Table") if r.get("tax_year") == 2025])
+        self.assertGreater(before, 0)
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "brackets": self.SINGLE_2026, "replace": True,
+        })
+        after = len([r for r in STORE.rows("State Tax Table") if r.get("tax_year") == 2025])
+        self.assertEqual(before, after)
+
+    def test_rejects_unknown_filing_status(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [{"filing_status": "Married Filing Separately", "bracket_floor": 0,
+                          "bracket_ceiling": None, "base_tax": 0, "marginal_rate": 5}],
+        })
+        self.assertIn("does not accept", text)
+
+    def test_rejects_a_gap(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 4000,
+                 "base_tax": 0, "marginal_rate": 4.75},
+                {"filing_status": "Single", "bracket_floor": 5000, "bracket_ceiling": None,
+                 "base_tax": 190, "marginal_rate": 6.75},
+            ],
+        })
+        self.assertIn("do not meet", text)
+
+    def test_rejects_not_starting_at_zero(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 1000, "bracket_ceiling": None,
+                 "base_tax": 0, "marginal_rate": 4.75},
+            ],
+        })
+        self.assertIn("start", text)
+
+    def test_rejects_no_open_top_bracket(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 4000,
+                 "base_tax": 0, "marginal_rate": 4.75},
+            ],
+        })
+        self.assertIn("above the highest", text)
+
+    def test_rejects_two_open_top_brackets(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": None,
+                 "base_tax": 0, "marginal_rate": 4.75},
+                {"filing_status": "Single", "bracket_floor": 4000, "bracket_ceiling": None,
+                 "base_tax": 190, "marginal_rate": 6.75},
+            ],
+        })
+        self.assertIn("blank bracket_ceiling", text)
+
+    def test_rejects_rate_as_a_fraction(self):
+        """9.9% stated as 0.099 is accepted as a number and wrong as a rate.
+
+        This one cannot be caught by range alone — 0.099 IS between 0 and 100 —
+        so it is here as a reminder of what the range check does and does not buy.
+        What it does catch is 990.
+        """
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": None,
+                 "base_tax": 0, "marginal_rate": 990},
+            ],
+        })
+        self.assertIn("percentage", text)
+
+    def test_rejects_ceiling_below_floor(self):
+        text = self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 5000,
+                 "base_tax": 0, "marginal_rate": 4.75},
+                {"filing_status": "Single", "bracket_floor": 5000, "bracket_ceiling": 4000,
+                 "base_tax": 190, "marginal_rate": 6.75},
+            ],
+        })
+        self.assertIn("at or below", text)
+
+    def test_nothing_is_written_when_validation_fails(self):
+        """A rejected payload leaves the table exactly as it was."""
+        before = len(STORE.rows("State Tax Table"))
+        self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2029,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": 4000,
+                 "base_tax": 0, "marginal_rate": 4.75},
+                {"filing_status": "Single", "bracket_floor": 9000, "bracket_ceiling": None,
+                 "base_tax": 190, "marginal_rate": 6.75},
+            ],
+        })
+        self.assertEqual(len(STORE.rows("State Tax Table")), before)
+
+    def test_a_replace_that_fails_validation_deletes_nothing(self):
+        """The delete happens after validation, never before it."""
+        before = [r for r in STORE.rows("State Tax Table") if r.get("tax_year") == 2025]
+        self.assertGreater(len(before), 0)
+        self.tool_error("import_state_tax_table", {
+            "state": "OR", "tax_year": 2025, "replace": True,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 500, "bracket_ceiling": None,
+                 "base_tax": 0, "marginal_rate": 4.75},
+            ],
+        })
+        after = [r for r in STORE.rows("State Tax Table") if r.get("tax_year") == 2025]
+        self.assertEqual(len(before), len(after))
+
+    def test_imported_year_is_what_withholding_reads(self):
+        """The end of the point: import a year, and that year's tax applies."""
+        self.tool_data("import_state_tax_table", {
+            "state": "OR", "tax_year": 2026,
+            "brackets": [
+                {"filing_status": "Single", "bracket_floor": 0, "bracket_ceiling": None,
+                 "base_tax": 0, "marginal_rate": 10.0},
+            ],
+        })
+        data = self.tool_data("get_state_tax_table", {
+            "state": "OR", "tax_year": 2026, "filing_status": "Single",
+        })
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(float(data["brackets"][0]["marginal_rate"]), 10.0)

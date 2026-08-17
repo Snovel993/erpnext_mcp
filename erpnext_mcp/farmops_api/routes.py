@@ -652,6 +652,13 @@ ROUTES = (
 	Route("/mobile", mobile_api.get_spray_application_report),
 	Route("/files", files_api.stage_file_chunk),
 	Route("/files", files_api.finalize_staged_file),
+	# Direct deposit. The worker's OWN bank details and nobody else's —
+	# these three resolve the subject from the caller's login rather than
+	# from an `employee` argument, because company scope is shared by
+	# everybody enrolled and would let one picker repoint another's wages.
+	Route("/mobile", mobile_api.list_my_bank_accounts),
+	Route("/mobile", mobile_api.add_my_bank_account),
+	Route("/mobile", mobile_api.update_my_bank_account),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

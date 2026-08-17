@@ -35,6 +35,19 @@ SUPPORTED_STATES = ("OR", "WA")
 # ── 2025 Oregon Income Tax Brackets (ORS 316.037) ─────────────────────────
 # Annual brackets. The engine annualizes gross, looks up the bracket, then
 # de-annualizes back to the pay period — same pattern as the federal engine.
+#
+# THESE ARE SEED DATA, NOT THE TAX TABLE. v0.91.0. No calculation in this module
+# reads them: `calculate_oregon_withholding` is handed a bracket list by its
+# caller, and on a live site that list comes from the State Tax Table doctype via
+# `tools/state_tax._load_state_table`. What these constants are for is
+# `seed_or_brackets`, which `install._state_tax_table` inserts once on a site
+# whose table is empty — and after that an operator owns the rows.
+#
+# So a new tax year does NOT come back here. It arrives through
+# `import_state_tax_table` with the year's own floors, which is the point of the
+# doctype: Oregon publishes its brackets in December and a farm should not need a
+# release to withhold correctly in January. What this file still pins is the
+# 2025 figures a fresh install starts from, and the year it says they belong to.
 
 OR_SEED_TAX_YEAR = 2025
 
@@ -439,22 +452,41 @@ def _calc_state_income_tax(
     return max(per_period, 0), detail
 
 
-def seed_or_brackets() -> list[dict]:
-    """Return Oregon bracket rows for all periods, ready for insertion."""
+def seed_or_brackets(tax_year: int = OR_SEED_TAX_YEAR) -> list[dict]:
+    """Return Oregon bracket rows for one tax year, ready for insertion.
+
+    THE ROWS ARE ANNUAL, AND THAT IS THE WHOLE CONTRACT. `_calc_state_income_tax`
+    annualizes the period's gross, walks the brackets against that annual figure,
+    and divides the annual tax back down — so a bracket table it reads has to be
+    stated in annual dollars. Nothing else in this module de-annualizes anything.
+
+    Until v0.91.0 this function divided each bracket by every entry in
+    PERIODS_PER_YEAR and emitted a row per frequency, which was wrong twice over.
+    State Tax Table has no `payroll_period` column — Federal Tax Table does, and
+    that is the difference the code had borrowed without checking — so the six
+    frequencies all landed under the same (state, tax_year, filing_status) key and
+    `_load_state_table` read back 24 overlapping rows for one filing status. And
+    even a table that could tell them apart would have been storing per-period
+    floors for an engine that only ever asks in annual dollars.
+
+    The `tax_year` argument is what makes a new year a data change rather than a
+    code change: the seeder ships 2025, and January's rates arrive through
+    `import_state_tax_table` against a year this function never has to know about.
+    """
     rows = []
     for filing_status, annual in OR_ANNUAL_BRACKETS.items():
-        for period_name, periods in PERIODS_PER_YEAR.items():
-            for bracket in annual:
-                floor = bracket["bracket_floor"] / periods
-                ceiling = bracket["bracket_ceiling"] / periods if bracket["bracket_ceiling"] else None
-                base = bracket["base_tax"] / periods
-                rows.append({
-                    "state": "OR",
-                    "tax_year": OR_SEED_TAX_YEAR,
-                    "filing_status": filing_status,
-                    "bracket_floor": round(floor, 2),
-                    "bracket_ceiling": round(ceiling, 2) if ceiling else None,
-                    "base_tax": round(base, 2),
-                    "marginal_rate": bracket["marginal_rate"],
-                })
+        for bracket in annual:
+            rows.append({
+                "state": "OR",
+                "tax_year": int(tax_year),
+                "filing_status": filing_status,
+                "bracket_floor": float(bracket["bracket_floor"]),
+                "bracket_ceiling": (
+                    float(bracket["bracket_ceiling"])
+                    if bracket["bracket_ceiling"] is not None
+                    else None
+                ),
+                "base_tax": float(bracket["base_tax"]),
+                "marginal_rate": float(bracket["marginal_rate"]),
+            })
     return rows

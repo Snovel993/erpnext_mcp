@@ -480,6 +480,13 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/get_spray_application_report",
 		"/files/stage_file_chunk",
 		"/files/finalize_staged_file",
+		# v0.91.0. Direct deposit. The read is the caller's own accounts and the
+		# two writes are their own account — no `employee` argument on any of
+		# the three, which is what keeps a shared company scope from becoming a
+		# way to redirect a colleague's wages.
+		"/mobile/list_my_bank_accounts",
+		"/mobile/add_my_bank_account",
+		"/mobile/update_my_bank_account",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

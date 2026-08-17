@@ -114,6 +114,7 @@ from . import (
 	onboard_worker,
 	roles,
 	settings,
+	state_withholding,
 	training,
 	withholding,
 )
@@ -139,6 +140,7 @@ def after_install() -> None:
 	_i9_document_types()
 	_i9_print_format()
 	_federal_tax_table()
+	_state_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
 	_badge_logo_field()
@@ -176,6 +178,7 @@ def after_migrate() -> None:
 	_i9_document_types()
 	_i9_print_format()
 	_federal_tax_table()
+	_state_tax_table()
 	_kpi_definitions()
 	_farm_task_templates()
 	_badge_logo_field()
@@ -656,6 +659,49 @@ def _federal_tax_table() -> None:
 			print(f"erpnext_mcp: seeded {created} federal tax bracket(s) for tax year {withholding.SEED_TAX_YEAR}")
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(f"erpnext_mcp: the federal tax table was not seeded — {type(exc).__name__}: {exc}")
+
+
+def _state_tax_table() -> None:
+	"""Seed 2025 Oregon income tax brackets if the table is empty.
+
+	v0.91.0, AND UNTIL NOW NOTHING CALLED THE SEEDER AT ALL. `seed_or_brackets`
+	has existed since v0.29.0 and no install path ran it, so State Tax Table was
+	empty on every site — and an empty table is not an error anybody sees.
+	`calculate_oregon_withholding` takes `if income_enabled and state_tax_table`
+	and falls to a branch that records "disabled or no brackets", so Oregon income
+	tax came out as a clean $0.00 on payroll that owed it. The other four Oregon
+	amounts computed correctly the whole time, which is what kept a zero in the
+	one column from looking like a broken install.
+
+	It follows `_federal_tax_table` exactly, including the part that matters most:
+	IT ONLY SEEDS WHEN THE TABLE HAS NO ROWS AT ALL for the seed year, so an
+	operator who imported their own brackets — or corrected the seeded ones after
+	Oregon revised them — keeps their data across every later migrate.
+
+	Washington gets nothing here and needs nothing: it has no income tax, its
+	programs are all flat rates on State Tax Configuration, and `_load_state_table`
+	is only consulted for OR.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "State Tax Table"):
+			return
+		year = state_withholding.OR_SEED_TAX_YEAR
+		existing = frappe.db.count("State Tax Table", {"state": "OR", "tax_year": year})
+		if existing:
+			return
+		created = 0
+		for bracket in state_withholding.seed_or_brackets(year):
+			doc = frappe.get_doc({
+				"doctype": "State Tax Table",
+				**bracket,
+			})
+			doc.flags.ignore_permissions = True
+			doc.insert()
+			created += 1
+		if created:
+			print(f"erpnext_mcp: seeded {created} Oregon tax bracket(s) for tax year {year}")
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: the state tax table was not seeded — {type(exc).__name__}: {exc}")
 
 
 def _weather_settings() -> None:
@@ -1390,6 +1436,15 @@ _PRECIOUS_DOCTYPES = (
 		"the payroll register — every pay period's gross, deductions and net for every "
 		"employee, with the per-slip breakdown of federal and state withholding, FICA, "
 		"and the minimum wage check. The record that proves everybody was paid correctly",
+	),
+	(
+		"Farm Payroll Deduction",
+		"the standing instructions to withhold what is not a tax — court-ordered "
+		"garnishments, child support, tax levies and student loans, alongside the "
+		"worker's own elections for retirement, health cover and union dues. A court "
+		"serves an order on the EMPLOYER, and an employer that cannot produce the order "
+		"it withheld under, the date it started and the amount it took answers for the "
+		"money itself. It exists nowhere else",
 	),
 	(
 		"Expense Receipt",

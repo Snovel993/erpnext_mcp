@@ -574,6 +574,21 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"get_osha_300_log",
 		"get_osha_300a_summary",
 		"get_spray_application_report",
+		# v0.91.0. Direct deposit, entered by the worker whose wages it is.
+		# `MobileAPI.swift` names none of the three yet — the handset half is
+		# separate work — so they sit here rather than in `MOBILE`.
+		#
+		# THESE ARE THE ONLY THREE METHODS ON THIS SURFACE THAT TAKE NO SUBJECT
+		# FROM THE BODY. Every other write that names a person accepts an
+		# `employee` docname and checks it against the caller's COMPANY scope,
+		# which is right for onboarding and wrong for a payment instruction:
+		# company scope is shared by everybody enrolled, so it would let one
+		# picker repoint another's wages. These resolve the subject from the
+		# caller's own login instead, and `update_my_bank_account` proves the
+		# docname belongs to that employee before it writes.
+		"list_my_bank_accounts",
+		"add_my_bank_account",
+		"update_my_bank_account",
 	}
 
 	def _whitelisted(self, module):

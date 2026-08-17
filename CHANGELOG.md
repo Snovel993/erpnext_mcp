@@ -453,6 +453,86 @@ not a checkbox on the handset of whoever printed it, and two workers on one crew
 getting differently-shaped stubs on the same afternoon is a wage-claim exhibit.
 The MCP surface keeps the argument.
 
+### Oregon's tax brackets become data, and the seeder that never ran
+
+`seed_or_brackets` has existed since v0.29.0 and **no install path ever called
+it**, so `State Tax Table` was empty on every site. An empty table is not an
+error anybody sees: `calculate_oregon_withholding` takes
+`if income_enabled and state_tax_table`, falls to a branch that records
+"disabled or no brackets", and Oregon income tax comes out as a clean **$0.00**
+on payroll that owed it. The other four Oregon amounts — transit, paid leave,
+workers' comp, SUTA — computed correctly the whole time, which is what kept a
+zero in the one column from looking like a broken install. `install.py` now
+seeds it beside the federal table, on the same only-if-empty rule, so an
+operator who imported their own brackets keeps them.
+
+**And what it would have seeded was the wrong shape.** The seeder divided every
+bracket by every entry in `PERIODS_PER_YEAR` and emitted a row per pay
+frequency — but `State Tax Table` has no `payroll_period` column (Federal Tax
+Table does, and that is the difference the code had borrowed without checking),
+so all six frequencies landed under the same state/year/filing-status key and
+`_load_state_table` read back 24 overlapping rows for one filing status. Even a
+table that could tell them apart would have been storing per-period floors for
+an engine that annualizes gross before looking one up. The rows are annual now,
+which is what `_calc_state_income_tax` has always read.
+
+The standalone suite could not have caught it: its fixture seeds annual rows by
+hand and never called the shipped seeder, so the tests and production disagreed
+about the shape of the table and both were internally consistent. There is now a
+test that the seeder's output and the in-module constants withhold the *same
+amount* through the engine.
+
+**`import_state_tax_table` gains `replace`, and refuses to duplicate.** The
+settings switch has described it as "import or replace" since v0.29.0 and it
+only ever inserted — so a second import of a corrected year left two overlapping
+tables and let the bracket walk pick whichever sorted last. It now refuses
+unless `replace=true`, and validates the whole payload **before writing
+anything**: coverage from zero, no gaps, no overlaps, exactly one open-ended top
+bracket, rates as percentages. A rejected import deletes nothing, which is why
+the delete happens after validation rather than before it.
+
+A new tax year is now rows rather than a release — Oregon publishes its brackets
+in December and they take effect in January.
+
+### Direct deposit: an ACH register, and the file that pays it
+
+Two doctypes and six tools. **Employee Bank Account** is where one worker's
+wages go — routing number ABA check-digit validated, account number stored
+encrypted in Frappe's `__Auth` table and never returned by any read tool, and an
+allocation that lets one cheque split across several accounts. **ACH Originator
+Configuration** is the company's own identity in the ACH network, which comes
+from its bank's origination agreement and cannot be inferred from anything else
+on the site.
+
+`generate_nacha_file` turns a calculated Farm Payroll Entry into a NACHA file
+attached privately to that entry: file header, batch header, one entry detail
+record **per deposit**, batch control, file control, padded to a whole number of
+ten-record blocks. `generate_prenote_file` is the same file with zero amounts and
+its own transaction codes, asking the banks to confirm the accounts exist first.
+
+**A worker with no bank account is skipped and reported; a worker whose
+allocations do not add up refuses the whole file.** The asymmetry is deliberate.
+The first is somebody paid by cheque, which is ordinary. The second would be a
+file that balances against itself — the batch total is computed from the entries
+actually written — while paying one person the wrong amount.
+
+**The three mobile routes take no `employee` argument at all.** Every other write
+on that transport that names a person takes an Employee docname from the body and
+checks it against the caller's *company* scope, which is right for onboarding,
+where a foreman acts on somebody else's record on purpose. It is wrong here:
+company scope is shared by everybody enrolled, so an `employee` argument checked
+that way would let any picker with a handset repoint a colleague's wages. These
+three resolve the subject from the caller's own login, and `update_my_bank_account`
+proves the docname belongs to that employee before touching it — answering a row
+that is not theirs in the same words as a row that does not exist.
+
+**The format tests are the point of the format tests.** A NACHA record is 94
+character positions, not 94 delimited fields, so a field written one character
+short shifts everything after it and the file still looks like a file. Every
+field's offset and width is pinned against the spec, along with both control
+records, the entry hash — the sum of the *eight-digit* routing prefixes,
+truncated to ten digits — and the blocking.
+
 ## 0.90.0 — 2026-08-16 — one number past the wave
 
 No feature, no tool, no doctype. Eight parallel branches landed on `main` in one

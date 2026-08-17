@@ -1,0 +1,167 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:company",
+ "creation": "2026-08-17 09:00:00.000000",
+ "description": "The company's own identity in the ACH network — the bank that originates its payroll files and the identifiers that bank issued it. Every value here comes from the ODFI's origination agreement and none of it can be inferred from anything else on the site, which is why it is a configuration rather than a derived field.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "status",
+  "col_break_identity",
+  "bank_name",
+  "originating_dfi",
+  "identifiers_section",
+  "company_identification",
+  "company_name",
+  "col_break_identifiers",
+  "immediate_destination",
+  "immediate_destination_name",
+  "immediate_origin",
+  "immediate_origin_name",
+  "batch_section",
+  "entry_description",
+  "discretionary_data",
+  "col_break_batch",
+  "settlement_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nInactive",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bank_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Originating Bank Name"
+  },
+  {
+   "description": "The nine-digit routing number of the bank that originates these files. Its first eight digits become the Originating DFI Identification on the batch header and the prefix of every trace number.",
+   "fieldname": "originating_dfi",
+   "fieldtype": "Data",
+   "label": "Originating DFI Routing Number",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identifiers_section",
+   "fieldtype": "Section Break",
+   "label": "Identifiers"
+  },
+  {
+   "description": "Ten characters, issued by the ODFI. Conventionally a '1' followed by the nine-digit federal EIN. This is what the receiving bank shows the employee as the source of the deposit.",
+   "fieldname": "company_identification",
+   "fieldtype": "Data",
+   "label": "Company Identification",
+   "reqd": 1
+  },
+  {
+   "description": "Sixteen characters, and it is what an employee sees on their bank statement. Leave blank to use the Company's own name, truncated.",
+   "fieldname": "company_name",
+   "fieldtype": "Data",
+   "label": "Company Name (on statement)"
+  },
+  {
+   "fieldname": "col_break_identifiers",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The nine-digit routing number the file is sent TO — usually the ODFI itself, sometimes its correspondent. Leave blank to use the originating DFI.",
+   "fieldname": "immediate_destination",
+   "fieldtype": "Data",
+   "label": "Immediate Destination"
+  },
+  {
+   "fieldname": "immediate_destination_name",
+   "fieldtype": "Data",
+   "label": "Immediate Destination Name"
+  },
+  {
+   "description": "Ten characters. Some ODFIs want the company identification here and some want the originating routing number — it is a term of the origination agreement, so it is stored as given rather than inferred. Leave blank to use the company identification.",
+   "fieldname": "immediate_origin",
+   "fieldtype": "Data",
+   "label": "Immediate Origin"
+  },
+  {
+   "fieldname": "immediate_origin_name",
+   "fieldtype": "Data",
+   "label": "Immediate Origin Name"
+  },
+  {
+   "fieldname": "batch_section",
+   "fieldtype": "Section Break",
+   "label": "Batch Defaults"
+  },
+  {
+   "default": "PAYROLL",
+   "description": "Ten characters, printed on the employee's bank statement beside the deposit. PAYROLL is the convention.",
+   "fieldname": "entry_description",
+   "fieldtype": "Data",
+   "label": "Company Entry Description"
+  },
+  {
+   "description": "Twenty characters of the originator's own reference, ignored by the ACH network. Optional.",
+   "fieldname": "discretionary_data",
+   "fieldtype": "Data",
+   "label": "Company Discretionary Data"
+  },
+  {
+   "fieldname": "col_break_batch",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "2",
+   "description": "Banking days between the file being generated and the money landing, used to compute the default effective entry date. Most ODFIs require at least one; two is the common standing instruction.",
+   "fieldname": "settlement_days",
+   "fieldtype": "Int",
+   "label": "Settlement Days"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-17 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "ACH Originator Configuration",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

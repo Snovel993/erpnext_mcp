@@ -1,0 +1,222 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-17 09:00:00.000000",
+ "description": "One deposit destination for one employee. An employee splitting their net pay across two accounts has two rows here, each with its own allocation; the row with allocation_type Full takes whatever the fixed and percentage rows have not. The full account number is encrypted at rest and no tool reads it back — only the last four are ever displayed.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "col_break_identity",
+  "status",
+  "priority",
+  "bank_section",
+  "bank_name",
+  "routing_number",
+  "col_break_bank",
+  "account_type",
+  "account_number_last_four",
+  "account_number",
+  "allocation_section",
+  "allocation_type",
+  "allocation_amount",
+  "prenote_section",
+  "prenote_sent",
+  "prenote_date",
+  "col_break_prenote",
+  "last_deposit_date"
+ ],
+ "fields": [
+  {
+   "default": "EBA-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "EBA-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "col_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Active",
+   "description": "Only Active accounts are paid. Deactivating a row is how an account is retired — the row is kept because it is the evidence of where a past payroll was sent.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nInactive",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "The order allocations are applied in when an employee splits their pay. Lower numbers are taken first; the Full account is always taken last regardless.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "fieldname": "bank_section",
+   "fieldtype": "Section Break",
+   "label": "Bank"
+  },
+  {
+   "fieldname": "bank_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Bank Name",
+   "reqd": 1
+  },
+  {
+   "description": "Nine digits. Validated against the ABA check digit on save, which catches a mistyped digit and a transposed pair — between them almost every way a routing number is copied wrong off a cheque.",
+   "fieldname": "routing_number",
+   "fieldtype": "Data",
+   "label": "Routing Number",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_bank",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Checking",
+   "description": "Decides the ACH transaction code: 22 for a checking credit, 32 for savings. Sending a savings account under a checking code is a returned entry.",
+   "fieldname": "account_type",
+   "fieldtype": "Select",
+   "label": "Account Type",
+   "options": "Checking\nSavings",
+   "reqd": 1
+  },
+  {
+   "description": "Only the last four digits. Everything that displays this account displays ****1234 off this column, and it is written from the full number on save.",
+   "fieldname": "account_number_last_four",
+   "fieldtype": "Data",
+   "label": "Account Number (Last 4)",
+   "read_only": 1
+  },
+  {
+   "description": "The full account number, encrypted at rest in Frappe's own password table. No tool reads it back: get_employee_bank_account does not return it and the mobile route does not either. It leaves this site in exactly one direction — into a generated ACH file, which is a private attachment.",
+   "fieldname": "account_number",
+   "fieldtype": "Password",
+   "label": "Account Number (Encrypted)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "allocation_section",
+   "fieldtype": "Section Break",
+   "label": "Allocation"
+  },
+  {
+   "default": "Full",
+   "description": "Full takes the whole remaining net pay and an employee may have only one. Fixed Amount takes a set number of dollars; Percentage takes a share of gross net pay. Fixed and percentage rows are satisfied first and the Full row receives the remainder.",
+   "fieldname": "allocation_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Allocation Type",
+   "options": "Full\nFixed Amount\nPercentage",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.allocation_type != 'Full'",
+   "description": "Dollars when the allocation type is Fixed Amount, a percentage between 0 and 100 when it is Percentage. Ignored for Full.",
+   "fieldname": "allocation_amount",
+   "fieldtype": "Float",
+   "label": "Allocation Amount",
+   "precision": "4"
+  },
+  {
+   "fieldname": "prenote_section",
+   "fieldtype": "Section Break",
+   "label": "Prenotification"
+  },
+  {
+   "default": "0",
+   "description": "A zero-dollar test entry has been sent to this account and the bank did not reject it. NACHA gives the receiving bank three banking days to return a prenote; generate_nacha_file will warn about an account still inside that window.",
+   "fieldname": "prenote_sent",
+   "fieldtype": "Check",
+   "label": "Prenote Sent"
+  },
+  {
+   "fieldname": "prenote_date",
+   "fieldtype": "Date",
+   "label": "Prenote Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_prenote",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_deposit_date",
+   "fieldtype": "Date",
+   "label": "Last Deposit Date",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-17 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Employee Bank Account",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

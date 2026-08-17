@@ -334,8 +334,29 @@ def update_state_tax_config(args: dict) -> ToolResult:
     )
 
 
+#: The filing statuses State Tax Table will accept, which are the Select options
+#: the doctype ships. Checked here rather than left to Frappe because a Select
+#: does not validate on insert — a misspelled status would store fine and then
+#: never match `_load_state_table`, which filters on it exactly. The failure
+#: would be an import that reported success and a withholding of zero.
+TABLE_FILING_STATUSES = ("Single", "Married Filing Jointly", "Head of Household")
+
+
 def import_state_tax_table(args: dict) -> ToolResult:
-    """Bulk import state income tax brackets."""
+    """Bulk import state income tax brackets for a tax year.
+
+    THE WHOLE PAYLOAD IS VALIDATED BEFORE ANYTHING IS WRITTEN, and that ordering
+    is the point rather than a nicety: a bracket table half-replaced is worse than
+    one not replaced at all, because it withholds from real cheques and looks
+    populated while doing it.
+
+    `replace` is what makes a correction possible. Oregon revises a bracket after
+    an operator has already imported the year; without it the only options were a
+    second import — which used to duplicate every row silently, leaving
+    `_load_state_table` to return two overlapping tables and the bracket walk to
+    pick whichever sorted last — or deleting rows by hand in the Desk. With it,
+    the year's rows for this state are cleared and rewritten as one unit.
+    """
     state = _validate_state(as_str(args, "state", required=True))
     tax_year = as_int(args, "tax_year")
     if not tax_year:
@@ -343,32 +364,168 @@ def import_state_tax_table(args: dict) -> ToolResult:
     brackets = args.get("brackets")
     if not brackets:
         raise ToolError("brackets is required — a list of bracket objects.")
+    if not isinstance(brackets, (list, tuple)):
+        raise ToolError("brackets must be a list of bracket objects.")
+    replace = bool(args.get("replace"))
+
+    rows = [_validated_bracket(b, i, state, tax_year) for i, b in enumerate(brackets)]
+    _check_bracket_coverage(rows)
+
+    existing = frappe.db.count(STATE_TAX_TABLE, {"state": state, "tax_year": tax_year})
+    if existing and not replace:
+        raise ToolError(
+            f"{existing} {state} bracket(s) already exist for tax year {tax_year}. Importing "
+            "again would leave two overlapping tables for the same year, and the withholding "
+            "calculation reads every row that matches — so the duplicate would change what is "
+            "withheld without failing. Pass replace=true to clear the year and rewrite it, or "
+            "import a different tax_year. Nothing was written."
+        )
+
+    deleted = 0
+    if replace and existing:
+        for name in frappe.db.get_all(
+            STATE_TAX_TABLE,
+            filters={"state": state, "tax_year": tax_year},
+            pluck="name",
+        ):
+            frappe.delete_doc(STATE_TAX_TABLE, name, force=True, ignore_permissions=True)
+            deleted += 1
 
     created = 0
-    for bracket in brackets:
-        if not isinstance(bracket, dict):
-            continue
-        doc = frappe.get_doc({
-            "doctype": STATE_TAX_TABLE,
-            "state": state,
-            "tax_year": tax_year,
-            "filing_status": bracket.get("filing_status", ""),
-            "bracket_floor": float(bracket.get("bracket_floor", 0)),
-            "bracket_ceiling": float(bracket["bracket_ceiling"]) if bracket.get("bracket_ceiling") else None,
-            "base_tax": float(bracket.get("base_tax", 0)),
-            "marginal_rate": float(bracket.get("marginal_rate", 0)),
-        })
+    for row in rows:
+        doc = frappe.get_doc({"doctype": STATE_TAX_TABLE, **row})
         doc.flags.ignore_permissions = True
         doc.insert()
         created += 1
 
+    statuses = sorted({r["filing_status"] for r in rows})
+    summary = f"Imported {created} {state} bracket(s) for tax year {tax_year}"
+    if deleted:
+        summary += f", replacing {deleted}"
     return ToolResult(
-        data={"state": state, "tax_year": tax_year, "created": created},
-        summary=f"Imported {created} {state} bracket(s) for tax year {tax_year}",
+        data={
+            "state": state,
+            "tax_year": tax_year,
+            "created": created,
+            "deleted": deleted,
+            "replaced": bool(deleted),
+            "filing_statuses": statuses,
+        },
+        summary=f"{summary} ({', '.join(statuses)})",
     )
 
 
 # ── internal helpers ─────────────────────────────────────────────────────
+
+
+def _validated_bracket(bracket, index: int, state: str, tax_year: int) -> dict:
+    """One bracket, checked and normalised, or a ToolError naming its position.
+
+    The index is in the message because a rejected import is a list of forty rows
+    somebody pasted, and "bracket 17" is the difference between a fix and a hunt.
+    """
+    where = f"bracket {index + 1}"
+    if not isinstance(bracket, dict):
+        raise ToolError(f"{where} is not an object. Nothing was written.")
+
+    status = str(bracket.get("filing_status") or "").strip()
+    if not status:
+        raise ToolError(f"{where} has no filing_status. Nothing was written.")
+    if status not in TABLE_FILING_STATUSES:
+        raise ToolError(
+            f"{where} has filing_status {status!r}, which State Tax Table does not accept. "
+            f"Use one of: {', '.join(TABLE_FILING_STATUSES)}. Nothing was written."
+        )
+
+    def _number(key: str, required: bool = False) -> float | None:
+        value = bracket.get(key)
+        if value is None or value == "":
+            if required:
+                raise ToolError(f"{where} has no {key}. Nothing was written.")
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ToolError(f"{where} has a non-numeric {key}: {value!r}. Nothing was written.")
+
+    floor = _number("bracket_floor", required=True)
+    ceiling = _number("bracket_ceiling")
+    base = _number("base_tax", required=True)
+    rate = _number("marginal_rate", required=True)
+
+    if floor < 0:
+        raise ToolError(f"{where} has a negative bracket_floor ({floor}). Nothing was written.")
+    if base < 0:
+        raise ToolError(f"{where} has a negative base_tax ({base}). Nothing was written.")
+    if rate < 0 or rate > 100:
+        raise ToolError(
+            f"{where} has a marginal_rate of {rate}, which is not a percentage between 0 and 100. "
+            "Rates are stated as 9.9 for 9.9%, not 0.099. Nothing was written."
+        )
+    if ceiling is not None and ceiling <= floor:
+        raise ToolError(
+            f"{where} has a bracket_ceiling ({ceiling}) at or below its bracket_floor ({floor}). "
+            "Leave the ceiling blank for the top bracket. Nothing was written."
+        )
+
+    return {
+        "state": state,
+        "tax_year": int(tax_year),
+        "filing_status": status,
+        "bracket_floor": floor,
+        "bracket_ceiling": ceiling,
+        "base_tax": base,
+        "marginal_rate": rate,
+    }
+
+
+def _check_bracket_coverage(rows: list[dict]) -> None:
+    """Per filing status: start at zero, no gaps, no overlaps, one open top.
+
+    `_calc_state_income_tax` walks the sorted brackets and keeps the last one
+    whose floor the annual gross clears. That walk cannot report a hole — a gap
+    between 10,200 and 12,000 just means everybody in it is taxed at the 10,200
+    bracket, quietly and wrongly — so the shape has to be checked at import, which
+    is the last moment anybody is looking.
+    """
+    by_status: dict[str, list[dict]] = {}
+    for row in rows:
+        by_status.setdefault(row["filing_status"], []).append(row)
+
+    for status, group in by_status.items():
+        group = sorted(group, key=lambda r: r["bracket_floor"])
+        if group[0]["bracket_floor"] != 0:
+            raise ToolError(
+                f"the {status} brackets start at {group[0]['bracket_floor']} rather than 0, so "
+                "income below that has no bracket. The lowest bracket must have a bracket_floor "
+                "of 0. Nothing was written."
+            )
+
+        open_top = [r for r in group if r["bracket_ceiling"] is None]
+        if not open_top:
+            raise ToolError(
+                f"every {status} bracket has a bracket_ceiling, so income above the highest one "
+                "has no bracket. Leave the top bracket's ceiling blank. Nothing was written."
+            )
+        if len(open_top) > 1:
+            raise ToolError(
+                f"{len(open_top)} {status} brackets have a blank bracket_ceiling. Only the top "
+                "bracket may be open-ended. Nothing was written."
+            )
+        if open_top[0] is not group[-1]:
+            raise ToolError(
+                f"the open-ended {status} bracket starts at {open_top[0]['bracket_floor']}, but "
+                f"a bracket starting at {group[-1]['bracket_floor']} sits above it. The bracket "
+                "with no ceiling must be the highest. Nothing was written."
+            )
+
+        for lower, upper in zip(group, group[1:]):
+            if lower["bracket_ceiling"] != upper["bracket_floor"]:
+                raise ToolError(
+                    f"the {status} brackets do not meet: one ends at {lower['bracket_ceiling']} "
+                    f"and the next begins at {upper['bracket_floor']}. Each bracket's ceiling must "
+                    "equal the next one's floor. Nothing was written."
+                )
 
 
 def _config_fields() -> list[str]:
