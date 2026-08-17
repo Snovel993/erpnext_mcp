@@ -112,6 +112,20 @@ class ControlPoint:
 	citation: str
 	#: What the control refuses, in the imperative, for the enforced message.
 	blocks: str
+	#: The doctype whose rows this control READS to reach its verdict, copied onto
+	#: the seeded rule's mandatory `target_doctype`. It is the register the gate
+	#: consults, not necessarily the document somebody was trying to write: the
+	#: approval-threshold gate reads Approval Threshold rows to judge a Payment
+	#: Entry, and it is the threshold table an operator wants named when they ask
+	#: what that row is about. Where the two coincide — the three journal-entry
+	#: controls, which read the entry itself — they are the same doctype.
+	#:
+	#: A gate is never scanned, so this field steers nothing at runtime. What it
+	#: does is make `describe`'s `requires`/`available` honest (a site without
+	#: Backup Record cannot verify a restore, and the register should say so
+	#: rather than showing a control that silently never fires) and give the
+	#: mandatory column on Compliance Rule a true value rather than a placeholder.
+	target_doctype: str
 
 
 #: THE COMPLETE LIST. A rule naming anything else is refused on save.
@@ -134,6 +148,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 10 (Control Activities); SOX §404",
 		blocks="booking a transaction above the approval authority that covers it",
+		target_doctype="Approval Threshold",
 	),
 	"period_close_lockdown": ControlPoint(
 		key="period_close_lockdown",
@@ -147,6 +162,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 12 (Control Activities); SOX §404",
 		blocks="posting into a period that has been closed",
+		target_doctype="Journal Entry",
 	),
 	"closing_checklist": ControlPoint(
 		key="closing_checklist",
@@ -160,6 +176,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 12 (Control Activities); SOX §404",
 		blocks="closing a period with required steps still outstanding",
+		target_doctype="Closing Checklist",
 	),
 	"journal_entry_duplicate": ControlPoint(
 		key="journal_entry_duplicate",
@@ -173,6 +190,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 10 (Control Activities)",
 		blocks="booking an entry that duplicates one already on the books",
+		target_doctype="Journal Entry",
 	),
 	"journal_entry_unusual_amount": ControlPoint(
 		key="journal_entry_unusual_amount",
@@ -186,6 +204,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 10 (Control Activities)",
 		blocks="booking an entry far outside the normal size for its accounts",
+		target_doctype="Journal Entry",
 	),
 	"segregation_of_duties": ControlPoint(
 		key="segregation_of_duties",
@@ -199,6 +218,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 10 (Control Activities); SOX §404",
 		blocks="approving a transaction the same person prepared",
+		target_doctype="Journal Entry",
 	),
 	"revenue_recognition": ControlPoint(
 		key="revenue_recognition",
@@ -211,6 +231,7 @@ CONTROL_POINTS = {
 		),
 		citation="ASC 606-10-25 (Revenue from Contracts with Customers)",
 		blocks="recognising revenue against an obligation that is not yet satisfied",
+		target_doctype="Revenue Contract",
 	),
 	"cost_variance": ControlPoint(
 		key="cost_variance",
@@ -222,6 +243,7 @@ CONTROL_POINTS = {
 		),
 		citation="COSO 2013 Principle 16 (Monitoring Activities)",
 		blocks="accepting a cost variance beyond the tolerated band without explanation",
+		target_doctype="Standard Cost",
 	),
 	# ── v0.81.0: the governance domain ───────────────────────────────────────
 	# The five below are consulted by tools/related_party_controls.py,
@@ -242,6 +264,7 @@ CONTROL_POINTS = {
 		),
 		citation="COBIT 2019 DSS05.04 (Managed Identity and Logical Access); COSO 2013 Principle 11; SOX §404",
 		blocks="granting or widening access when the last review is older than the review period",
+		target_doctype="User",
 	),
 	"backup_verification": ControlPoint(
 		key="backup_verification",
@@ -256,6 +279,7 @@ CONTROL_POINTS = {
 		),
 		citation="COBIT 2019 DSS04.07 (Managed Continuity); COSO 2013 Principle 11; SOX §404",
 		blocks="declaring recovery readiness when no backup has been verified inside the required window",
+		target_doctype="Backup Record",
 	),
 	"change_approval": ControlPoint(
 		key="change_approval",
@@ -268,6 +292,7 @@ CONTROL_POINTS = {
 		),
 		citation="COBIT 2019 BAI06.01 (Managed IT Changes); COSO 2013 Principle 11; SOX §404",
 		blocks="recording a system change with no approver, or with the person who made it as its own approver",
+		target_doctype="Change Management Log",
 	),
 	"disclosure_completeness": ControlPoint(
 		key="disclosure_completeness",
@@ -281,6 +306,7 @@ CONTROL_POINTS = {
 		),
 		citation="SEC Regulation S-K; SOX §302 (Disclosure Controls and Procedures)",
 		blocks="marking a filing complete while required disclosure items are still outstanding",
+		target_doctype="Disclosure Checklist",
 	),
 	"related_party_transfer_pricing": ControlPoint(
 		key="related_party_transfer_pricing",
@@ -295,6 +321,7 @@ CONTROL_POINTS = {
 		),
 		citation="IRC §482 and Treas. Reg. §1.482-1 (arm's length standard); ASC 850 (Related Party Disclosures)",
 		blocks="booking a related-party transaction with no transfer pricing documentation covering it",
+		target_doctype="GL Entry",
 	),
 }
 
@@ -654,6 +681,18 @@ def seed_specs() -> list:
 				"title": spec.title,
 				"category": CATEGORY,
 				"control_point": key,
+				# Mandatory on Compliance Rule since long before these gates existed,
+				# and left unfilled by every one of them from v0.80.0 to v0.87.0. The
+				# omission was easy to make and impossible to see: a gate is never
+				# scanned, so nothing in THIS module ever needed a target doctype, and
+				# the standalone harness does not enforce `reqd`. On a real bench all
+				# thirteen raised MandatoryError — into `seed_compliance_rules`'s
+				# `failed` list, which is swallowed by design because the seeder runs
+				# inside `bench migrate` and must never abort it. So the entire IPO
+				# readiness register was simply absent from every site, quietly, which
+				# is precisely the outcome this module's docstring calls the worst one
+				# available.
+				"target_doctype": spec.target_doctype,
 				"enforcement_mode": ADVISORY,
 				"enabled": 1,
 				"purpose": spec.purpose,
@@ -687,6 +726,7 @@ def describe_all() -> list:
 				"purpose": spec.purpose,
 				"citation": spec.citation,
 				"blocks": spec.blocks,
+				"target_doctype": spec.target_doctype,
 				"mode": current,
 				"enforced": current == ENFORCED,
 				"rule": row.get("name") or None,

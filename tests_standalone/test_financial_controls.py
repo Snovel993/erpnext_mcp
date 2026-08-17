@@ -887,6 +887,60 @@ class TheRegisterReadsBack(ControlsTestCase):
 			self.assertTrue(spec.purpose, f"{key} has no purpose")
 			self.assertTrue(spec.blocks, f"{key} does not say what it refuses")
 
+	def test_every_gate_seed_fills_every_mandatory_column(self):
+		"""v0.87.1. Read from the DocType meta, not from a list written here.
+
+		THE FAILURE THIS CATCHES ALREADY HAPPENED, and it ran from v0.80.0 to
+		v0.87.0. `target_doctype` has been `reqd` on Compliance Rule since well
+		before gates existed; the thirteen gate seeds never filled it, because a
+		gate is not scanned and nothing in `enforcement` needed one. On a real bench
+		every one of them raised MandatoryError on migrate.
+
+		IT FAILED SILENTLY, WHICH IS WHY IT LASTED SEVEN RELEASES.
+		`seed_compliance_rules` never raises, by design, because it runs inside
+		`bench migrate` where an exception aborts the migration for the whole bench
+		— so the thirteen went into the report's `failed` list, which nobody reads,
+		and an operator's register simply had no IPO readiness controls in it. A
+		control an operator believes they have and does not is the failure
+		`enforcement`'s own docstring calls the worst one available.
+
+		THIS SUITE COULD NOT HAVE CAUGHT IT BEFORE. The standalone harness does not
+		enforce `reqd` — it is a test double, not an emulator — so the seeds
+		inserted here perfectly well while failing on every real site. Hence a test
+		that reads the requirement off the meta and checks the spec dicts directly,
+		rather than one that inserts and trusts the double to refuse.
+
+		Deriving the mandatory set from the meta rather than naming `target_doctype`
+		means the NEXT column somebody marks required is caught here, at the point
+		of marking it, rather than on a site.
+		"""
+		mandatory = [
+			field.fieldname
+			for field in frappe.get_meta(compliance_rules.DOCTYPE).fields
+			if getattr(field, "reqd", 0)
+		]
+		self.assertIn("target_doctype", mandatory, "did target_doctype stop being required?")
+		for spec in enforcement.seed_specs():
+			for fieldname in mandatory:
+				with self.subTest(rule_id=spec["rule_id"], field=fieldname):
+					self.assertTrue(
+						str(spec.get(fieldname) or "").strip(),
+						f"{spec['rule_id']} leaves the mandatory {fieldname} empty — it will not "
+						"insert on a real bench, and the seeder will swallow the failure.",
+					)
+
+	def test_every_gate_targets_a_doctype_that_exists(self):
+		"""A target naming nothing would make `available` false for ever, which
+		reads on the register as a control the site cannot run — indistinguishable
+		from one that is simply quiet."""
+		for key, spec in enforcement.CONTROL_POINTS.items():
+			with self.subTest(control_point=key):
+				self.assertTrue(spec.target_doctype, f"{key} names no target doctype")
+				self.assertTrue(
+					frappe.db.exists("DocType", spec.target_doctype),
+					f"{key} targets {spec.target_doctype!r}, which is not a DocType this site has.",
+				)
+
 	def test_gates_are_never_swept(self):
 		"""A gate handed to the declarative scanner would put a 'could not be
 		assembled' note in front of an operator every night."""
