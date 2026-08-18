@@ -702,14 +702,32 @@ ERPNEXT_SCHEMA = {
 		"reports_to",
 		"branch",
 		"employment_type",
+		# v0.68.1. `Employee.grade` is Frappe HR's own pay-band Link, and it is
+		# here for one reason: `tools/org.list_employee_grades` counts through it.
+		# A column the fixture did not carry would have made every grade report a
+		# headcount of zero, which reads as "nobody is on this band" rather than
+		# as "this app asked a question the schema could not answer".
+		"grade",
 	],
 	# The HR masters the Employee's Links point at. Present so the link
 	# validation below is a real check rather than a skipped one — see
 	# `_validate_links_on`, which does not validate a target doctype the fixture
 	# has never heard of.
-	"Department": ["name", "department_name", "company", "is_group"],
-	"Designation": ["name", "designation_name"],
+	# v0.68.1 adds `parent_department` and `disabled` — the two columns
+	# `update_department` writes. Frappe HR's Department is a NestedSet and the
+	# parent link is the tree; a fixture without it would have let the tool set a
+	# field `compat.has_field` says is absent, silently, and the suite would have
+	# called a no-op a pass.
+	"Department": ["name", "department_name", "company", "is_group", "parent_department", "disabled"],
+	"Designation": ["name", "designation_name", "description"],
 	"Employment Type": ["name", "employee_type_name"],
+	# v0.68.1. Frappe HR's pay band. PROMPT-NAMED on a stock site — there is no
+	# column behind the docname, which is why `tools/org._name_column` asks this
+	# site's meta before it believes the spec and why the fixture gives it none.
+	# `default_base_pay` and `default_salary_structure` are deliberately ABSENT:
+	# this app refuses to write them by name, and a fixture that carried them
+	# would let a test assert a write that the tool must never make.
+	"Employee Grade": ["name"],
 	# v0.54.0. `Employee.branch` has been a column in this double since before
 	# anything wrote it, modelled as Data with no master behind it — so the link
 	# check below was skipped and `create_employee` would have accepted a branch
@@ -1309,6 +1327,26 @@ ERPNEXT_AUTONAME = {
 	# refuses on. A double that serial-named it would have let the seeder insert
 	# "Hourly" and then refuse an Employee who named it.
 	"Employment Type": "field:employee_type_name",
+	# v0.68.1. THE OTHER THREE ORG MASTERS, and each is the same sentence as
+	# Employment Type above: the record IS its name, which is what makes
+	# `frappe.db.exists("Designation", "Picker")` both the idempotence check
+	# `create_designation` writes and the Link check `create_employee` refuses on.
+	# A double that serial-named them would have let a seeder insert "Picker" and
+	# then refuse an Employee who named it.
+	"Designation": "field:designation_name",
+	"Branch": "field:branch",
+	# Frappe HR's pay band is PROMPT-named: the docname is whatever the caller
+	# supplied and there is no column behind it. Modelled rather than left blank
+	# so `create_employee_grade` exercises the same path here as on a bench.
+	"Employee Grade": "prompt",
+	# `Department` IS DELIBERATELY ABSENT, and that is the faithful choice rather
+	# than the lazy one. Frappe HR names a Department through a controller that
+	# appends the company abbreviation — "Harvest" at Orchard Meadow becomes
+	# "Harvest - OML" — and neither `field:department_name` nor a serial name is
+	# that. The serial name this fixture falls through to has the ONE property
+	# that matters for the tools: the docname is not the string somebody typed,
+	# so `tools/org._resolve` is forced to go through the name column here
+	# exactly as it must on a bench. A `field:` entry would have hidden that.
 	# ERPNext's Company is `field:company_name`, and `create_company` depends on
 	# it: a Company that came back named "C-00001" would make every account
 	# docname built from its abbreviation point at a company nobody can find.
@@ -1772,7 +1810,9 @@ ERPNEXT_FIELD_LINKS = {
 	("Employee", "department"): ("Link", "Department"),
 	("Employee", "designation"): ("Link", "Designation"),
 	("Employee", "employment_type"): ("Link", "Employment Type"),
+	("Employee", "grade"): ("Link", "Employee Grade"),
 	("Employee", "gender"): ("Link", "Gender"),
+	("Department", "parent_department"): ("Link", "Department"),
 	("Employee", "user_id"): ("Link", "User"),
 	# ── v0.66.0: the master-data links and the two party Selects ────────────
 	# Every one of these is a link `tools/masters.py` writes. Modelling them is
@@ -2989,6 +3029,22 @@ RENAME_LINK_FIELDS = {
 		("Company", "cost_center"),
 		("Company", "round_off_cost_center"),
 	),
+	# v0.68.1. The five org masters `tools/org.py` renames. Every entry here is a
+	# Link a real bench would repoint, and the Employee columns are the point:
+	# correcting "Mill Creak" to "Mill Creek" has to carry the forty people
+	# already posted to it, or the rename is a way to orphan a crew.
+	"Designation": (
+		("Employee", "designation"),
+		("Position Wage Default", "designation"),
+	),
+	"Department": (
+		("Employee", "department"),
+		("Department", "parent_department"),
+		("Attendance", "department"),
+	),
+	"Branch": (("Employee", "branch"),),
+	"Employment Type": (("Employee", "employment_type"),),
+	"Employee Grade": (("Employee", "grade"),),
 }
 
 
@@ -4955,6 +5011,18 @@ def _build_frappe() -> types.ModuleType:
 			raise ValidationError(f"{doctype} {new} already exists")
 		row = table.pop(old)
 		row["name"] = new
+		# v0.68.1. THE NAME COLUMN MOVES WITH THE DOCNAME, which is what real
+		# Frappe's `rename_doc` does in `update_autoname_field` and what this
+		# double did not. On a `field:`-named doctype the two are the same string
+		# by construction, so a rename that moved only the key would leave
+		# `Designation.designation_name` reading the OLD title — and every read
+		# in `tools/org.py` goes through that column, so the suite would have
+		# reported a rename that half happened as one that worked. Doctypes named
+		# any other way have no such column and are untouched.
+		meta = META.get(doctype)
+		autoname = str(getattr(meta, "autoname", "") or "") if meta else ""
+		if autoname.startswith("field:"):
+			row[autoname.split(":", 1)[1]] = new
 		table[new] = row
 		STORE.pending = [(dt, new if (dt == doctype and dn == old) else dn) for dt, dn in STORE.pending]
 		for link_doctype, fieldname in RENAME_LINK_FIELDS.get(doctype, ()):

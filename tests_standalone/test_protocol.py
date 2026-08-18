@@ -1065,10 +1065,19 @@ class Catalogue(SeededTestCase):
 		quantities nobody supplied is reported unallocated with its full amount
 		rather than spread evenly across blocks, because an even spread is
 		indistinguishable in the output from a measured one.
+
+		v0.68.1 IS THE ORG STRUCTURE, fifteen tools over five masters that were
+		already Link targets on Employee and had no CRUD anywhere: Designation,
+		Department, Branch, Employment Type and Employee Grade. `create_employee`
+		has always refused a value naming no record and listed the site's own
+		choices; until now that refusal named an answer nobody could act on. The
+		five updates all carry `new_name`, because three of the five masters hold
+		nothing but their name and a correction is the only edit there is — and a
+		rename repoints every Employee already on it.
 		"""
-		self.assertEqual(len(registry.TOOLS), 724)
-		self.assertEqual(len(registry.READ_TOOLS), 362)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 362)
+		self.assertEqual(len(registry.TOOLS), 739)
+		self.assertEqual(len(registry.READ_TOOLS), 367)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 372)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

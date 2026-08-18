@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 724 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 739 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 362 read tools are **on** by default and can be switched off individually. A
+All 367 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16124,3 +16124,132 @@ the thing an agency was told is `generate_tax_form`, which stays off this surfac
 The three correction arguments are on the deposit schedule's signature only; the
 941's adjustment lines are not, so the route's argument filter keeps them off the
 handset.
+
+---
+
+## The org structure an Employee links to (v0.68.1)
+
+Five masters ship with Frappe HR, five of them are Link targets on `Employee`,
+and until this release none of them could be created from here. `create_employee`
+has always checked `designation`, `department`, `branch` and `employment_type`
+against the site's own records and refused a value naming none — correctly, and
+with the site's own choices listed in the refusal. What was missing was any way
+to act on that answer.
+
+Fifteen tools, three per master: `create_`, `list_` and `update_`.
+
+| Master | Create | List | Update |
+|---|---|---|---|
+| Designation | `create_designation` | `list_designations` | `update_designation` |
+| Department | `create_department` | `list_departments` | `update_department` |
+| Branch | `create_branch` | `list_branches` | `update_branch` |
+| Employment Type | `create_employment_type` | `list_employment_types` | `update_employment_type` |
+| Employee Grade | `create_employee_grade` | `list_employee_grades` | `update_employee_grade` |
+
+The checks in `create_employee` are **unchanged**. These tools create the records
+those checks read; the check and the register are two halves of one thing, and
+neither is loosened for the other.
+
+### The docname is not the name you typed
+
+Frappe names these five in three different ways, and a caller that assumed one
+would be wrong on a live site:
+
+* **Designation, Branch, Employment Type** — `field:` naming. The docname *is*
+  the name somebody typed.
+* **Employee Grade** — `Prompt`. The docname is exactly what you pass, with no
+  column of its own behind it.
+* **Department** — a controller that appends the company's abbreviation, so
+  `Harvest` at Orchard Meadow, LLC is named `Harvest - OML`.
+
+So every tool here resolves **both** spellings, always, on all five, and every
+result reports the docname Frappe actually chose. Nothing in this app computes a
+docname: that is a rule Frappe already owns, and a second implementation of it
+would drift the first time a site customised `Department.autoname`.
+
+```bash
+# Created as "Harvest"; named "Harvest - OML".
+{"name": "create_department",
+ "arguments": {"department_name": "Harvest", "company": "Orchard Meadow, LLC"}}
+
+# Both of these find it.
+{"name": "update_department", "arguments": {"department": "Harvest", "disabled": true}}
+{"name": "update_department", "arguments": {"department": "Harvest - OML", "disabled": true}}
+```
+
+### The reads carry a headcount
+
+Every `list_` returns `active_employees` per row and an `unused` list of the rows
+nobody holds, counted through the matching `Employee` column (`designation`,
+`department`, `branch`, `employment_type`, `grade`). That is what makes the read
+worth calling twice: a row in `unused` is safe to rename or retire, and one with
+a crew on it is not.
+
+`in_use_only: true` drops the empty rows. `list_departments` also takes
+`company`.
+
+### `new_name` renames, and carries the people with it
+
+Branch, Employment Type and Employee Grade carry **nothing but their name** on a
+stock site. An `update_` that only set fields would be a tool that can never do
+anything, and the correction is the edit an operator actually needs — a camp
+typed wrong at six in the morning is already on every person hired since.
+
+`new_name` goes through Frappe's own `rename_doc`, so every Employee already
+carrying the old value reads the new one without anybody editing them.
+
+```bash
+{"name": "update_branch",
+ "arguments": {"branch": "Mill Creak", "new_name": "Mill Creek"}}
+```
+
+**It is refused where the target name already exists.** Frappe's `rename_doc`
+takes a `merge` flag that folds one record into another; that is a decision about
+which of two designations forty people actually hold, not a spelling fix, and
+this tool must not make it by accident.
+
+Anything that stored the old string *outside* a Link field — a saved report
+filter, a saved view — still says the old one. That is reported in the result's
+`note`.
+
+### What the writes refuse
+
+**Employee Grade's pay columns, by name.** `default_base_pay`,
+`default_salary_structure` and `default_leave_policy` are refused on both the
+create and the update, in the handler as well as in the schema. One value on a
+grade sets what an entire *band* of people is paid — it reaches further than any
+single Employee field this app writes — and it has a form, an approval and a
+retention rule in the Desk that this app knows nothing about.
+
+**A duplicate name.** Every `create_` is idempotent by NAME rather than by
+docname, which is the only check that works on the two masters whose docname is
+built rather than typed. Two rows with one name split the people who hold it
+across both, and no report adds them back together.
+
+**A company the caller cannot see**, on `create_department` — the one of the five
+that belongs to a Company.
+
+All ten writes require System Manager, HR Manager, HR User or Farm Manager. The
+five reads are not role-gated: a hiring form has to be able to offer the list it
+is about to refuse a value against.
+
+### `reports_to` on the Employee
+
+Added to `create_employee` and `update_employee` in the same release, because it
+is the org-structure field that lives on the person rather than in a register.
+
+Two of this app's own surfaces already read it and neither could get it filled
+in: `escalate_farm_task` refuses with *"no reports_to on their Employee record, so
+this app does not know who their supervisor is"*, and `get_shadow_log_entry` walks
+the chain to build a review ladder. The only editor was the Desk.
+
+It accepts the supervisor's docname, employee number, name **or** login — the same
+four ways in every other Employee argument takes, so it can be filled from a badge
+scan.
+
+**A loop is refused, and the refusal prints the path.** This is the only
+self-referential Link this app writes, so it is the only one that can close a
+cycle; everybody in a reporting cycle is their own supervisor, an escalation walks
+it forever, and a review ladder has no top. A cycle that was *already* in the data
+before this tool existed does not block an unrelated correction — the walk stops
+rather than making somebody else's mess the caller's problem.

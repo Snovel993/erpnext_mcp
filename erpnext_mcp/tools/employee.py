@@ -230,6 +230,15 @@ LINK_TARGETS = {
 	"designation": "Designation",
 	"employment_type": "Employment Type",
 	"gender": "Gender",
+	# v0.68.1. THE SUPERVISOR, AND IT POINTS AT ANOTHER EMPLOYEE. Frappe HR's own
+	# `Employee.reports_to`, and the only self-referential Link in this table —
+	# which is why `_reports_to_or_refuse` below does a check none of the others
+	# needs: a Link that can name its own row can also name a cycle, and a cycle
+	# is not a data-entry curiosity here. `shadow_log.py` WALKS this chain to
+	# decide who reviews whom, and `dispatch.py` reads one hop of it to find a
+	# worker's supervisor; both survive a cycle by reporting it, and neither
+	# should have to.
+	"reports_to": EMPLOYEE,
 	"user_id": USER,
 }
 
@@ -273,6 +282,18 @@ WRITABLE = (
 	# a site without Frappe HR's Branch master reports it through
 	# `fields_not_on_this_site` rather than failing the hire.
 	"branch",
+	# v0.68.1. WHO THEY REPORT TO, and it joins this list under exactly the rule
+	# `branch` joined it under: a field two of this app's own surfaces already
+	# READ and nothing could WRITE. `dispatch.py` refuses to escalate a task with
+	# "no reports_to on their Employee record, so this app does not know who
+	# their supervisor is", and `shadow_log.py` walks the chain to build a review
+	# ladder — both of them against a column whose only editor was the Desk.
+	#
+	# IT IS AN ASSIGNMENT FACT AND NOT A PAY ONE. A supervisor is who signs the
+	# shift and who the escalation goes to; it sets no rate, no structure and no
+	# approval limit, which is why it belongs on this list and not on
+	# `SENSITIVE_FIELDS` beside `salary_structure`.
+	"reports_to",
 	"status",
 	"user_id",
 	"personal_email",
@@ -563,6 +584,15 @@ def _clean(fieldname: str, raw, label: str = "") -> str:
 	if fieldname == "user_id":
 		value = value.lower()
 
+	if fieldname == "reports_to":
+		# RESOLVED, NOT MATCHED. Every other Link here is a master whose docname
+		# is the thing somebody types; this one points at an Employee, whose
+		# docname is "HR-EMP-00042" and is the one spelling nobody knows. The
+		# same four ways in that `resolve_employee` gives every other tool —
+		# docname, employee number, name, login — apply here, or a foreman would
+		# be the only field on the form you cannot fill in from the badge.
+		return resolve_employee(value)
+
 	if fieldname in SELECT_FIELDS and select_options(EMPLOYEE, fieldname):
 		return as_choice(EMPLOYEE, fieldname, value, label)
 
@@ -772,6 +802,14 @@ def create_employee(args: dict) -> ToolResult:
 		# actually gets written. A field on the first and not the second is one
 		# the tool takes without complaint and silently drops.
 		"branch",
+		# v0.68.1, and on this list for the same reason `branch` is. A hire whose
+		# supervisor is known on the day is a hire whose first escalation has
+		# somewhere to go; collecting it a week later in the Desk is how a farm
+		# ends up with `dispatch.escalate_farm_task` refusing on half the crew.
+		# No cycle is possible from here — the record does not exist yet, so
+		# nothing can already report to it — which is why only `update_employee`
+		# walks the chain.
+		"reports_to",
 		"personal_email",
 		"cell_number",
 		# v0.62.0. On `WRITABLE` and therefore here, for the reason the comment
@@ -1100,6 +1138,8 @@ def update_employee(args: dict) -> ToolResult:
 					"Nothing was changed."
 				)
 			linkage = _require_enrolled(value, args)
+		if key == "reports_to" and value:
+			_refuse_supervisor_cycle(name, value)
 		values[key] = value
 
 	writable, absent = _supported(values)
@@ -1142,6 +1182,63 @@ def update_employee(args: dict) -> ToolResult:
 		),
 		docstatus_delta="0 → 0 (Employee amended)" if changed else "none",
 	)
+
+
+#: How far `_refuse_supervisor_cycle` climbs before it stops asking. Deep enough
+#: for any real org chart — a farm's is three or four — and finite because the
+#: chain it walks may ALREADY contain a cycle put there before this tool existed,
+#: in which case the walk must end rather than the request hang.
+SUPERVISOR_CHAIN_CAP = 50
+
+
+def _refuse_supervisor_cycle(employee: str, supervisor: str) -> None:
+	"""Refuse a `reports_to` that would make somebody their own manager.
+
+	THE ONLY SELF-REFERENTIAL LINK THIS APP WRITES, so it is the only one that
+	can close a loop. `shadow_log.walk` and `dispatch` both READ this chain, and
+	both are written to survive a cycle by reporting one — which is right for a
+	reader and is not a reason to let a writer create one. The refusal names both
+	ends and the path between them, because "A reports to B reports to A" is a
+	sentence somebody can act on and "invalid value" is not.
+
+	A chain that is ALREADY broken is not made the caller's problem: the walk
+	stops at `SUPERVISOR_CHAIN_CAP` and lets the write through, because refusing
+	an unrelated correction over a loop somebody else left in the Desk would make
+	this tool the one thing that cannot fix it.
+	"""
+	if not compat.has_field(EMPLOYEE, "reports_to"):
+		return
+	if supervisor == employee:
+		name = frappe.db.get_value(EMPLOYEE, employee, "employee_name") or employee
+		raise ToolError(
+			f"{name} cannot report to themselves. An escalation with nowhere to go looks "
+			"exactly like one that was handled. Nothing was changed."
+		)
+
+	path = [supervisor]
+	seen = {supervisor}
+	current = supervisor
+	for _ in range(SUPERVISOR_CHAIN_CAP):
+		nxt = str(frappe.db.get_value(EMPLOYEE, current, "reports_to") or "").strip()
+		if not nxt:
+			return
+		if nxt == employee:
+			path.append(employee)
+			raise ToolError(
+				f"setting reports_to to {supervisor} would close a loop: "
+				f"{' → '.join([employee, *path])}. Everybody in a cycle is their own "
+				"supervisor, so an escalation walks it forever and a review ladder has no "
+				"top. Point one of them at somebody outside the loop first. Nothing was "
+				"changed."
+			)
+		if nxt in seen:
+			# A loop that does not include this employee, and therefore one this
+			# call did not create. Reported nowhere and refused nothing — see the
+			# docstring on why an unrelated correction is not held hostage to it.
+			return
+		seen.add(nxt)
+		path.append(nxt)
+		current = nxt
 
 
 # ── 3. link_employee_to_user ────────────────────────────────────────────────

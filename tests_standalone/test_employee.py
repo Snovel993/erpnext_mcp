@@ -750,17 +750,18 @@ class WhatItRefusesToWrite(EmployeeTestCase):
 	def test_an_income_tax_slab_is_refused(self):
 		self.assertIn("payroll, tax or banking", self.create_error(income_tax_slab="Slab A"))
 
-	def test_a_real_employee_field_outside_the_nineteen_is_refused_differently(self):
+	def test_a_real_employee_field_outside_the_twenty_is_refused_differently(self):
 		"""'Real but not mine' and 'not a field at all' are different mistakes.
 
-		This was `branch` until v0.54.0, which made branch writable — the hiring
-		wizard's Assignment step asks which camp somebody reports to and had
-		nowhere to put the answer. `reports_to` takes its place as the example
-		and is the better one: it is a real column on this site's Employee, it is
-		deliberately NOT writable here because a reporting line is an org-chart
-		decision rather than an identity fact, and it is the field somebody will
-		actually try."""
-		message = self.create_error(reports_to="E-00002")
+		THIS EXAMPLE HAS NOW MOVED TWICE, and both moves are the same story: it
+		was `branch` until v0.54.0 and `reports_to` until v0.68.1, and each time
+		the field stopped being an example because this app started writing it.
+		`relieving_date` takes the place and is the better one for the long run —
+		it is a real column on this site's Employee, and the date somebody left
+		is the OUTPUT of a process (a final Attendance, a last payroll, a revoked
+		credential) rather than a value a hiring form types in, which is why it
+		is not on the list and is not likely to join it."""
+		message = self.create_error(relieving_date="2025-01-31")
 		self.assertIn("is not one this tool writes", message)
 		self.assertIn("employee_name", message)
 
@@ -771,7 +772,7 @@ class WhatItRefusesToWrite(EmployeeTestCase):
 
 	def test_none_of_the_refusals_create_anything(self):
 		before = len(STORE.rows("Employee"))
-		for payload in ({"ctc": 1}, {"reports_to": "x"}, {"nonsense": "y"}, {"employee_name": "Ana"}):
+		for payload in ({"ctc": 1}, {"relieving_date": "x"}, {"nonsense": "y"}, {"employee_name": "Ana"}):
 			self.create_error(**payload)
 		self.assertEqual(len(STORE.rows("Employee")), before)
 
@@ -1254,7 +1255,20 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 		particular camp recorded the COMPANY that employs them and nothing about
 		where they report. It sits beside `department`, `designation` and
 		`employment_type` because it is the same kind of fact and is checked the
-		same way: a Link, against this site's own Branch records."""
+		same way: a Link, against this site's own Branch records.
+
+		`reports_to` IS THE TWENTIETH, added in v0.68.1, AND IT REVERSES A
+		DECISION THIS TEST USED TO RECORD. It was the example of a real column
+		this tool deliberately would not write, on the argument that a reporting
+		line is an org-chart decision rather than an identity fact. What made
+		that wrong is that two of this app's own surfaces already READ it and
+		neither could get it filled in: `escalate_farm_task` refuses with "no
+		reports_to on their Employee record, so this app does not know who their
+		supervisor is", and `get_shadow_log_entry` walks the chain to build a
+		review ladder. A column this app depends on and cannot write is a column
+		that stays empty, and the only editor left was the Desk. It is still not
+		payroll, tax or banking — it sets no rate, no structure and no approval
+		limit — which is the boundary this list actually defends."""
 		self.assertEqual(
 			employee_tool.WRITABLE,
 			(
@@ -1270,6 +1284,7 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 				"designation",
 				"employment_type",
 				"branch",
+				"reports_to",
 				"status",
 				"user_id",
 				"personal_email",
@@ -1314,6 +1329,12 @@ class TheAllowlistIsClosed(EmployeeTestCase):
 			"designation": "Picker",
 			"employment_type": "Seasonal Worker",
 			"branch": "Mill Creek Camp",
+			# The seeded supervisor's DOCNAME rather than their name, because
+			# this test compares the value it sent with the value that landed
+			# and `_clean` deliberately resolves the other three spellings —
+			# employee number, name, login — down to this one. `ReportsTo` in
+			# `test_org.py` is where the resolution itself is asserted.
+			"reports_to": "HR-EMP-00001",
 			"status": "Active",
 			"personal_email": "ana@example.test",
 			"cell_number": "5415550143",

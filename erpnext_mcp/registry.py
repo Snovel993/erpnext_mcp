@@ -104,6 +104,7 @@ from .tools import (
 	newhire,
 	notes,
 	opening,
+	org,
 	packets,
 	parties,
 	payroll,
@@ -10580,6 +10581,14 @@ TOOLS = {
 				"the refusal lists what there is. `company` is the legal entity that pays "
 				"them and this is the place they report to, which is why both exist.",
 			),
+			"reports_to": _field(
+				_STRING,
+				"Their supervisor, as an EMPLOYEE — accepts that person's docname, employee "
+				"number, name or login, so it can be filled in from a badge. This is the "
+				"column `escalate_farm_task` reads to find who a job goes up to, and the "
+				"chain `get_shadow_log_entry` walks to build a review ladder; a hire without "
+				"it is a hire whose first escalation refuses.",
+			),
 			"status": _field(_STRING, "Active (default), Inactive, Suspended or Left."),
 			"user_id": _field(
 				_STRING,
@@ -10674,6 +10683,13 @@ TOOLS = {
 				"The operating unit or camp they report to. Must be a Branch on this site. "
 				"Set it when somebody moves camps, which is a different fact from moving company.",
 			),
+			"reports_to": _field(
+				_STRING,
+				"Their supervisor, as an EMPLOYEE — docname, employee number, name or login all "
+				"resolve. REFUSED IF IT WOULD CLOSE A LOOP: everybody in a reporting cycle is "
+				"their own supervisor, so an escalation walks it forever and a review ladder "
+				"has no top. The refusal prints the path it found.",
+			),
 			"status": _field(
 				_STRING,
 				"Active, Inactive, Suspended or Left. The mobile methods answer for Active employees.",
@@ -10709,6 +10725,378 @@ TOOLS = {
 		title="Update an employee",
 		available=_needs_doctype("Employee"),
 		requires="the Employee DocType, which Frappe HR ships",
+	),
+	# ── the five organisational masters (v0.68.1) ───────────────────────────
+	#
+	# THEY ARE ONE BLOCK BECAUSE THEY ARE ONE JOB. Every one of the five is a
+	# Link target on Employee, every one of them was a register `create_employee`
+	# refused a value against and nothing here could add to, and all fifteen
+	# tools are three lines each over `tools/org.py`'s shared bodies — so a
+	# description that drifts from its four siblings is drift somebody can see.
+	"create_designation": _tool(
+		org.create_designation,
+		"MUTATING (default OFF). Add one job title to the register `create_employee` "
+		"and `update_employee` refuse an unknown value against — this is how a site "
+		"gets a designation its own people actually hold.\n\n"
+		"A Designation is what a Position Wage Default is keyed on, so the title "
+		"'Picker' existing is what lets a Picker hired in June start on the Picker "
+		"rate. It is also how this app finds a CHECKER: "
+		"`list_pending_threshold_acknowledgments` counts every Active Employee whose "
+		"designation is 'Checker'. See `list_mobile_users`, whose role catalogue maps "
+		"titles onto the mobile roles that carry them.\n\n"
+		"IDEMPOTENT BY NAME: a second call naming a title that already exists is "
+		"REFUSED rather than creating a twin, because two rows with one name split "
+		"the people who hold it across both and no report adds them back together.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"designation_name": _field(
+				_STRING,
+				"The job title, as somebody would type it. For example 'Picker', "
+				"'Tractor Driver', 'Checker', 'Crew Leader'.",
+			),
+			"description": _field(_STRING, "What the job actually is, in a sentence. Optional."),
+		},
+		required=("designation_name",),
+		mutating=True,
+		title="Create a job title",
+		available=_needs_doctype("Designation"),
+		requires="the Designation DocType, which Frappe HR ships",
+	),
+	"list_designations": _tool(
+		org.list_designations,
+		"Every job title on this site, each with the number of ACTIVE Employees "
+		"holding it, and an `unused` list of the ones nobody does. Read-only.\n\n"
+		"CALL THIS BEFORE HIRING. `create_employee` refuses a designation naming no "
+		"record and lists a dozen of them in the refusal; this is the whole register, "
+		"and it is what a form should offer instead of a free-text box.\n\n"
+		"THE HEADCOUNT IS THE POINT OF THE READ. A row in `unused` is safe to rename "
+		"or retire; one with people on it is not, and the count is what tells them "
+		"apart.",
+		{
+			"limit": _LIMIT,
+			"in_use_only": _field(
+				_BOOLEAN, "Only titles at least one Active Employee holds. Default false."
+			),
+		},
+		title="List job titles",
+		available=_needs_doctype("Designation"),
+		requires="the Designation DocType, which Frappe HR ships",
+	),
+	"update_designation": _tool(
+		org.update_designation,
+		"MUTATING (default OFF). Correct one job title.\n\n"
+		"Pass only what changes. A value already equal to what you asked for lands in "
+		"`unchanged` rather than being reported as a write that did not happen.\n\n"
+		"RENAMING REPOINTS EVERY LINK. `new_name` goes through Frappe's own "
+		"`rename_doc`, so every Employee already carrying the old title reads the new "
+		"one without anybody editing them. It is REFUSED where the target name already "
+		"exists: folding two registers into one is a decision about which of them the "
+		"people on both actually hold, not a spelling fix.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"designation": _field(
+				_STRING, "The title to change. Its docname or the name you typed — both resolve."
+			),
+			"new_name": _field(
+				_STRING,
+				"Correct the spelling. Moves the docname AND every Link that pointed at it.",
+			),
+			"description": _field(_STRING, "Rewrite what the job is. Pass an empty string to clear it."),
+		},
+		required=("designation",),
+		mutating=True,
+		idempotent=True,
+		title="Update a job title",
+		available=_needs_doctype("Designation"),
+		requires="the Designation DocType, which Frappe HR ships",
+	),
+	"create_department": _tool(
+		org.create_department,
+		"MUTATING (default OFF). Add one department to a company's org chart.\n\n"
+		"THE ONE OF THE FIVE THAT BELONGS TO A COMPANY, and the one whose docname is "
+		"not what you typed: Frappe HR appends the company abbreviation, so 'Harvest' "
+		"created at Orchard Meadow is named 'Harvest - OML'. Every tool here takes "
+		"either spelling, and the result reports the docname it actually got — this "
+		"app does not compute one.\n\n"
+		"IDEMPOTENT BY NAME WITHIN A COMPANY: 'Harvest' at two entities is two "
+		"records and is an ordinary shape; 'Harvest' twice at one entity is refused.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager, and refuses a "
+		"company that account cannot see.",
+		{
+			"department_name": _field(
+				_STRING,
+				"The department, as somebody would type it. For example 'Harvest', "
+				"'Packing Shed', 'Maintenance'. WITHOUT the company abbreviation.",
+			),
+			"company": _COMPANY,
+			"parent_department": _field(
+				_STRING, "Sit it under another Department. Frappe HR's Department is a tree."
+			),
+			"is_group": _field(
+				_BOOLEAN,
+				"True for a branch of the tree that holds other departments rather than people.",
+			),
+		},
+		required=("department_name",),
+		mutating=True,
+		title="Create a department",
+		available=_needs_doctype("Department"),
+		requires="the Department DocType, which Frappe HR ships",
+	),
+	"list_departments": _tool(
+		org.list_departments,
+		"Every department, optionally for one company, each with the number of ACTIVE "
+		"Employees in it and an `unused` list of the ones nobody is in. Read-only.\n\n"
+		"BOTH SPELLINGS ARE REPORTED on every row — the docname Frappe built and the "
+		"`department_name` somebody typed. They differ on any site with a company "
+		"abbreviation, and a caller that displays one and passes the other is the bug "
+		"this pair prevents.",
+		{
+			"company": _COMPANY,
+			"limit": _LIMIT,
+			"in_use_only": _field(
+				_BOOLEAN, "Only departments at least one Active Employee is in. Default false."
+			),
+		},
+		title="List departments",
+		available=_needs_doctype("Department"),
+		requires="the Department DocType, which Frappe HR ships",
+	),
+	"update_department": _tool(
+		org.update_department,
+		"MUTATING (default OFF). Move a department in the tree, retire it, or correct "
+		"its spelling.\n\n"
+		"Pass only what changes. A value already equal to what you asked for lands in "
+		"`unchanged` rather than being reported as a write that did not happen.\n\n"
+		"`disabled` RETIRES WITHOUT DELETING, which is the right shape: the Employees "
+		"already pointing at it keep doing so, and their history stays readable.\n\n"
+		"RENAMING REPOINTS EVERY LINK — see update_designation. It is refused where "
+		"the target already exists.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"department": _field(
+				_STRING,
+				"The department to change. Its docname ('Harvest - OML') or the name you "
+				"typed ('Harvest') — both resolve.",
+			),
+			"new_name": _field(
+				_STRING,
+				"Correct the spelling. Moves the docname AND every Link that pointed at it.",
+			),
+			"company": _field(_STRING, "Move it to another entity. Must be one you can see."),
+			"parent_department": _field(
+				_STRING, "Move it under a different Department. It cannot be its own parent."
+			),
+			"is_group": _field(
+				_BOOLEAN, "Make it a holder of other departments, or stop it being one."
+			),
+			"disabled": _field(
+				_BOOLEAN,
+				"Retire it without deleting it. Existing Employees keep pointing at it.",
+			),
+		},
+		required=("department",),
+		mutating=True,
+		idempotent=True,
+		title="Update a department",
+		available=_needs_doctype("Department"),
+		requires="the Department DocType, which Frappe HR ships",
+	),
+	"create_branch": _tool(
+		org.create_branch,
+		"MUTATING (default OFF). Add one operating unit or CAMP.\n\n"
+		"A Branch is the place somebody reports to, which on a farm is a different "
+		"fact from which company employs them — a crew moved from Home Ranch to Mill "
+		"Creek for cherry harvest changed branch and not company. `create_employee` "
+		"and `update_employee` both write it, and both refuse a value naming no "
+		"record; this is how the record gets there.\n\n"
+		"IDEMPOTENT BY NAME: a second call naming a branch that already exists is "
+		"refused rather than creating a twin.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"branch": _field(
+				_STRING,
+				"The operating unit or camp, as somebody would type it. For example "
+				"'Mill Creek', 'Home Ranch', 'North Camp'.",
+			),
+		},
+		required=("branch",),
+		mutating=True,
+		title="Create a branch",
+		available=_needs_doctype("Branch"),
+		requires="the Branch DocType, which Frappe HR ships",
+	),
+	"list_branches": _tool(
+		org.list_branches,
+		"Every branch on this site, each with the number of ACTIVE Employees posted "
+		"to it, and an `unused` list of the ones nobody is at. Read-only.\n\n"
+		"THE HEADCOUNT IS THE POINT OF THE READ. A row in `unused` is safe to rename "
+		"or retire; one with a crew at it is not.",
+		{
+			"limit": _LIMIT,
+			"in_use_only": _field(
+				_BOOLEAN, "Only branches at least one Active Employee is posted to. Default false."
+			),
+		},
+		title="List branches",
+		available=_needs_doctype("Branch"),
+		requires="the Branch DocType, which Frappe HR ships",
+	),
+	"update_branch": _tool(
+		org.update_branch,
+		"MUTATING (default OFF). Correct a branch's spelling.\n\n"
+		"A Branch carries NOTHING BUT ITS NAME on a stock Frappe HR site, so "
+		"`new_name` is the only thing there is to change here — and it is a real "
+		"need: a camp typed wrong at six in the morning is already on every person "
+		"hired since.\n\n"
+		"RENAMING REPOINTS EVERY LINK. `new_name` goes through Frappe's own "
+		"`rename_doc`, so every Employee already posted to the old spelling reads the "
+		"new one without anybody editing them. It is REFUSED where the target name "
+		"already exists: folding two camps into one is a decision about where those "
+		"people actually work, not a spelling fix.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"branch": _field(_STRING, "The branch to change."),
+			"new_name": _field(
+				_STRING,
+				"The corrected spelling. Moves the docname AND every Link that pointed at it.",
+			),
+		},
+		required=("branch",),
+		mutating=True,
+		idempotent=True,
+		title="Update a branch",
+		available=_needs_doctype("Branch"),
+		requires="the Branch DocType, which Frappe HR ships",
+	),
+	"create_employment_type": _tool(
+		org.create_employment_type,
+		"MUTATING (default OFF). Add one employment category.\n\n"
+		"INSTALLING THIS APP SEEDS 'Hourly' AND 'Seasonal Worker', because a stock "
+		"Frappe HR ships neither and `create_employee` refuses an employment_type "
+		"naming no record — which was the majority of a farm's workforce. This is how "
+		"a site adds the rest: H-2A, Salaried, Piece Rate, whatever it actually "
+		"employs people on.\n\n"
+		"IDEMPOTENT BY NAME, and the seeder is create-only in the same direction: "
+		"neither overwrites a category an operator has already named.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"employment_type_name": _field(
+				_STRING,
+				"The category, as somebody would type it. For example 'Hourly', "
+				"'Seasonal Worker', 'H-2A', 'Salaried'.",
+			),
+		},
+		required=("employment_type_name",),
+		mutating=True,
+		title="Create an employment category",
+		available=_needs_doctype("Employment Type"),
+		requires="the Employment Type DocType, which Frappe HR ships",
+	),
+	"list_employment_types": _tool(
+		org.list_employment_types,
+		"Every employment category on this site, each with the number of ACTIVE "
+		"Employees on it, and an `unused` list of the ones nobody is on. Read-only.\n\n"
+		"CALL THIS BEFORE HIRING: `create_employee` refuses an employment_type naming "
+		"no record, and this is the register it refuses against.",
+		{
+			"limit": _LIMIT,
+			"in_use_only": _field(
+				_BOOLEAN, "Only categories at least one Active Employee is on. Default false."
+			),
+		},
+		title="List employment categories",
+		available=_needs_doctype("Employment Type"),
+		requires="the Employment Type DocType, which Frappe HR ships",
+	),
+	"update_employment_type": _tool(
+		org.update_employment_type,
+		"MUTATING (default OFF). Correct an employment category's spelling.\n\n"
+		"An Employment Type carries NOTHING BUT ITS NAME on a stock Frappe HR site, "
+		"so `new_name` is the only thing there is to change here.\n\n"
+		"RENAMING REPOINTS EVERY LINK — every Employee already on the old spelling "
+		"reads the new one without anybody editing them. It is REFUSED where the "
+		"target name already exists: merging two categories changes what a whole "
+		"group of people is classified as, and that is not a spelling fix.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"employment_type": _field(_STRING, "The category to change."),
+			"new_name": _field(
+				_STRING,
+				"The corrected spelling. Moves the docname AND every Link that pointed at it.",
+			),
+		},
+		required=("employment_type",),
+		mutating=True,
+		idempotent=True,
+		title="Update an employment category",
+		available=_needs_doctype("Employment Type"),
+		requires="the Employment Type DocType, which Frappe HR ships",
+	),
+	"create_employee_grade": _tool(
+		org.create_employee_grade,
+		"MUTATING (default OFF). Add one pay band's LABEL.\n\n"
+		"THE LABEL ONLY. `default_base_pay`, `default_salary_structure` and "
+		"`default_leave_policy` are REFUSED BY NAME here and on the update. One value "
+		"on a grade sets what an entire BAND of people is paid — it reaches further "
+		"than any single Employee field this app writes — and it belongs in the Desk, "
+		"where the HR module's own approvals and retention rules run.\n\n"
+		"PROMPT-NAMED: the docname is exactly the name you pass, unlike a Department.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"employee_grade_name": _field(
+				_STRING,
+				"The pay band, as somebody would type it. For example 'Grade 1', 'Lead', "
+				"'Apprentice'. This becomes the docname exactly.",
+			),
+		},
+		required=("employee_grade_name",),
+		mutating=True,
+		title="Create a pay band",
+		available=_needs_doctype("Employee Grade"),
+		requires="the Employee Grade DocType, which Frappe HR ships",
+	),
+	"list_employee_grades": _tool(
+		org.list_employee_grades,
+		"Every pay band on this site, each with the number of ACTIVE Employees on it, "
+		"and an `unused` list of the ones nobody is on. Read-only.\n\n"
+		"THE LABEL AND THE HEADCOUNT, NOT THE PAY. What each band actually pays lives "
+		"on the grade in the Desk and on Farm Salary Structure; this app does not read "
+		"it back here any more than it writes it.",
+		{
+			"limit": _LIMIT,
+			"in_use_only": _field(
+				_BOOLEAN, "Only bands at least one Active Employee is on. Default false."
+			),
+		},
+		title="List pay bands",
+		available=_needs_doctype("Employee Grade"),
+		requires="the Employee Grade DocType, which Frappe HR ships",
+	),
+	"update_employee_grade": _tool(
+		org.update_employee_grade,
+		"MUTATING (default OFF). Correct a pay band's spelling.\n\n"
+		"ITS PAY COLUMNS ARE REFUSED BY NAME — see create_employee_grade. A grade "
+		"carries nothing else this app will write, so `new_name` is the only thing "
+		"there is to change here.\n\n"
+		"RENAMING REPOINTS EVERY LINK — every Employee already on the old label reads "
+		"the new one without anybody editing them. It is REFUSED where the target "
+		"name already exists, because merging two bands is a decision about what the "
+		"people on both are paid.\n\n"
+		"Requires System Manager, HR Manager, HR User or Farm Manager.",
+		{
+			"employee_grade": _field(_STRING, "The pay band to change."),
+			"new_name": _field(
+				_STRING,
+				"The corrected spelling. Moves the docname AND every Link that pointed at it.",
+			),
+		},
+		required=("employee_grade",),
+		mutating=True,
+		idempotent=True,
+		title="Update a pay band",
+		available=_needs_doctype("Employee Grade"),
+		requires="the Employee Grade DocType, which Frappe HR ships",
 	),
 	"link_employee_to_user": _tool(
 		employee.link_employee_to_user,

@@ -829,9 +829,14 @@ class ToolRegistration(unittest.TestCase):
 		# activity-based costing: the activity register, the pools, the
 		# allocation engine and the reads over a stored run. See `test_abc.py`
 		# for what the engine refuses to estimate.
-		self.assertEqual(len(self.registry.TOOLS), 724)
-		self.assertEqual(len(self.registry.READ_TOOLS), 362)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 362)
+		# v0.68.1 adds fifteen — five reads and ten writes — over the five
+		# organisational masters an Employee links to: Designation, Department,
+		# Branch, Employment Type and Employee Grade. Every one of them was a
+		# register `create_employee` refused a value against and nothing could
+		# add to, so the refusal named an answer the caller could not act on.
+		self.assertEqual(len(self.registry.TOOLS), 739)
+		self.assertEqual(len(self.registry.READ_TOOLS), 367)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 372)
 
 
 if __name__ == "__main__":

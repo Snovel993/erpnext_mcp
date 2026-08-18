@@ -622,6 +622,25 @@
   "allow_generate_api_token",
   "allow_revoke_api_token",
   "allow_generate_mobile_login_qr",
+  "org_master_section",
+  "allow_list_designations",
+  "allow_list_departments",
+  "allow_list_branches",
+  "org_master_col",
+  "allow_list_employment_types",
+  "allow_list_employee_grades",
+  "org_master_write_section",
+  "allow_create_designation",
+  "allow_update_designation",
+  "allow_create_department",
+  "allow_update_department",
+  "allow_create_branch",
+  "org_master_write_col",
+  "allow_update_branch",
+  "allow_create_employment_type",
+  "allow_update_employment_type",
+  "allow_create_employee_grade",
+  "allow_update_employee_grade",
   "fieldwork_write_section",
   "allow_claim_task_via_mobile",
   "allow_start_task_via_mobile",
@@ -4974,6 +4993,129 @@
    "fieldname": "allow_generate_mobile_login_qr",
    "fieldtype": "Check",
    "label": "Generate Mobile Login QR"
+  },
+  {
+   "fieldname": "org_master_section",
+   "fieldtype": "Section Break",
+   "label": "Org Structure — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Designation on this site with the number of ACTIVE Employees holding each, and the ones nobody holds. The register create_employee refuses an unknown designation against, which is what a hiring form should offer instead of a free-text box.",
+   "fieldname": "allow_list_designations",
+   "fieldtype": "Check",
+   "label": "List Job Titles"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Department, optionally for one company, with its headcount. Reports BOTH spellings on every row — the docname Frappe built ('Harvest - OML') and the name somebody typed ('Harvest') — because they differ on any site with a company abbreviation.",
+   "fieldname": "allow_list_departments",
+   "fieldtype": "Check",
+   "label": "List Departments"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Branch — the operating unit or camp somebody reports to, which on a farm is a different fact from which company employs them — with the number of Active Employees posted to each.",
+   "fieldname": "allow_list_branches",
+   "fieldtype": "Check",
+   "label": "List Branches"
+  },
+  {
+   "fieldname": "org_master_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Employment Type with the number of Active Employees on each. Installing this app seeds Hourly and Seasonal Worker, because a stock Frappe HR ships neither and create_employee refuses a value naming no record.",
+   "fieldname": "allow_list_employment_types",
+   "fieldtype": "Check",
+   "label": "List Employment Categories"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every Employee Grade with the number of Active Employees on each. The LABEL and the headcount, not the pay: what a band actually pays is not read back here any more than it is written.",
+   "fieldname": "allow_list_employee_grades",
+   "fieldtype": "Check",
+   "label": "List Pay Bands"
+  },
+  {
+   "fieldname": "org_master_write_section",
+   "fieldtype": "Section Break",
+   "label": "Org Structure — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Adds one Designation — the register create_employee and update_employee refuse an unknown job title against. A Designation is also what a Position Wage Default is keyed on, so adding one creates the row a wage rate can hang off. Idempotent by name: a second call naming a title that exists is refused rather than creating a twin.",
+   "fieldname": "allow_create_designation",
+   "fieldtype": "Check",
+   "label": "Create Job Title"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Rewrites a Designation's description, or corrects its spelling. new_name goes through Frappe's own rename_doc, so every Employee already carrying the old title reads the new one without anybody editing them; it is refused where the target name already exists, because folding two registers into one is a decision about people rather than a typo.",
+   "fieldname": "allow_update_designation",
+   "fieldtype": "Check",
+   "label": "Update Job Title"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Adds one Department to a company's org chart. The one of the five org masters that belongs to a Company, and the one whose docname is not what you typed — Frappe HR appends the company abbreviation. Refuses a company the calling account cannot see.",
+   "fieldname": "allow_create_department",
+   "fieldtype": "Check",
+   "label": "Create Department"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Moves a Department in the tree, retires it with disabled (which keeps the Employees already in it pointing at it), or corrects its spelling. Takes either spelling of the name.",
+   "fieldname": "allow_update_department",
+   "fieldtype": "Check",
+   "label": "Update Department"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Adds one Branch — the operating unit or camp an Employee is posted to. Idempotent by name.",
+   "fieldname": "allow_create_branch",
+   "fieldtype": "Check",
+   "label": "Create Branch"
+  },
+  {
+   "fieldname": "org_master_write_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Corrects a Branch's spelling. A Branch carries nothing but its name on a stock Frappe HR site, so the rename is the whole tool — and it is a real need: a camp typed wrong at six in the morning is already on every person hired since. Refused where the target name exists.",
+   "fieldname": "allow_update_branch",
+   "fieldtype": "Check",
+   "label": "Update Branch"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Adds one Employment Type — H-2A, Salaried, Piece Rate, whatever this operation actually employs people on. Installing the app seeds Hourly and Seasonal Worker; this is how a site adds the rest. Idempotent by name, and the seeder is create-only in the same direction: neither overwrites what an operator has named.",
+   "fieldname": "allow_create_employment_type",
+   "fieldtype": "Check",
+   "label": "Create Employment Category"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Corrects an Employment Type's spelling and carries every Employee already on it. Refused where the target name exists: merging two categories changes what a whole group of people is classified as.",
+   "fieldname": "allow_update_employment_type",
+   "fieldtype": "Check",
+   "label": "Update Employment Category"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Adds one Employee Grade's LABEL. default_base_pay, default_salary_structure and default_leave_policy are REFUSED BY NAME — one value on a grade sets what an entire band of people is paid, which reaches further than any single Employee field this app writes, and it belongs in the Desk where the HR module's approvals run.",
+   "fieldname": "allow_create_employee_grade",
+   "fieldtype": "Check",
+   "label": "Create Pay Band"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Corrects an Employee Grade's spelling and carries every Employee already on it. Its pay columns are refused by name here too.",
+   "fieldname": "allow_update_employee_grade",
+   "fieldtype": "Check",
+   "label": "Update Pay Band"
   },
   {
    "fieldname": "fieldwork_write_section",
