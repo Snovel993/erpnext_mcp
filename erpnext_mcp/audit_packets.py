@@ -6,8 +6,9 @@ the thing somebody carries into a room and defends, and the difference shows up 
 three places:
 
   * **It pulls from the operational records, not from a copy.** The spray records
-    in an FSMA packet are the Spray Logs. The worker facility records are the
-    Housing Units. There is no shadow store this reads from, which is the whole
+    in an FSMA packet are the Spray Applications this app writes itself — see
+    `_spray_records`, and note that it reads farm_precision_ag's Spray Log too
+    rather than instead. The worker facility records are the Housing Units. There is no shadow store this reads from, which is the whole
     Sprint 7 stance and the reason `compliance_fields.py` puts the applicator's
     name on the spray rather than in a compliance table beside it. A packet
     assembled from a shadow copy is a packet that can disagree with the records
@@ -18,10 +19,11 @@ three places:
     written.
 
   * **It says what it could not find.** A section with no records says so, in the
-    packet, with the reason. An EPA packet whose spray-records section is silently
-    absent reads as an operation with nothing to declare rather than one whose
-    farm_precision_ag is not installed, and an auditor will find the difference
-    faster than the operator will.
+    packet, with the reason — and the reason distinguishes an EMPTY PERIOD from a
+    MISSING REGISTER, because those are different facts about a farm. A
+    spray-records section that is silently absent reads as an operation with
+    nothing to declare, and an auditor will find the difference faster than the
+    operator will.
 
 THE KAIROTIC GATE, AND WHY IT IS A REFUSAL RATHER THAN A WARNING.
 
@@ -49,6 +51,7 @@ so a new type is a declaration rather than code.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import frappe
@@ -81,6 +84,30 @@ SECTION_ORDER = (
 #: in the packet, never silent — the same rule the compliance-packet framework
 #: applies for the same reason.
 SECTION_CAP = 750
+
+#: The two pesticide-application registers this packet can read, and the order it
+#: reads them in. `Spray Application` is erpnext_mcp's own and ships with the app;
+#: `Spray Log` is farm_precision_ag's and predates it. See `_spray_records`.
+SPRAY_APPLICATION = "Spray Application"
+SPRAY_APPLICATION_BLOCK = "Spray Application Block"
+SPRAY_LOG = "Spray Log"
+
+#: What a packet writes into a column the record left blank. It is a marker and
+#: never an empty string, because an empty cell in a printed table reads as an
+#: oversight in the packet rather than a gap in the record.
+UNRECORDED = "(unrecorded)"
+
+_SPRAY_COLUMNS = (
+	"spray",
+	"date",
+	"block",
+	"product",
+	"applicator_name",
+	"epa_reg_number",
+	"rei_hours",
+	"phi_days",
+	"source",
+)
 
 
 @dataclass(frozen=True)
@@ -884,26 +911,165 @@ def _heat_exposure(spec: AuditPacketType, company: str, start: str, end: str) ->
 
 
 def _spray_records(spec: AuditPacketType, company: str, start: str, end: str) -> dict:
-	"""Pesticide applications in the period, from the Spray Log itself."""
-	if not compat.doctype_exists("Spray Log"):
+	"""Pesticide applications in the period, from the application record itself.
+
+	TWO REGISTERS, AND WHICH ONE IS THIS APP'S. `Spray Application` is
+	erpnext_mcp's own doctype (v0.79.0, `tools/spray.py`) and ships with the app,
+	so on any migrated site it EXISTS — which is why this section stopped being
+	one that "will be empty here" for five of the eight packet types. `Spray Log`
+	is farm_precision_ag's, predates it, and is read second so that a site which
+	sprayed under the old app still hands over its history. Both are read; each
+	row says which register it came from, because an auditor comparing the packet
+	to the records has to know which screen to open.
+
+	APPLIED, NOT PLANNED. A Planned application is an intention and a Cancelled
+	one is a pass that did not happen; neither is evidence of anything going on
+	the ground, and a packet that listed them would be claiming applications it
+	cannot show. They are counted and named in `excluded_by_status` rather than
+	dropped in silence — an auditor who finds a spray in the register that is
+	missing from the packet asks a much harder question than one who was told.
+
+	THE PRODUCTS COME OFF THE APPLICATION, NOT OFF THE TANK MIX. `products_applied`
+	is the snapshot written at the moment of the pass, with the label numbers as
+	they read on the day. Joining live to the mix or the Item would answer a
+	question about today, and the question is about April.
+	"""
+	has_application = compat.doctype_exists(SPRAY_APPLICATION)
+	has_log = compat.doctype_exists(SPRAY_LOG)
+	if not has_application and not has_log:
 		return _section(
 			"Pesticide applications",
 			"Every application made in the period, with the applicator, the product and the intervals.",
 			[],
-			("spray", "date", "applicator_name", "epa_reg_number", "rei_hours", "phi_hours"),
+			_SPRAY_COLUMNS,
 			absent=(
-				"farm_precision_ag is not installed on this site, so there is no Spray Log to "
-				"read. If applications were made in this period they are recorded somewhere "
-				"else, and this packet does not contain them."
+				"This site has neither a Spray Application register nor farm_precision_ag's "
+				"Spray Log, so there is nothing to read. Spray Application ships with "
+				"erpnext_mcp — run `bench migrate`. If applications were made in this period "
+				"they are recorded somewhere else, and this packet does not contain them."
 			),
 		)
-	date_field = compat.first_field("Spray Log", "application_date", "spray_date", "date", "posting_date")
+
+	rows, excluded = _spray_application_rows(company, start, end)
+	rows.extend(_spray_log_rows(company, start, end))
+	rows.sort(key=lambda row: (row["date"] or "", row["spray"]))
+
+	section = _section(
+		"Pesticide applications",
+		(
+			"Every application in the period as the register records it. The applicator, the "
+			"registration number and the intervals are columns ON that record rather than a "
+			"compliance copy of it — which is why they cannot have drifted from what was "
+			"actually done."
+		),
+		rows,
+		_SPRAY_COLUMNS,
+	)
+	if excluded:
+		section["excluded_by_status"] = excluded
+		section["status_note"] = (
+			f"{len(excluded)} application(s) in this window are Planned or Cancelled and are "
+			"NOT in the rows above: nothing went on the ground for them. They are named here "
+			"so that a register compared against this packet reconciles."
+		)
+	incomplete = [
+		row["spray"]
+		for row in rows
+		if row["applicator_name"] == UNRECORDED or row["epa_reg_number"] == UNRECORDED
+	]
+	if incomplete:
+		section["incomplete_records"] = incomplete
+		section["problem_note"] = (
+			f"{len(incomplete)} application(s) have no applicator or no registration number on "
+			"the record. They cannot be completed retroactively without inventing facts, and "
+			"they are shown as they are."
+		)
+	unlicensed = [row["spray"] for row in rows if row["applicator_license"] == UNRECORDED]
+	if unlicensed:
+		section["without_applicator_licence"] = unlicensed
+	return section
+
+
+def _spray_application_rows(company: str, start: str, end: str) -> tuple:
+	"""`(rows, excluded)` off this app's own Spray Application register."""
+	if not compat.doctype_exists(SPRAY_APPLICATION):
+		return [], []
+	filters = _company_filter(company)
+	filters["completed_at"] = ("between", [f"{start} 00:00:00", f"{end} 23:59:59"])
+	found = _rows(
+		SPRAY_APPLICATION,
+		filters,
+		(
+			"name",
+			"status",
+			"completed_at",
+			"started_at",
+			"applicator",
+			"applicator_license",
+			"total_acres",
+			"products_applied",
+			"rei_hours",
+			"phi_days",
+			"phi_clears_on",
+			"wind_speed_mph",
+			"wind_direction",
+			"temperature_f",
+			"tank_mix",
+			"sprayer",
+		),
+		order_by="completed_at asc",
+	)
+	applied, excluded = [], []
+	for row in found:
+		status = str(row.get("status") or "Applied")
+		if status == "Applied":
+			applied.append(row)
+		else:
+			excluded.append(f"{row['name']} ({status})")
+	blocks = _spray_blocks([row["name"] for row in applied])
+	names = _user_full_names(row.get("applicator") for row in applied)
+
+	rows = []
+	for row in applied:
+		products = _spray_products(row.get("products_applied"))
+		applicator = str(row.get("applicator") or "")
+		rows.append(
+			{
+				"spray": row["name"],
+				"date": str(row.get("completed_at") or row.get("started_at") or "")[:10] or None,
+				"block": _joined(blocks.get(row["name"], ())),
+				"product": _joined(
+					line.get("item_name") or line.get("item") for line in products
+				),
+				"applicator_name": names.get(applicator) or applicator or UNRECORDED,
+				"applicator_license": row.get("applicator_license") or UNRECORDED,
+				"epa_reg_number": _joined(line.get("epa_reg_number") for line in products),
+				"rei_hours": row.get("rei_hours"),
+				"phi_days": row.get("phi_days"),
+				"acres": row.get("total_acres"),
+				"wind_mph": row.get("wind_speed_mph"),
+				"wind_direction": row.get("wind_direction"),
+				"temp_f": row.get("temperature_f"),
+				"phi_clears_on": str(row.get("phi_clears_on") or "")[:10] or None,
+				"tank_mix": row.get("tank_mix"),
+				"sprayer": row.get("sprayer"),
+				"source": SPRAY_APPLICATION,
+			}
+		)
+	return rows, excluded
+
+
+def _spray_log_rows(company: str, start: str, end: str) -> list:
+	"""farm_precision_ag's register, for a site that sprayed before this app."""
+	if not compat.doctype_exists(SPRAY_LOG):
+		return []
+	date_field = compat.first_field(SPRAY_LOG, "application_date", "spray_date", "date", "posting_date")
 	filters = _company_filter(company)
 	if date_field:
 		filters[date_field] = ("between", (start, end))
 	rows = []
 	for row in _rows(
-		"Spray Log",
+		SPRAY_LOG,
 		filters,
 		(
 			"name",
@@ -912,6 +1078,7 @@ def _spray_records(spec: AuditPacketType, company: str, start: str, end: str) ->
 			"block",
 			"product",
 			"applicator_name",
+			"applicator_license",
 			"epa_reg_number",
 			"rei_hours",
 			"phi_hours",
@@ -926,42 +1093,96 @@ def _spray_records(spec: AuditPacketType, company: str, start: str, end: str) ->
 			{
 				"spray": row["name"],
 				"date": str(row.get(date_field) or row.get("creation") or "")[:10] or None,
-				"block": row.get("field") or row.get("block"),
-				"product": row.get("product"),
-				"applicator_name": row.get("applicator_name") or "(unrecorded)",
-				"epa_reg_number": row.get("epa_reg_number") or "(unrecorded)",
+				"block": row.get("field") or row.get("block") or UNRECORDED,
+				"product": row.get("product") or UNRECORDED,
+				"applicator_name": row.get("applicator_name") or UNRECORDED,
+				"applicator_license": row.get("applicator_license") or UNRECORDED,
+				"epa_reg_number": row.get("epa_reg_number") or UNRECORDED,
 				"rei_hours": row.get("rei_hours"),
+				# Deliberately not converted into `phi_days`. The two registers
+				# record the pre-harvest interval in different units and this
+				# packet is evidence, so each row carries the number its own
+				# record holds rather than one this file worked out.
+				"phi_days": None,
 				"phi_hours": row.get("phi_hours"),
 				"target_pest": row.get("target_pest"),
 				"wind_mph": row.get("weather_wind_mph"),
 				"wind_direction": row.get("wind_direction"),
 				"temp_f": row.get("weather_temp_f"),
+				"source": SPRAY_LOG,
 			}
 		)
-	section = _section(
-		"Pesticide applications",
-		(
-			"Every application in the period as the Spray Log records it. The applicator, the "
-			"registration number and the intervals are columns ON that record rather than a "
-			"compliance copy of it — which is why they cannot have drifted from what was "
-			"actually done."
-		),
-		rows,
-		("spray", "date", "block", "product", "applicator_name", "epa_reg_number", "rei_hours", "phi_hours"),
-	)
-	incomplete = [
-		row["spray"]
-		for row in rows
-		if row["applicator_name"] == "(unrecorded)" or row["epa_reg_number"] == "(unrecorded)"
-	]
-	if incomplete:
-		section["incomplete_records"] = incomplete
-		section["problem_note"] = (
-			f"{len(incomplete)} application(s) predate the compliance fields and have no "
-			"applicator or registration number. They cannot be completed retroactively without "
-			"inventing facts, and they are shown as they are."
-		)
-	return section
+	return rows
+
+
+def _spray_blocks(names) -> dict:
+	"""`{application: [block, ...]}` for a batch, in one query.
+
+	Read through the parent link rather than per row: a packet section is capped
+	at 750 applications and 750 extra queries is how a packet stops being
+	generated at all.
+	"""
+	names = [name for name in names if name]
+	if not names or not compat.doctype_exists(SPRAY_APPLICATION_BLOCK):
+		return {}
+	found: dict = {}
+	for row in frappe.db.get_all(
+		SPRAY_APPLICATION_BLOCK,
+		filters={"parent": ("in", names)},
+		# `parent` is asked for by name and NOT through `compat.existing_fields`.
+		# It is a framework column rather than one of the DocType's own fields,
+		# so `existing_fields` drops it — and a batched child read that loses
+		# `parent` files every row under one empty key, which reads here as a
+		# packet full of applications over nowhere.
+		fields=["parent", "block", "acres"],
+		limit=SECTION_CAP * 8,
+	) or []:
+		entry = dict(row)
+		block = entry.get("block")
+		if block:
+			found.setdefault(str(entry.get("parent") or ""), []).append(block)
+	return found
+
+
+def _spray_products(raw) -> list:
+	"""The product lines off the application's own stored snapshot."""
+	if not raw:
+		return []
+	try:
+		parsed = json.loads(raw) if isinstance(raw, str) else raw
+	except (json.JSONDecodeError, ValueError, TypeError):
+		return []
+	if not isinstance(parsed, list):
+		return []
+	return [line for line in parsed if isinstance(line, dict)]
+
+
+def _user_full_names(users) -> dict:
+	"""`{user: full_name}` for a batch. A packet names people, not login ids."""
+	wanted = sorted({str(user) for user in users if user})
+	if not wanted or not compat.doctype_exists("User"):
+		return {}
+	found = {}
+	for row in frappe.db.get_all(
+		"User",
+		filters={"name": ("in", wanted)},
+		fields=compat.existing_fields("User", ("name", "full_name")),
+		limit=len(wanted),
+	) or []:
+		entry = dict(row)
+		if entry.get("full_name"):
+			found[str(entry.get("name"))] = entry["full_name"]
+	return found
+
+
+def _joined(values) -> str:
+	"""Distinct, order-preserving, comma-joined — or the unrecorded marker."""
+	seen = []
+	for value in values:
+		text = str(value).strip() if value not in (None, "") else ""
+		if text and text not in seen:
+			seen.append(text)
+	return ", ".join(seen) if seen else UNRECORDED
 
 
 def _water(spec: AuditPacketType, company: str, start: str, end: str) -> dict:

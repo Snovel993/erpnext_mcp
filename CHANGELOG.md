@@ -3,6 +3,67 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.93.0 — 2026-08-18 — the registers the packets could not see
+
+### The spray records an EPA packet said this farm did not keep
+
+`list_audit_packet_types` reported `spray_records → Spray Log` under
+`sections_that_will_be_empty_here` for five of the eight regimes, and the EPA
+packet's own section said, in the document handed to the inspector, that
+"farm_precision_ag is not installed on this site, so there is no Spray Log to
+read."
+
+Both statements were true about `Spray Log`. Neither was true about the farm.
+**`Spray Application` is erpnext_mcp's own DocType** — it has shipped with the
+app since v0.79.0, `create_spray_application` has been writing the tank, the
+blocks, the wind and the intervals into it ever since, and `_spray_records` was
+reading a different register one app over. The packet was telling a regulator
+that this operation keeps no pesticide records while the pesticide records sat
+one tool call away.
+
+**The section reads both, and neither replaces the other.** `Spray Application`
+first, `Spray Log` second, each row carrying a `source` column — because an
+auditor comparing the packet against the screen has to know which screen. A site
+that sprayed under farm_precision_ag still hands over that history; a site that
+never had it stops being told about an app it does not run. The section is now
+absent-by-app only when BOTH registers are missing, which on a migrated site
+cannot happen, and it names `bench migrate` when it does.
+
+**Three lookups had to arrive on one row**, and the packet is worth no more than
+the weakest of them:
+
+  * the **block** off `Spray Application Block`, one level down. Read in one
+    batched query through `parent` — and `parent` is asked for by NAME rather
+    than through `compat.existing_fields`, which drops it for being a framework
+    column rather than one of the DocType's own. A batched child read that loses
+    `parent` files every row under one empty key, and the packet prints a
+    pesticide application over nowhere. That failure is what
+    `test_the_block_arrives_off_the_child_table` was written against.
+  * the **product and its EPA registration number** off `products_applied`, the
+    snapshot written at the moment of the pass. Not a live join to the Item or
+    the tank mix: those answer a question about today, and the question is about
+    April.
+  * the **applicator's name** off `User`, batched. A packet is read by somebody
+    who wants to know who held the wand, and `mendez@example.com` is not an
+    answer to that question.
+
+**Planned and Cancelled applications are excluded and NAMED.** Nothing went on
+the ground for either, so neither is evidence — but a register reconciled against
+this packet has to add up, and an inspector who finds a spray in the register
+that is missing from the document asks a much harder question than one who was
+handed `excluded_by_status`.
+
+**The period bound carries a time now.** `completed_at` is a Datetime and
+`period_end` is a Date, so a pass finished at 11:30 on the last day of the period
+sorted after the bound and fell out of the packet.
+`test_a_pass_on_the_last_day_of_the_period_is_in_it` is the guard.
+
+The two tests that encoded the old behaviour were rewritten rather than deleted,
+and the prediction test now takes a DocType away before asserting — every
+register a packet reads ships with this app or with ERPNext, so an assertion that
+the prediction is non-empty would otherwise have passed with the mechanism
+switched off entirely.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

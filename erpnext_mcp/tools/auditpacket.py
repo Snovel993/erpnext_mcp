@@ -81,7 +81,7 @@ def list_audit_packet_types(args: dict) -> ToolResult:
 				"A section listed under `sections_that_will_be_empty_here` has no DocType behind "
 				"it on this site, and the packet will SAY SO rather than omit the section. An "
 				"absent spray-records section reads as an operation with nothing to declare; a "
-				"section that says farm_precision_ag is not installed reads as the truth."
+				"section that names the DocType it could not find reads as the truth."
 			),
 			"kairotic_gate": (
 				"Every type refuses on a period that is not genuinely closed: one that has not "
@@ -100,7 +100,12 @@ _SECTION_DOCTYPES = {
 	"certifications": ("Certification",),
 	"workforce": ("Employee",),
 	"training": ("Employee Training Record",),
-	"spray_records": ("Spray Log",),
+	# v0.90.0. Spray Application is erpnext_mcp's OWN doctype and ships with the
+	# app, so this section stopped being one that "will be empty here" for the
+	# five packet types that carry it. farm_precision_ag's Spray Log is still
+	# read by the section builder for a site that sprayed under the old app —
+	# it is not named here because its absence no longer empties anything.
+	"spray_records": ("Spray Application",),
 	"water": ("Field",),
 	"traceability": ("Bucket Log Entry",),
 	"housing": ("Housing Unit",),

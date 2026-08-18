@@ -33,7 +33,7 @@ exactly why `test_hooks.py` forbids the `fixtures` hook by name.
 
 import json
 
-from erpnext_mcp import audit_packets, dashboard, install
+from erpnext_mcp import audit_packets, compliance_fields, dashboard, install
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
 from .harness import INSTALLED_DOCTYPES, STORE, add_field
@@ -53,6 +53,7 @@ ALL_ON = {
 		"create_field",
 		"create_housing_unit",
 		"create_housing_assignment",
+		"create_spray_application",
 		"list_governance_documents",
 		"get_governance_document_content",
 	)
@@ -504,12 +505,35 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 		self.assertEqual(section["row_count"], 0)
 		self.assertIn("No records matched for this period", section["empty_note"])
 
-	def test_spray_records_say_farm_precision_ag_is_not_installed(self):
+	def test_spray_records_are_empty_for_the_period_not_absent_by_app(self):
+		"""v0.90.0: Spray Application ships with erpnext_mcp, exactly as Bucket
+		Log Entry does — it cannot be "not installed" on a site running this app.
+		So an EPA packet with no applications in the period says THAT, and not
+		that farm_precision_ag is missing. See SprayRecordsComeFromThisApp for
+		the populated case."""
 		self.a_full_operation()
 		section = next(
 			entry for entry in self.generate("EPA")["packet"]["sections"] if entry["key"] == "spray_records"
 		)
-		self.assertIn("farm_precision_ag is not installed", section["empty_note"])
+		self.assertEqual(section["row_count"], 0)
+		self.assertIn("No records matched for this period", section["empty_note"])
+		self.assertNotIn("farm_precision_ag", section["empty_note"])
+
+	def test_spray_records_name_the_doctype_when_neither_register_is_installed(self):
+		"""The pre-migrate site, and the only case left in which this section is
+		absent-by-app rather than empty-for-the-period. It names the DocType and
+		the command that creates it, because "not installed" without a remedy is
+		a dead end for the operator holding the packet."""
+		self.a_full_operation()
+		for doctype in ("Spray Application", "Spray Log"):
+			INSTALLED_DOCTYPES.discard(doctype)
+			self.addCleanup(INSTALLED_DOCTYPES.add, doctype)
+		section = next(
+			entry for entry in self.generate("EPA")["packet"]["sections"] if entry["key"] == "spray_records"
+		)
+		self.assertEqual(section["row_count"], 0)
+		self.assertIn("Spray Application", section["empty_note"])
+		self.assertIn("bench migrate", section["empty_note"])
 
 	def test_workforce_says_the_compliance_fields_are_missing_rather_than_empty(self):
 		"""ABSENT, not empty. An auditor should be told which."""
@@ -546,9 +570,29 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 		self.assertTrue(any(entry["section"] == "traceability" for entry in disclosures))
 
 	def test_the_type_listing_says_which_sections_will_be_empty_here(self):
+		"""The negative control for the two tests below. Every DocType a packet
+		reads ships with erpnext_mcp or with ERPNext, so on a healthy site the
+		prediction is empty for every type — which would make an assertion that
+		it PREDICTS nothing pass without the mechanism working at all. So this
+		takes a DocType away and checks the prediction appears."""
+		INSTALLED_DOCTYPES.discard("Certification")
+		self.addCleanup(INSTALLED_DOCTYPES.add, "Certification")
 		data = self.tool_data("list_audit_packet_types", {})
-		epa = next(entry for entry in data["audit_types"] if entry["audit_type"] == "EPA")
-		self.assertTrue(any("Spray Log" in entry for entry in epa["sections_that_will_be_empty_here"]))
+		gap = next(entry for entry in data["audit_types"] if entry["audit_type"] == "GAP")
+		self.assertIn("certifications → Certification", gap["sections_that_will_be_empty_here"])
+
+	def test_spray_records_is_never_listed_as_a_section_that_will_be_empty(self):
+		"""v0.90.0. Spray Application ships with erpnext_mcp, so the five packet
+		types that carry this section stopped predicting it empty. This is the
+		regression that mattered: the prediction was read as "this farm cannot
+		produce spray records", which was never true of a migrated site."""
+		data = self.tool_data("list_audit_packet_types", {})
+		for entry in data["audit_types"]:
+			with self.subTest(audit_type=entry["audit_type"]):
+				self.assertFalse(
+					any("spray_records" in item for item in entry["sections_that_will_be_empty_here"]),
+					entry["sections_that_will_be_empty_here"],
+				)
 
 	def test_bucket_log_entry_is_never_listed_as_a_section_that_will_be_empty(self):
 		"""It ships with erpnext_mcp — it is always here, the same as Housing Unit
@@ -558,6 +602,178 @@ class EmptySectionsExplainThemselves(PacketTestCase):
 		self.assertFalse(
 			any("Bucket Log Entry" in entry for entry in fsma["sections_that_will_be_empty_here"])
 		)
+
+
+class SprayRecordsComeFromThisApp(PacketTestCase):
+	"""v0.90.0: the spray section reads erpnext_mcp's OWN Spray Application.
+
+	It read farm_precision_ag's Spray Log and nothing else, which meant five of
+	the eight packet types announced up front that their spray records would be
+	empty — on a site that had been recording every pass through
+	`create_spray_application` since v0.79.0. The packet was telling an EPA
+	inspector that this farm keeps no spray records while the register sat one
+	tool call away.
+
+	WHAT IS ASSERTED HERE IS THE JOIN, not the query: a pass is recorded through
+	the real tool, and the block off the child table, the product and its
+	registration number off the stored snapshot, and the applicator's NAME off
+	the User all have to arrive on one row of the packet. Each of those is a
+	different lookup and any one of them returning nothing would leave a column
+	an inspector reads as a gap in the record.
+	"""
+
+	BLOCK = "Yellow Camp Block 3 - MC"
+	CAPTAN = "CAPTAN-80WDG"
+
+	def setUp(self):
+		super().setUp()
+		# Through the real installer: the interval columns are what
+		# `stock_bridge.item_intervals` reads, and a fixture that added them by
+		# hand would prove the copy works on a site this app never produces.
+		compliance_fields.install_compliance_fields()
+		STORE.seed("UOM", [{"name": "Lb", "enabled": 1}])
+		STORE.seed(
+			"Item",
+			[
+				{
+					"name": self.CAPTAN,
+					"item_code": self.CAPTAN,
+					"item_name": "Captan 80 WDG",
+					"stock_uom": "Lb",
+					"is_stock_item": 1,
+					"disabled": 0,
+					"item_defaults": [],
+					"reorder_levels": [],
+					# The label numbers live on the Item, and the application
+					# copies them at the moment of the pass. Passing them in the
+					# `products` payload would be ignored — see
+					# `spray._mix_products`, which reads `stock_bridge.item_intervals`.
+					"rei_hours": 24,
+					"phi_days": 14,
+				}
+			],
+		)
+		STORE.seed(
+			"User",
+			[{"name": "mendez@example.com", "email": "mendez@example.com", "full_name": "R. Mendez", "enabled": 1}],
+		)
+
+	def a_spray(self, **kw):
+		payload = {
+			"company": MAIN,
+			"blocks": [{"block": self.BLOCK, "acres": 12.5}],
+			"products": [
+				{
+					"item_code": self.CAPTAN,
+					"rate_per_acre": 5,
+					"rate_uom": "Lb",
+					"epa_reg_number": "66222-242",
+					"rei_hours": 24,
+					"phi_days": 14,
+				}
+			],
+			"applicator": "mendez@example.com",
+			"applicator_license": "OR-PA-88213",
+			"completed_at": "2026-04-05 11:30:00",
+			"started_at": "2026-04-05 07:00:00",
+			"wind_speed_mph": 4,
+			"wind_direction": "WNW",
+		}
+		payload.update(kw)
+		return self.tool_data("create_spray_application", payload)
+
+	def spray_section(self, audit_type="EPA"):
+		return next(
+			entry
+			for entry in self.generate(audit_type)["packet"]["sections"]
+			if entry["key"] == "spray_records"
+		)
+
+	def test_an_application_in_the_period_is_in_the_packet(self):
+		self.a_full_operation()
+		created = self.a_spray()
+		section = self.spray_section()
+		self.assertEqual(section["row_count"], 1)
+		row = section["rows"][0]
+		self.assertEqual(row["spray"], created["name"])
+		self.assertEqual(row["date"], "2026-04-05")
+		self.assertEqual(row["source"], "Spray Application")
+
+	def test_the_block_arrives_off_the_child_table(self):
+		"""The block lives on Spray Application Block, one level down. A section
+		that read only the parent would print a pesticide application over
+		nowhere."""
+		self.a_full_operation()
+		self.a_spray()
+		self.assertEqual(self.spray_section()["rows"][0]["block"], self.BLOCK)
+
+	def test_the_product_and_its_registration_number_come_off_the_snapshot(self):
+		"""Off `products_applied`, which is what went out on the day — not a live
+		join to the Item, which would answer a question about today."""
+		self.a_full_operation()
+		self.a_spray()
+		row = self.spray_section()["rows"][0]
+		self.assertEqual(row["product"], "Captan 80 WDG")
+		self.assertEqual(row["epa_reg_number"], "66222-242")
+		self.assertEqual(row["rei_hours"], 24)
+		self.assertEqual(row["phi_days"], 14)
+
+	def test_the_applicator_is_named_rather_than_logged_in(self):
+		"""A packet is handed to a person who wants to know who held the wand,
+		and `mendez@example.com` is not an answer to that question."""
+		self.a_full_operation()
+		self.a_spray()
+		row = self.spray_section()["rows"][0]
+		self.assertEqual(row["applicator_name"], "R. Mendez")
+		self.assertEqual(row["applicator_license"], "OR-PA-88213")
+
+	def test_a_pass_outside_the_period_is_not_in_the_packet(self):
+		self.a_full_operation()
+		self.a_spray(completed_at="2026-08-05 11:30:00", started_at="2026-08-05 07:00:00")
+		self.assertEqual(self.spray_section()["row_count"], 0)
+
+	def test_a_pass_on_the_last_day_of_the_period_is_in_it(self):
+		"""The classic off-by-a-day: `completed_at` is a Datetime and the period
+		bound is a Date, so a spray finished at 11:30 on 30 June sorts AFTER
+		'2026-06-30' unless the upper bound carries a time."""
+		self.a_full_operation()
+		self.a_spray(completed_at="2026-06-30 11:30:00", started_at="2026-06-30 07:00:00")
+		self.assertEqual(self.spray_section()["row_count"], 1)
+
+	def test_a_planned_pass_is_excluded_and_named(self):
+		"""Nothing went on the ground, so it is not evidence — but a register
+		compared against this packet has to reconcile, so it is named."""
+		self.a_full_operation()
+		created = self.a_spray(status="Planned")
+		section = self.spray_section()
+		self.assertEqual(section["row_count"], 0)
+		self.assertIn(f"{created['name']} (Planned)", section["excluded_by_status"])
+		self.assertIn("Planned or Cancelled", section["status_note"])
+
+	def test_a_missing_registration_number_is_reported_not_hidden(self):
+		self.a_full_operation()
+		created = self.a_spray(
+			products=[{"item_code": self.CAPTAN, "rate_per_acre": 5, "rate_uom": "Lb"}]
+		)
+		section = self.spray_section()
+		self.assertEqual(section["rows"][0]["epa_reg_number"], "(unrecorded)")
+		self.assertIn(created["name"], section["incomplete_records"])
+
+	def test_the_fsma_packet_carries_it_too(self):
+		"""Five types name this section. The bridge is in the section builder, so
+		every one of them gets it — this is the one that proves it is not EPA
+		special-casing."""
+		self.a_full_operation()
+		self.a_spray()
+		self.assertEqual(self.spray_section("FSMA")["row_count"], 1)
+
+	def test_the_packet_still_renders_with_a_spray_in_it(self):
+		"""EveryAuditType's rule: a section builder that returns a shape the table
+		emitter cannot draw is a packet discovered on the morning of the audit."""
+		self.a_full_operation()
+		self.a_spray()
+		data = self.generate("EPA")
+		self.assertGreater(data["attachment"]["file_size"], 1000)
 
 
 class TraceabilityIsErpnextMcpsOwnDoctype(PacketTestCase):
