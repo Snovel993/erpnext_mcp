@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 743 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 744 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -16707,3 +16707,66 @@ beside the Employee that was still created.
 different kinds of gap — one is a missing capability, the other is a wrong number
 — and the field has meant "the next step towards a working phone" since the tool
 shipped.
+
+
+## Losing the phone (v0.93.0)
+
+### `recover_mobile_access`
+
+MUTATING (off). Every mechanical piece already existed — `revoke_api_token` says
+in its own result that it is *"they lost their phone"* — and a manager holding a
+lost-phone report still had to do three things in the right order, keyed on a
+value they usually do not have.
+
+1. **They do not know the login.** A foreman knows a face and a badge. Every
+   other tool here takes `user`, which is an email on a system the worker has
+   never signed into from a keyboard.
+2. **The order matters and nothing enforced it.** The phone is in somebody
+   else's pocket right now.
+3. **Nothing asked who it was for.** `generate_api_token` mints a credential for
+   whatever login it is given — right for a tool an administrator drives, wrong
+   as the whole of an account-recovery path, because the request arrives as
+   somebody at a farm office *saying* they are somebody.
+
+### The badge is the identity proof
+
+A badge is a physical card the worker still has when the phone is gone. `badge`
+resolves through the same register a crew clock reads, so a retired card, an
+unknown card and a card belonging to somebody who has left stay three different
+refusals. Naming an `employee` or a `user` **as well** makes the two check each
+other, and **a badge that resolves to somebody else stops the reset** — that is
+either the wrong card or the wrong person, and neither ends in a working
+credential.
+
+**The no-badge path is not refused, it is recorded.** Somebody who lost the phone
+*and* the card is an ordinary Tuesday, and a recovery tool that could not serve
+it is one a farm routes around. `identity_verified_by` comes back as `badge` or
+`manager assertion`, and the second is written onto the grant's notes and into
+the audit row — a fact about how much this reset is worth, rather than something
+to be inferred from an absent argument.
+
+### It revokes before it mints
+
+Minting first would leave the old credential live for as long as the second step
+took, and forever if the second step never happened. A failure after the
+revocation leaves the account with **no** credential, which is the safe side of
+that trade — and `test_the_revocation_happens_before_the_mint` makes the mint
+fail on purpose to prove it.
+
+Arguments are validated **before** anything is destroyed, though: nothing about a
+typo in `expiry_days` requires a working credential to have been killed first.
+
+### The Employee record is never touched
+
+Not re-created, not duplicated, not re-onboarded. Their badge, shifts, buckets,
+housing, I-9 and W-4 hang off a docname that does not change here — the
+difference between recovering an account and hiring somebody twice, and only one
+of those puts a person on the dispatch board twice and in the payroll register
+once.
+
+Somebody with **no login at all** is refused and pointed at
+`onboard_employee(employee=…)`, which reuses the same Employee record for exactly
+this reason.
+
+`reason` is required and has a length floor, because that row is the audit trail
+for destroying somebody's credential and issuing another.

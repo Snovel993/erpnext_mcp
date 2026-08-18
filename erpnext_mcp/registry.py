@@ -18029,6 +18029,67 @@ TOOLS = {
 		mutating=True,
 		title="Revoke an API token",
 	),
+	"recover_mobile_access": _tool(
+		mobile.recover_mobile_access,
+		"MUTATING (default OFF). A WORKER LOST THEIR PHONE: kill the old "
+		"credential, mint a new one, and leave the person's record exactly where "
+		"it was. One call for what was three, keyed on what a foreman actually "
+		"has.\n\n"
+		"THE BADGE IS THE IDENTITY PROOF. It is a physical card the worker still "
+		"holds when the phone is gone, and it resolves through the same register a "
+		"crew clock reads — so a retired card, an unknown card and a card "
+		"belonging to somebody who has left are three different refusals. Naming "
+		"an employee or a login AS WELL makes the two check each other, and a "
+		"badge that resolves to somebody else STOPS THE RESET: that is either the "
+		"wrong card or the wrong person, and neither ends in a working "
+		"credential.\n\n"
+		"THE NO-BADGE PATH IS NOT REFUSED, IT IS RECORDED. Somebody who lost the "
+		"phone AND the card is an ordinary Tuesday, and a recovery tool that could "
+		"not serve it is one a farm routes around. `identity_verified_by` comes "
+		"back as `badge` or `manager assertion`, and the second goes onto the "
+		"grant's notes and into the audit row — a fact about how much this reset "
+		"is worth, rather than something to be inferred from an absent "
+		"argument.\n\n"
+		"IT REVOKES BEFORE IT MINTS, ALWAYS. The lost handset is in somebody "
+		"else's pocket while this call runs. Minting first would leave the old "
+		"credential live for as long as the second step took — and forever if the "
+		"second step never happened. A failure after the revocation leaves the "
+		"account with NO credential, which is the safe side of that trade.\n\n"
+		"THE EMPLOYEE RECORD IS NEVER TOUCHED. Not re-created, not duplicated. "
+		"Their badge, shifts, buckets, housing, I-9 and W-4 hang off a docname "
+		"that does not change here — the difference between recovering an account "
+		"and hiring somebody twice, and only one of those puts a person on the "
+		"dispatch board twice and in the payroll register once. Somebody with no "
+		"login AT ALL is refused and pointed at onboard_employee(employee=...), "
+		"which reuses the same record for exactly this reason.\n\n"
+		"`reason` IS REQUIRED and has a floor, because this row is the audit trail "
+		"for destroying somebody's credential and issuing another.",
+		{
+			"badge": _field(
+				_STRING,
+				"Scanned from the card they still have. The only argument here that PROVES "
+				"anything — everything else is somebody saying who somebody is.",
+			),
+			"employee": _field(_STRING, "Employee docname. Checked against the badge when both are given."),
+			"user": _field(_STRING, "The login, if you happen to know it."),
+			"company": _field(_STRING, "Scopes the badge lookup, the same way resolve_badge does."),
+			"reason": _field(
+				_STRING,
+				"REQUIRED. What happened and where — 'phone lost at Yellow Camp 2026-08-18'. It "
+				"is the row somebody reads in November.",
+			),
+			"issue_qr": _field(
+				_BOOLEAN,
+				"Return the enrolment QR in this same result. Default false. The new credential "
+				"is in the result either way; this is the scannable form of it.",
+			),
+			"expiry_days": _field(_STRING, "Token review window in days. Defaults to 120."),
+			"url": _field(_STRING, "Public base URL for the QR. Defaults to public_url on settings."),
+		},
+		required=("reason",),
+		mutating=True,
+		title="Recover a lost phone's access",
+	),
 	"generate_mobile_login_qr": _tool(
 		mobile.generate_mobile_login_qr,
 		"MUTATING (default OFF). The enrolment card: a scannable PNG carrying the "

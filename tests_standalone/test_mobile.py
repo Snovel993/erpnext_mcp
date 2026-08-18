@@ -56,6 +56,9 @@ WRITES_ON = {
 		"generate_api_token",
 		"revoke_api_token",
 		"generate_mobile_login_qr",
+		"recover_mobile_access",
+		"link_badge_to_employee",
+		"resolve_badge",
 	)
 }
 ALL_ON = {**READS_ON, **WRITES_ON}
@@ -704,6 +707,247 @@ class Revocation(MobileTestCase):
 		self.assertIn(
 			"allow_revoke_mobile_user",
 			self.tool_error("revoke_mobile_user", {"email": WORKER, "reason": "end of season"}),
+		)
+
+
+class LosingThePhone(MobileTestCase):
+	"""v0.93.0: `recover_mobile_access`, and what it refuses.
+
+	EVERY MECHANICAL PIECE ALREADY EXISTED — `revoke_api_token` says in its own
+	result that it is "the 'they lost their phone' one" — and a manager holding a
+	lost-phone report still had to do three things in the right order, keyed on a
+	login they usually do not have. A foreman knows a face and a badge.
+
+	THE THREE CLAIMS:
+
+      IT REVOKES BEFORE IT MINTS. The lost handset is in somebody else's pocket
+      while this call runs, and a failure after the revocation leaves the account
+      with no credential — which is the safe side of the trade. Minting first
+      would leave the old credential live for as long as the second step took.
+
+      THE BADGE IS THE IDENTITY PROOF, AND A MISMATCH STOPS EVERYTHING. A card
+      that resolves to somebody else is either the wrong card or the wrong
+      person, and neither ends in a working credential. The absence of a badge is
+      RECORDED rather than refused — somebody who lost the phone and the card is
+      an ordinary Tuesday.
+
+      THE EMPLOYEE RECORD IS NEVER TOUCHED. Recovering an account and hiring
+      somebody twice are different acts, and only one of them puts a person on
+      the dispatch board twice and in the payroll register once.
+	"""
+
+	REASON = "phone lost at Yellow Camp on 2026-08-18"
+
+	def an_employee(self, name="HR-EMP-ANA", user=WORKER, employee_name="Ana Ramos"):
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": name,
+					"employee_name": employee_name,
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2026-05-01",
+					"user_id": user,
+				}
+			],
+		)
+		return name
+
+	def a_badge(self, badge="QR-0001", employee="HR-EMP-ANA"):
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[{"name": badge, "badge_id": badge, "company": MAIN, "employee": employee, "active": 1}],
+		)
+		return badge
+
+	def recover(self, **overrides):
+		payload = {"reason": self.REASON}
+		payload.update(overrides)
+		return self.tool_data("recover_mobile_access", payload)
+
+	def secret_of(self, user=WORKER):
+		return mobile.read_api_secret(user)
+
+	# ── the credential ─────────────────────────────────────────────────────
+	def test_the_old_credential_stops_working_and_a_new_one_is_issued(self):
+		self.make()
+		before = self.secret_of()
+		self.an_employee()
+		data = self.recover(user=WORKER)
+		self.assertTrue(data["previous_credential_revoked"])
+		self.assertTrue(data["api_secret"])
+		self.assertNotEqual(data["api_secret"], before)
+		self.assertEqual(self.secret_of(), data["api_secret"])
+
+	def test_an_account_that_held_no_credential_says_so_rather_than_claiming_a_revocation(self):
+		self.make()
+		self.tool_data("revoke_api_token", {"user": WORKER, "reason": "test"})
+		self.an_employee()
+		data = self.recover(user=WORKER)
+		self.assertFalse(data["previous_credential_revoked"])
+		self.assertIn("already logged out", data["old_device_note"])
+
+	def test_the_revocation_happens_before_the_mint(self):
+		"""THE ORDERING GUARANTEE, and the only way to see it is to make the mint
+		fail. If the replacement were minted first, a failure here would leave the
+		lost handset working — which is the whole thing this order prevents."""
+		self.make()
+		self.an_employee()
+		self.assertTrue(self.secret_of())
+
+		def explode(_args):
+			raise RuntimeError("the mint failed after the revocation")
+
+		original = mobile.generate_api_token
+		mobile.generate_api_token = explode
+		self.addCleanup(setattr, mobile, "generate_api_token", original)
+
+		self.tool("recover_mobile_access", {"user": WORKER, "reason": self.REASON})
+		self.assertEqual(self.secret_of(), "", "the lost phone still has a working credential")
+
+	def test_a_bad_argument_does_not_destroy_a_working_credential(self):
+		"""The other side of it. Nothing about a typo requires the revocation to
+		have happened, so the arguments are checked before anything is killed."""
+		self.make()
+		self.an_employee()
+		before = self.secret_of()
+		error = self.tool_error(
+			"recover_mobile_access", {"user": WORKER, "reason": self.REASON, "expiry_days": -1}
+		)
+		self.assertIn("Nothing was changed", error)
+		self.assertEqual(self.secret_of(), before)
+
+	def test_the_qr_is_returned_only_when_asked_for(self):
+		self.make()
+		self.an_employee()
+		self.assertIsNone(self.recover(user=WORKER)["qr"])
+		self.assertTrue(self.recover(user=WORKER, issue_qr=True)["qr"])
+
+	# ── the badge ──────────────────────────────────────────────────────────
+	def test_a_scanned_badge_finds_the_login_without_anybody_knowing_it(self):
+		"""The argument the tool exists for: a foreman knows a card, not an email."""
+		self.make()
+		self.an_employee()
+		self.a_badge()
+		data = self.recover(badge="QR-0001")
+		self.assertEqual(data["user"], WORKER)
+		self.assertEqual(data["employee"], "HR-EMP-ANA")
+		self.assertEqual(data["identity_verified_by"], "badge")
+		self.assertEqual(data["badge"], "QR-0001")
+
+	def test_a_badge_naming_somebody_else_stops_the_reset(self):
+		"""Either the wrong card or the wrong person, and neither ends in a
+		working credential."""
+		self.make()
+		self.an_employee()
+		self.a_badge()
+		before = self.secret_of()
+		error = self.tool_error(
+			"recover_mobile_access",
+			{"badge": "QR-0001", "employee": "HR-EMP-SOMEBODY-ELSE", "reason": self.REASON},
+		)
+		self.assertIn("wrong card or the wrong person", error)
+		self.assertEqual(self.secret_of(), before)
+
+	def test_a_badge_against_the_wrong_login_stops_the_reset(self):
+		self.make()
+		self.an_employee()
+		self.a_badge()
+		error = self.tool_error(
+			"recover_mobile_access",
+			{"badge": "QR-0001", "user": "someone.else@example.test", "reason": self.REASON},
+		)
+		self.assertIn("whose login is not", error)
+
+	def test_a_retired_badge_is_refused_by_the_register_that_owns_it(self):
+		"""Delegated to resolve_badge, so a retired card, an unknown card and one
+		belonging to somebody who has left stay three different refusals."""
+		self.make()
+		self.an_employee()
+		STORE.seed(
+			"Bucket Log Badge Map",
+			[
+				{
+					"name": "QR-OLD",
+					"badge_id": "QR-OLD",
+					"company": MAIN,
+					"employee": "HR-EMP-ANA",
+					"active": 0,
+				}
+			],
+		)
+		error = self.tool_error("recover_mobile_access", {"badge": "QR-OLD", "reason": self.REASON})
+		self.assertIn("retired", error)
+
+	def test_no_badge_is_allowed_and_recorded_as_the_weaker_claim(self):
+		"""Somebody who lost the phone AND the card is an ordinary Tuesday, and a
+		recovery tool that could not serve it is one a farm routes around."""
+		self.make()
+		self.an_employee()
+		data = self.recover(employee="HR-EMP-ANA")
+		self.assertEqual(data["identity_verified_by"], "manager assertion")
+		self.assertIsNone(data["badge"])
+		self.assertIn("NO BADGE WAS PRESENTED", data["verification_note"])
+
+	def test_the_verification_method_is_written_onto_the_grant(self):
+		"""Not left to be inferred from an absent argument."""
+		self.make()
+		self.an_employee()
+		self.a_badge()
+		self.recover(badge="QR-0001")
+		notes = str(frappe.db.get_value("Mobile Access Grant", WORKER, "notes") or "")
+		self.assertIn("credential recovered (badge)", notes)
+		self.assertIn(self.REASON, notes)
+
+	# ── the person ─────────────────────────────────────────────────────────
+	def test_the_employee_record_is_not_touched(self):
+		self.make()
+		employee = self.an_employee()
+		self.a_badge()
+		before = dict(STORE.get_raw("Employee", employee))
+		count = len(STORE.rows("Employee"))
+		data = self.recover(badge="QR-0001")
+		self.assertEqual(data["employee"], employee)
+		self.assertEqual(len(STORE.rows("Employee")), count)
+		self.assertEqual(dict(STORE.get_raw("Employee", employee)), before)
+
+	def test_somebody_with_no_login_is_refused_and_pointed_at_onboarding(self):
+		"""The re-onboarding path, and it REUSES the Employee — which is the whole
+		reason it is named here rather than create_employee."""
+		self.an_employee("HR-EMP-BETO", user="", employee_name="Beto Cruz")
+		error = self.tool_error(
+			"recover_mobile_access", {"employee": "HR-EMP-BETO", "reason": self.REASON}
+		)
+		self.assertIn("onboard_employee(employee=...)", error)
+		self.assertIn("REUSES", error)
+
+	def test_a_disabled_login_is_refused_rather_than_quietly_re_enabled(self):
+		"""Re-enabling somebody is a different decision from replacing a phone."""
+		self.make()
+		self.an_employee()
+		frappe.db.set_value("User", WORKER, "enabled", 0)
+		error = self.tool_error("recover_mobile_access", {"user": WORKER, "reason": self.REASON})
+		self.assertIn("disabled", error)
+
+	# ── the audit trail ────────────────────────────────────────────────────
+	def test_a_reason_is_required_and_a_word_is_not_one(self):
+		self.make()
+		self.an_employee()
+		self.assertIn("reason", self.tool_error("recover_mobile_access", {"user": WORKER}))
+		error = self.tool_error("recover_mobile_access", {"user": WORKER, "reason": "lost"})
+		self.assertIn("say what happened", error)
+
+	def test_naming_nobody_is_refused_with_the_three_ways_to_name_somebody(self):
+		error = self.tool_error("recover_mobile_access", {"reason": self.REASON})
+		for option in ("badge", "employee", "user"):
+			self.assertIn(option, error)
+
+	def test_it_is_off_by_default_like_every_other_mutating_tool(self):
+		self.configure(enabled=1, **READS_ON)
+		self.assertIn(
+			"allow_recover_mobile_access",
+			self.tool_error("recover_mobile_access", {"user": WORKER, "reason": self.REASON}),
 		)
 
 

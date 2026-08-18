@@ -841,9 +841,11 @@ class ToolRegistration(unittest.TestCase):
 		# v0.44.0 and nothing walked them. `get_owner_dashboard` composes seven
 		# existing reads into the one screen an owner opens. Nothing about the ML
 		# model registry changed; the totals moved because the catalogue did.
-		self.assertEqual(len(self.registry.TOOLS), 743)
+		# v0.93.0 adds ONE write as well: `recover_mobile_access`, the lost-phone
+		# path — revoke, re-mint, verify by badge, and never touch the Employee.
+		self.assertEqual(len(self.registry.TOOLS), 744)
 		self.assertEqual(len(self.registry.READ_TOOLS), 371)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 372)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 373)
 
 
 if __name__ == "__main__":

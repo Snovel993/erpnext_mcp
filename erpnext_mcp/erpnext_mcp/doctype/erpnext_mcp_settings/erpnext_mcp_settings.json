@@ -625,6 +625,7 @@
   "mobile_write_col",
   "allow_generate_api_token",
   "allow_revoke_api_token",
+  "allow_recover_mobile_access",
   "allow_generate_mobile_login_qr",
   "org_master_section",
   "allow_list_designations",
@@ -5018,6 +5019,13 @@
    "fieldname": "allow_revoke_api_token",
    "fieldtype": "Check",
    "label": "Revoke API Token"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. A worker lost their phone: revoke the old credential, mint a new one, verify who they are by badge, and leave the Employee record untouched.",
+   "fieldname": "allow_recover_mobile_access",
+   "fieldtype": "Check",
+   "label": "Recover Mobile Access"
   },
   {
    "default": "0",

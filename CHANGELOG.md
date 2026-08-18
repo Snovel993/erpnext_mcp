@@ -313,6 +313,52 @@ and callers parse it that way; a missing W-4 is a different kind of gap — it
 produces a wrong NUMBER rather than a missing capability — so it gets its own
 sentence instead of silently displacing the one already there.
 
+### Losing the phone
+
+Every mechanical piece of a recovery already existed — `revoke_api_token` says in
+its own result that it is "the 'they lost their phone' one" — and a manager
+holding a lost-phone report still had to do three things in the right order,
+keyed on a value they usually do not have. **They do not know the login:** a
+foreman knows a face and a badge, and every tool in that module takes an email on
+a system the worker has never signed into from a keyboard.
+
+`recover_mobile_access` is one call for it.
+
+**The badge is the identity proof.** It is a physical card the worker still has
+when the phone is gone, and it resolves through the same register a crew clock
+reads — so a retired card, an unknown card and a card belonging to somebody who
+has left stay three different refusals rather than collapsing into one. Naming an
+employee or a login as well makes the two check each other, and a badge that
+resolves to somebody else **stops the reset**: that is either the wrong card or
+the wrong person, and neither ends in a working credential.
+
+**The no-badge path is not refused, it is recorded.** Somebody who lost the phone
+AND the card is an ordinary Tuesday, and a recovery tool that could not serve it
+is one a farm routes around. `identity_verified_by` is `badge` or `manager
+assertion`, and the second goes onto the grant's notes and into the audit row —
+a fact about how much this reset is worth, rather than something to be inferred
+from an absent argument.
+
+**It revokes before it mints.** The lost handset is in somebody else's pocket
+while the call runs; minting first would leave the old credential live for as
+long as the second step took, and forever if the second step never happened. A
+failure after the revocation leaves the account with no credential, which is the
+safe side of that trade — and the test for it makes the mint fail on purpose,
+because nothing else can see the ordering. Arguments are validated BEFORE
+anything is destroyed, though: nothing about a typo in `expiry_days` requires a
+working credential to have been killed first.
+
+**The Employee record is never touched.** Not re-created, not duplicated. Their
+badge, shifts, buckets, housing, I-9 and W-4 hang off a docname that does not
+change here — the difference between recovering an account and hiring somebody
+twice, and only one of those puts a person on the dispatch board twice and in the
+payroll register once. Somebody with no login at all is refused and pointed at
+`onboard_employee(employee=...)`, which reuses the same record for exactly this
+reason.
+
+`reason` is required and has a length floor: that row is the audit trail for
+destroying somebody's credential and issuing another.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

@@ -1541,3 +1541,259 @@ def _report_sweep(swept: list, skipped: list, days: int) -> None:
 def list_mobile_roles() -> list:
 	"""Every role this app defines, in full. Used by list_mobile_users."""
 	return [roles.describe_role(spec) for spec in roles.ROLE_SPECS]
+
+
+# ── 12. recover_mobile_access ───────────────────────────────────────────────
+#: Shortest a recovery `reason` may be and still be an explanation. Matches the
+#: floor `evidence.py` puts on a journal-entry reason, for the same judgement: a
+#: mandatory field somebody types "lost" into has been satisfied without being
+#: answered, and this one is the audit trail for a credential reset.
+MIN_RECOVERY_REASON = 8
+
+
+def recover_mobile_access(args: dict) -> ToolResult:
+	"""A worker lost their phone: kill the old credential, mint a new one, keep the person.
+
+	WHAT EXISTED AND WHY IT WAS NOT A RECOVERY PATH. Every mechanical piece has
+	been here since v0.17.0 — `revoke_api_token` even says in its own result that
+	it is "the 'they lost their phone' one" — and a manager holding a lost-phone
+	report still had to do three things in the right order, keyed on a value they
+	usually do not have.
+
+      1. THEY DO NOT KNOW THE LOGIN. A foreman knows a face and a badge. Every
+         tool in this module takes `user`, which is an email address on a system
+         the worker has never signed into from a keyboard.
+
+      2. THE ORDER MATTERS AND NOTHING ENFORCED IT. The phone is in somebody
+         else's pocket right now. Minting the replacement first and revoking
+         afterwards leaves the old credential live for as long as the second call
+         takes — and if the second call never happens, forever. This revokes
+         FIRST, always, and reports it as a separate outcome.
+
+      3. NOTHING ASKED WHO IT WAS FOR. `generate_api_token` mints a credential
+         for whatever login it is given. That is right for a tool an
+         administrator drives, and wrong as the whole of an account-recovery
+         path, because the request arrives as somebody at a farm office saying
+         they are somebody.
+
+	────────────────────────────────────────────────────────────────────────
+	THE BADGE IS THE IDENTITY PROOF, AND ITS ABSENCE IS RECORDED RATHER THAN
+	REFUSED
+	────────────────────────────────────────────────────────────────────────
+
+	A badge is a physical card the worker still has when the phone is gone, and
+	scanning it proves possession of something this site issued to one person.
+	When `badge` is given it resolves through the same register a crew clock
+	uses — so a retired card, an unknown card and a card belonging to somebody
+	who has left are three different refusals rather than one — and when the
+	caller ALSO names an employee or a login, the two must agree. A badge that
+	resolves to somebody else stops the reset, because that is either the wrong
+	card or the wrong person and neither should end in a working credential.
+
+	THE NO-BADGE PATH IS NOT REFUSED. A worker who lost the phone AND the card is
+	an ordinary Tuesday, and a recovery tool that could not serve it is a recovery
+	tool a farm routes around. What it does instead is SAY SO:
+	`identity_verified_by` is `"badge"` or `"manager assertion"`, and the second
+	is a fact about how much this reset is worth, recorded on the grant and in
+	the audit row rather than left to be inferred from an absent argument.
+
+	────────────────────────────────────────────────────────────────────────
+	THE EMPLOYEE RECORD IS NEVER TOUCHED
+	────────────────────────────────────────────────────────────────────────
+
+	Not re-created, not duplicated, not re-onboarded. Their badge, their shifts,
+	their buckets, their housing, their I-9 and their W-4 all hang off an Employee
+	docname that does not change here — which is the whole difference between
+	recovering an account and hiring somebody twice. A person with no login at all
+	is REFUSED and pointed at `onboard_employee(employee=...)`, which reuses the
+	same record for exactly this reason.
+	"""
+	reason = as_str(args, "reason", required=True).strip()
+	if len(reason) < MIN_RECOVERY_REASON:
+		raise ToolError(
+			f"reason is {reason!r}. This is the audit trail for killing somebody's credential and "
+			"minting another — say what happened and where, so the row means something in "
+			"November. Nothing was changed."
+		)
+
+	person, email, verification = _recovery_subject(args)
+
+	if not email:
+		raise ToolError(
+			f"{person or 'that person'} has no login on this site, so there is no credential to "
+			"recover. onboard_employee(employee=...) gives them one and REUSES this Employee "
+			"record rather than creating a second — their badge, shifts, buckets and paperwork "
+			"all hang off it. Nothing was changed."
+		)
+
+	row = _user_row(email)
+	if not row.get("enabled"):
+		raise ToolError(
+			f"User {email!r} is disabled. A credential minted for a disabled login does not work, "
+			"and re-enabling somebody is a different decision from replacing their phone — if "
+			"they still work here, enable the account first. Nothing was changed."
+		)
+
+	# ARGUMENTS ARE CHECKED BEFORE ANYTHING IS DESTROYED. `expiry_days` is
+	# validated inside `generate_api_token`, which runs after the revocation —
+	# so a typo in it would have killed a working credential and then refused to
+	# issue the replacement. Nothing about a bad argument requires the revocation
+	# to have happened, and the "safe side" argument below is about failures
+	# that only surface once the mint is genuinely under way.
+	review_days = as_int(args, "expiry_days", DEFAULT_TOKEN_REVIEW_DAYS) or DEFAULT_TOKEN_REVIEW_DAYS
+	if review_days <= 0:
+		raise ToolError(
+			"expiry_days must be a positive number of days. Nothing was changed — the phone that "
+			"was lost still works, so fix the argument and call again."
+		)
+
+	# REVOKED FIRST, ALWAYS. The old phone is in somebody else's pocket while
+	# this call runs; a failure after this point leaves the account with NO
+	# credential, which is the safe side of that trade.
+	had_token = _clear_token(email)
+
+	issued = generate_api_token(
+		{
+			"user": email,
+			"expiry_days": review_days,
+			"url": args.get("url"),
+		}
+	).data
+
+	if doctype_exists(GRANT) and frappe.db.exists(GRANT, email):
+		existing = _grant_row(email)
+		_write_grant(
+			email,
+			{
+				"mobile_role": existing.get("mobile_role") or _role_from_held(email),
+				"notes": _append_note(
+					existing.get("notes"),
+					f"credential recovered ({verification['method']}): {reason}",
+				),
+			},
+		)
+
+	card = None
+	if as_bool(args, "issue_qr", False):
+		card = generate_mobile_login_qr({**args, "user": email}).data
+
+	return ToolResult(
+		data={
+			"user": email,
+			"employee": person or None,
+			"employee_name": verification.get("employee_name"),
+			"identity_verified_by": verification["method"],
+			"badge": verification.get("badge"),
+			"reason": reason,
+			"previous_credential_revoked": had_token,
+			"api_key": issued["api_key"],
+			"api_secret": issued["api_secret"],
+			"auth_header": issued["auth_header"],
+			"farmops_auth_header": issued["farmops_auth_header"],
+			"mobile_endpoint": issued["mobile_endpoint"],
+			"token_review_due": issued["token_review_due"],
+			"entity_access": issued["entity_access"],
+			"roles_held": issued["roles_held"],
+			"qr": card,
+			"employee_record_note": (
+				"THE EMPLOYEE RECORD WAS NOT TOUCHED. Their badge, shifts, buckets, housing and "
+				"paperwork all still hang off the same docname — recovering an account and "
+				"hiring somebody twice are different acts, and only one of them leaves a person "
+				"on the dispatch board twice and in the payroll register once."
+			),
+			"secret_note": issued["secret_note"],
+			"old_device_note": (
+				"The previous credential was revoked BEFORE the new one was minted, so the lost "
+				"handset stopped working at that moment rather than when somebody got round to "
+				"the second call."
+				if had_token
+				else "This account held no live credential, so nothing was revoked — the phone "
+				"that was lost was already logged out, or was never enrolled."
+			),
+			"verification_note": verification["note"],
+		},
+		summary=(
+			f"recovered mobile access for {verification.get('employee_name') or email} "
+			f"({verification['method']})"
+			+ ("; previous credential revoked" if had_token else "; there was no live credential")
+			+ ("; QR issued" if card else "")
+		),
+	)
+
+
+def _recovery_subject(args: dict) -> tuple:
+	"""`(employee, login, verification)` from a badge, an Employee or a login.
+
+	THE BADGE WINS AND THE OTHERS ARE CHECKED AGAINST IT. When a caller scans a
+	card and also names who they think it is, agreement is the verification —
+	and disagreement is the one outcome that must not end in a working
+	credential, because it is either the wrong card or the wrong person.
+	"""
+	from . import badges
+
+	badge_id = as_str(args, "badge") or as_str(args, "badge_id")
+	claimed_employee = as_str(args, "employee")
+	claimed_user = (as_str(args, "user") or "").strip().lower()
+
+	if not (badge_id or claimed_employee or claimed_user):
+		raise ToolError(
+			"name who lost the phone: `badge` (scanned from the card they still have, which is "
+			"the only argument here that PROVES anything), `employee`, or `user`. Nothing was "
+			"changed."
+		)
+
+	if badge_id:
+		held = badges.resolve_badge({"badge": badge_id, "company": args.get("company")}).data
+		person = str(held["employee"])
+		if claimed_employee and claimed_employee != person:
+			raise ToolError(
+				f"badge {badge_id!r} belongs to {person} ({held['employee_name']}), and the call "
+				f"names {claimed_employee!r}. That is either the wrong card or the wrong person, "
+				"and neither ends in a working credential. Nothing was changed."
+			)
+		email = str(frappe.db.get_value(EMPLOYEE, person, "user_id") or "").strip().lower()
+		if claimed_user and email and claimed_user != email:
+			raise ToolError(
+				f"badge {badge_id!r} belongs to {person} ({held['employee_name']}), whose login "
+				f"is not {claimed_user!r}. Nothing was changed."
+			)
+		return (
+			person,
+			email or claimed_user,
+			{
+				"method": "badge",
+				"badge": badge_id,
+				"employee_name": held.get("employee_name"),
+				"note": (
+					f"The card issued to {held.get('employee_name')} was presented and resolved "
+					"through the same register a crew clock reads, so this reset is tied to "
+					"possession of something this site issued to one person."
+				),
+			},
+		)
+
+	person = claimed_employee
+	if not person and claimed_user:
+		person = _employee_for(claimed_user)
+	email = claimed_user
+	if not email and person:
+		if not frappe.db.exists(EMPLOYEE, person):
+			raise ToolError(f"no Employee called {person!r} on this site. Nothing was changed.")
+		email = str(frappe.db.get_value(EMPLOYEE, person, "user_id") or "").strip().lower()
+
+	name = str(frappe.db.get_value(EMPLOYEE, person, "employee_name") or "") if person else ""
+	return (
+		person,
+		email,
+		{
+			"method": "manager assertion",
+			"badge": None,
+			"employee_name": name or None,
+			"note": (
+				"NO BADGE WAS PRESENTED. This reset rests on the calling manager saying who the "
+				"person is, which is a weaker claim than a scanned card and is recorded as such "
+				"— on the grant, in this result and in the audit row. Somebody who lost the "
+				"phone AND the card is an ordinary Tuesday; pass `badge` when they still have it."
+			),
+		},
+	)
