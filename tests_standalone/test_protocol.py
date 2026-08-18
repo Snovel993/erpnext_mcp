@@ -1075,8 +1075,8 @@ class Catalogue(SeededTestCase):
 		nothing but their name and a correction is the only edit there is — and a
 		rename repoints every Employee already on it.
 		"""
-		self.assertEqual(len(registry.TOOLS), 740)
-		self.assertEqual(len(registry.READ_TOOLS), 368)
+		self.assertEqual(len(registry.TOOLS), 742)
+		self.assertEqual(len(registry.READ_TOOLS), 370)
 		self.assertEqual(len(registry.MUTATING_TOOLS), 372)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):

@@ -136,6 +136,7 @@ from .tools import (
 	tax,
 	tax_remittance,
 	taxforms,
+	trace,
 	trade,
 	training,
 	training_sessions,
@@ -17354,6 +17355,76 @@ TOOLS = {
 			"limit": _LIMIT,
 		},
 		title="List bucket entries",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"trace_backward": _tool(
+		trace.trace_backward,
+		"THE MOCK RECALL, BACKWARDS: everything that happened to one lot. Start "
+		"from whatever the person who telephoned quoted — a shipment, a bin, a "
+		"scale ticket, a settlement or one bucket capture — and this walks back "
+		"to the blocks, the crews, the pickers and the days, and then to what "
+		"those blocks had been given. Read-only; writes nothing.\n\n"
+		"THE SPRAY HOP IS WHY THIS EXISTS. A residue detection is a question about "
+		"the spray register, and answering it meant collecting block ids off the "
+		"captures by hand and filtering the sprays by block and by date on paper. "
+		"Applications are bounded at the LAST CAPTURE: a pass made after the fruit "
+		"came off did not reach it, and naming it sends somebody to investigate a "
+		"tank that was never on that crop. Planned and Cancelled passes are "
+		"excluded — neither put anything on the ground.\n\n"
+		"EVERY BREAK IS NAMED, WHICH IS THE POINT. `unlinked_counts` says how many "
+		"captures in this lot carry no block, no crew, no bin or no shipment id — "
+		"the number that turns 'our traceability is fine' into a fact. A block id "
+		"matching no Field, and a shipment id matching no Trade Shipment, are "
+		"reported as unresolved rather than dropped: both are real data faults and "
+		"the silent version is how a chain looks complete and is not.\n\n"
+		"To go the other way — from a block, a spray or a water test to the lots "
+		"that carry it and the customers holding them — use trace_forward.",
+		{
+			"shipment": _field(_STRING, "A shipment id as written on the captures, or a Trade Shipment docname."),
+			"bin": _field(_STRING, "A bin id as written on the captures."),
+			"scale_ticket": _field(_STRING, "A Scale Ticket docname. Widens to its origin block on its day."),
+			"settlement": _field(_STRING, "A Settlement Statement docname. Reaches the ground through its tickets."),
+			"bucket_entry": _field(_STRING, "One Bucket Log Entry. Widens to everything sharing its block, bin and shipment."),
+			"company": _COMPANY,
+			"date_from": _field(_STRING, "Narrow the captures, YYYY-MM-DD. Defaults to what the anchor implies."),
+			"date_to": _field(_STRING, "YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="Trace a lot back to the block",
+		available=_needs_doctype("Bucket Log Entry"),
+		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"trace_forward": _tool(
+		trace.trace_forward,
+		"THE MOCK RECALL, FORWARDS: which lots carry product from here, and WHO "
+		"HAS THEM. Start from a block, a spray application or a water test and "
+		"this walks to the captures, the bins, the shipments, the settlements, "
+		"the invoices and — the field a recall is actually run from — "
+		"`customers_to_notify`. Read-only; writes nothing.\n\n"
+		"THE DATE BOUND IS THE WHOLE VALUE OF IT. From a spray or a water test "
+		"this takes only what was picked AFTER that record, because a recall "
+		"naming three seasons of fruit over one tank in April is a recall nobody "
+		"can act on, and an operation that issues one is an operation whose next "
+		"recall is not believed. From a bare block it takes everything and SAYS "
+		"SO — unbounded is a legitimate question and a different one.\n\n"
+		"IT REPORTS THE FRUIT IT CANNOT PLACE. A capture with no bin, or none "
+		"with no shipment id, is product that left and cannot be traced to "
+		"anybody; those counts are in `unlinked_counts` and the honest scope of "
+		"the recall is wider than the customer list. Reaching NO customer at all "
+		"is reported as a break in its own right rather than as an empty list.\n\n"
+		"To go the other way — from a shipment or a bin back to the blocks and "
+		"the sprays that reached them — use trace_backward.",
+		{
+			"block": _field(_STRING, "A Field docname, or a block id as written on the captures. Unbounded unless date_from is given."),
+			"spray_application": _field(_STRING, "A Spray Application docname. Bounds the trace at the pass."),
+			"water_test": _field(_STRING, "A Water Test docname. Bounds the trace at the sample, through its zone's Field."),
+			"company": _COMPANY,
+			"date_from": _field(_STRING, "Override the bound the anchor implies, YYYY-MM-DD."),
+			"date_to": _field(_STRING, "YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="Trace a block forward to the lots",
 		available=_needs_doctype("Bucket Log Entry"),
 		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

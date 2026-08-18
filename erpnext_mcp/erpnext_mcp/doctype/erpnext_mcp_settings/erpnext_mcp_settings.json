@@ -599,6 +599,8 @@
   "allow_migrate_model_format",
   "bucket_log_read_section",
   "allow_list_bucket_entries",
+  "allow_trace_backward",
+  "allow_trace_forward",
   "allow_get_bucket_session",
   "allow_list_bucket_sessions",
   "allow_get_piecework_summary",
@@ -4840,6 +4842,20 @@
    "fieldname": "allow_list_bucket_entries",
    "fieldtype": "Check",
    "label": "List Bucket Entries"
+  },
+  {
+   "default": "1",
+   "description": "READ. The mock recall backwards: one lot back to the blocks, the crews, the pickers and the sprays that reached them.",
+   "fieldname": "allow_trace_backward",
+   "fieldtype": "Check",
+   "label": "Trace Backward"
+  },
+  {
+   "default": "1",
+   "description": "READ. The mock recall forwards: which lots carry product from a block, spray or water source, and which customers hold them.",
+   "fieldname": "allow_trace_forward",
+   "fieldtype": "Check",
+   "label": "Trace Forward"
   },
   {
    "default": "1",

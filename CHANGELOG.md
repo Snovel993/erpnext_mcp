@@ -158,6 +158,69 @@ six cabins, both readers naming the same set before the work, the same set after
 one walk, and — the test that pins the original complaint — that walking a cabin
 does **not** clear its detector test.
 
+### The mock recall nothing walked
+
+Every critical tracking event the FSMA Food Traceability Rule asks for has been
+recorded since v0.44.0. `Bucket Log Entry` carries `crew_id`, `block_id`,
+`bin_id` and `shipment_id`, and `compliance_fields.py` states the intent of each
+in the field definition itself — "the block is where the lot came from, and it is
+the join to the spray record, which is how a residue question becomes an
+answerable question", and "a buyer's mock recall is timed, and an operation that
+cannot answer in four hours fails the audit".
+
+**The data threaded. Nothing walked it.** Answering "which blocks are in this
+lot" meant filtering captures by hand, collecting the block ids, opening the
+spray register, filtering it by block and by date, and writing the result on
+paper — a four-hour answer to a four-hour question, done by the one person who
+knows where everything is, on the day a buyer calls.
+
+`erpnext_mcp/traceability.py` is the walk; `trace_backward` and `trace_forward`
+are the doors.
+
+**They are not one question with a flag.** Backward is asked when the PRODUCT is
+suspect — a customer complaint, a residue detection — and starts from a
+`shipment`, a `bin`, a `scale_ticket`, a `settlement` or one `bucket_entry`,
+ending at the blocks, the crews, the pickers and then at what those blocks had
+been given. Forward is asked when the SOURCE is suspect — a spray at the wrong
+rate, a water test that came back positive — and starts from a `block`, a
+`spray_application` or a `water_test`, ending at the bins, the shipments, the
+settlements and `customers_to_notify`.
+
+The starting point is several arguments rather than a doctype-and-name pair
+because the person asking is holding ONE thing and which thing depends on who
+telephoned them. A buyer's QA team quotes a shipment; a packing house a bin or a
+ticket; an accountant a settlement. Asking all of them to say
+`from_doctype="Trade Shipment"` is asking them to learn this app's register names
+during the one hour when nobody has time to look them up.
+
+**The date bound is the whole value of a forward trace.** From a spray or a water
+test it takes only what was picked AFTER that record. A recall naming three
+seasons of fruit because one tank went out in April is a recall nobody can act
+on, and an operation that issues one is an operation whose next recall is not
+believed. From a bare block it takes everything and SAYS SO — unbounded is a
+legitimate question and a different one. `trace_backward` applies the mirror
+bound: sprays are cut at the last capture, because a pass made after the fruit
+came off did not reach it. Both bounds have a test that fails when the bound is
+removed.
+
+**Every break is named, which is the point of the read rather than a failure of
+it** — the idiom `trace_contract_to_cash` established, and the argument holds
+harder here. `unlinked_counts` reports, per column, how many captures in this lot
+carry no block, no crew, no bin or no shipment id: the number that turns "our
+traceability is fine" into a fact somebody can argue with. A `block_id` matching
+no Field and a `shipment_id` matching no Trade Shipment are reported as
+unresolved rather than dropped — both are free text against registers with their
+own names, both are real data faults, and the silent version of either is how a
+chain looks complete and is not.
+
+**Reaching no customer is a break in its own right**, never an empty list. An
+empty `customers_to_notify` and a complete one look identical to anybody
+skimming, and one of them means the recall cannot be executed at all.
+
+It invents no link the site did not record. Two bins called "17" in two seasons
+are two different bins, and this walks the ids that were actually stored inside
+the window it was asked about.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

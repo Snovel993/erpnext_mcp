@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 740 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 742 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 368 read tools are **on** by default and can be switched off individually. A
+All 370 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16528,3 +16528,75 @@ as an unsupported claim.
 `has_document` now falls back to the File table, batched in one query for the
 whole register. The attach field stays authoritative when it is set;
 `document_source` says which of the two answered.
+
+
+## The mock recall, in both directions (v0.93.0)
+
+### `trace_backward` · `trace_forward`
+
+Read-only, both on by default. They write nothing operational.
+
+Every critical tracking event the FSMA Food Traceability Rule asks for has been
+recorded since v0.44.0. `Bucket Log Entry` carries `crew_id`, `block_id`,
+`bin_id` and `shipment_id`, and `compliance_fields.py` states the intent of each
+in the field definition itself — *"the block is where the lot came from, and it
+is the join to the spray record, which is how a residue question becomes an
+answerable question"*, and *"a buyer's mock recall is timed, and an operation
+that cannot answer in four hours fails the audit."*
+
+**The data threaded. Nothing walked it.** Answering "which blocks are in this
+lot" meant filtering captures by hand, collecting the block ids, opening the
+spray register, filtering that by block and by date, and writing the result on
+paper — a four-hour answer to a four-hour question, done by the one person who
+knows where everything is, on the day a buyer calls.
+
+### They are not one question with a flag
+
+| | `trace_backward` | `trace_forward` |
+|---|---|---|
+| Asked when | the PRODUCT is suspect | the SOURCE is suspect |
+| Triggered by | a customer complaint, a residue detection, a positive test at the packing house | a spray at the wrong rate, a water test that came back positive, a flooded block |
+| Start from | `shipment`, `bin`, `scale_ticket`, `settlement`, `bucket_entry` | `block`, `spray_application`, `water_test` |
+| Ends at | blocks, crews, pickers, days — then the sprays and water those blocks were given | bins, shipments, settlements, invoices — and `customers_to_notify` |
+
+The starting point is several arguments rather than a doctype-and-name pair
+because the person asking is holding **one** thing and which thing depends
+entirely on who telephoned them. Asking them to say `from_doctype="Trade
+Shipment"` is asking them to know this app's register names during the one hour
+when nobody has time to look them up.
+
+### The date bound is the whole value of a forward trace
+
+From a spray or a water test, `trace_forward` takes only what was picked **after**
+that record. A recall naming three seasons of fruit because one tank went out in
+April is a recall nobody can act on, and an operation that issues one is an
+operation whose next recall is not believed.
+
+From a bare block it takes everything **and says so** — unbounded is a legitimate
+question and a different one, and the two must not be silently confused. Pass
+`date_from` to bound it by hand.
+
+`trace_backward` applies the mirror bound: applications are cut at the **last
+capture**, because a pass made after the fruit came off did not reach it, and
+naming it sends somebody to investigate a tank that was never on that crop.
+Planned and Cancelled passes are excluded from both — neither put anything on the
+ground.
+
+### Every break is named, and that is the point
+
+| Break | What it means |
+|---|---|
+| `unlinked_counts` | captures in this lot carrying no block / crew / bin / shipment id, **per column**. The number that turns "our traceability is fine" into a fact |
+| `unresolved_block_ids` | a `block_id` matching no `Field`. The spray and water history covers only what resolved, so the answer is INCOMPLETE and says so |
+| `unresolved_shipment_ids` | a `shipment_id` matching no `Trade Shipment`. Free text against a register with its own names — the fruit left and the register cannot say to whom |
+| `breaks[].missing == "customers"` | **nobody to telephone.** No route reaches a customer, so the recall cannot be executed from this system at all |
+
+The last one is a break rather than an empty list on purpose: an empty
+`customers_to_notify` and a complete one look identical to anybody skimming.
+
+### What it will not do
+
+It invents no link the site did not record. `bin_id` is free text, two bins
+called "17" in two seasons are two different bins, and this walks the ids that
+were actually stored within the window it was asked about rather than guessing
+which "17" was meant.
