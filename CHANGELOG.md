@@ -221,6 +221,53 @@ It invents no link the site did not record. Two bins called "17" in two seasons
 are two different bins, and this walks the ids that were actually stored inside
 the window it was asked about.
 
+### The one screen an owner opens
+
+Every number an owner wants at six in the morning existed, and each lived behind
+its own call — crews in `list_shifts`, harvest in the bucket captures, compliance
+in `get_audit_readiness`, the camp in `get_housing_capacity`, money in
+`compute_all_kpis`, weather on the shift's own readings, work waiting in
+`list_pending_approvals` and `list_dispatch_board`. Seven calls, seven shapes,
+and no answer to the only question actually being asked: **is anything wrong
+today.** Assembling that by hand is a habit nobody keeps.
+
+`get_owner_dashboard` is one call, and the part that makes it a dashboard rather
+than a dump is **`attention`**: a ranked list of what is wrong now, each row
+carrying the severity, the count, and `read_it_with` — the tool that answers that
+row in full. Ranked by SEVERITY rather than by section, because an open Critical
+compliance alert and a KPI two percent off target are not two items on one list,
+and presenting them as though they were is how somebody learns to stop reading a
+dashboard.
+
+**Nothing invents a threshold.** Every severity is read off the record that
+raised it: a Compliance Alert's own severity, a KPI definition's own bands. This
+tool decides order, never gravity — and the test for it changes an alert's
+severity and watches the ranking follow, which is the only way to show the number
+is not being decided in the dashboard.
+
+**An unavailable source is not a clean one**, and that is the failure this read
+must never produce: a dashboard showing no compliance alerts because the
+compliance source refused looks exactly like a farm with no compliance alerts. So
+`sections_reporting` and `sections_unavailable` are both returned and
+`unavailable[]` carries the reason each source gave. A source that refuses is
+never fatal — the read composes tools that each enforce their own role, so a
+caller holding some of them gets the sections they may see and a named refusal
+for the rest, rather than an error page.
+
+**It carries no `available` gate**, alone among the tools that could. Gating the
+whole read on any one register would contradict the thing it exists to do, and
+would take the dashboard away from exactly the farm mid-setup that most needs to
+see what is missing. The test that caught this was the one asserting a failed
+source is reported: with the gate on, removing Compliance Alert removed the
+dashboard.
+
+**Weather comes off the shift, not off the internet.** The most recent reading
+the scheduled sweep already collected onto each open shift, with its own
+timestamp and `source` so an hour-old reading cannot be read as a live one.
+`fetch_weather_now` writes a reading and refuses a closed shift; putting an
+outbound request on the path of a screen somebody leaves open would be the wrong
+trade.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

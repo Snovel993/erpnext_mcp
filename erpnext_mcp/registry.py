@@ -105,6 +105,7 @@ from .tools import (
 	notes,
 	opening,
 	org,
+	owner,
 	packets,
 	parties,
 	payroll,
@@ -8763,6 +8764,52 @@ TOOLS = {
 		title="Check all regulation feeds",
 		available=_needs_doctype("Regulation Feed"),
 		requires="the Regulation Feed DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_owner_dashboard": _tool(
+		owner.get_owner_dashboard,
+		"THE ONE SCREEN AN OWNER OPENS: crews on the ground, harvest captured "
+		"today, the compliance posture, the camp backlogs, the financial KPIs, "
+		"the weather the crew is standing in, and what is waiting on somebody — "
+		"in one call. Read-only.\n\n"
+		"`attention` IS THE PRODUCT AND EVERYTHING ELSE IS ITS EVIDENCE. A ranked "
+		"list of what is wrong right now, each row naming the tool that answers it "
+		"in full. Ranked by SEVERITY rather than by section, because an open "
+		"Critical compliance alert and a KPI two percent off target are not two "
+		"items on one list — and presenting them as though they were is how "
+		"somebody learns to stop reading a dashboard.\n\n"
+		"NOTHING HERE INVENTS A THRESHOLD. Every severity is read off the record "
+		"that raised it: a Compliance Alert's own severity, a KPI definition's own "
+		"bands. This tool decides ORDER, never gravity.\n\n"
+		"A SOURCE THAT REFUSES IS REPORTED, NEVER FATAL — a dashboard that raises "
+		"because the caller lacks the shift role, or because a farm mid-setup has "
+		"no KPI definitions, is a dashboard nobody opens twice. AND AN UNAVAILABLE "
+		"SOURCE IS NOT A CLEAN ONE: `sections_unavailable` is returned beside "
+		"`sections_reporting`, because a dashboard showing no compliance alerts "
+		"because the compliance source refused looks exactly like a farm with "
+		"none.\n\n"
+		"WEATHER COMES OFF THE SHIFT, NOT OFF THE INTERNET. The most recent "
+		"reading the scheduled sweep already collected onto each open shift, with "
+		"its own timestamp and `source`. Putting an outbound request on the path "
+		"of a screen somebody leaves open would be the wrong trade; "
+		"fetch_weather_now is the deliberate call for the moment the schedule is "
+		"too slow for.",
+		{
+			"company": _COMPANY,
+			"as_of": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
+			"preview": _field(
+				_INTEGER,
+				"How many rows each section carries, 1–50. Default 10 — the tool named on each "
+				"section is where the whole list lives.",
+			),
+		},
+		required=("company",),
+		title="Owner operational dashboard",
+		# NO `available` GATE, deliberately. Every other tool that names one is
+		# unusable without its DocType; this one composes seven sources and
+		# reports the ones that could not answer, so gating the whole read on any
+		# single register would contradict the thing it exists to do — and would
+		# take the entire dashboard away from a farm mid-setup, which is exactly
+		# the farm that most needs to see what is missing.
 	),
 	"get_audit_readiness": _tool(
 		calendar.get_audit_readiness,

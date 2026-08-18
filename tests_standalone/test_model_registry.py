@@ -834,14 +834,15 @@ class ToolRegistration(unittest.TestCase):
 		# Branch, Employment Type and Employee Grade. Every one of them was a
 		# register `create_employee` refused a value against and nothing could
 		# add to, so the refusal named an answer the caller could not act on.
-		# v0.93.0 adds THREE reads and no write. `get_policy_coverage` is the
-		# only read over the SOP library that is about the policies which do NOT
+		# v0.93.0 adds FOUR reads and no write. `get_policy_coverage` is the only
+		# read over the SOP library that is about the policies which do NOT
 		# exist. `trace_backward` and `trace_forward` are the mock recall in both
 		# directions — the CTE columns on Bucket Log Entry have threaded since
-		# v0.44.0 and nothing walked them. Nothing about the ML model registry
-		# changed; the totals moved because the catalogue did.
-		self.assertEqual(len(self.registry.TOOLS), 742)
-		self.assertEqual(len(self.registry.READ_TOOLS), 370)
+		# v0.44.0 and nothing walked them. `get_owner_dashboard` composes seven
+		# existing reads into the one screen an owner opens. Nothing about the ML
+		# model registry changed; the totals moved because the catalogue did.
+		self.assertEqual(len(self.registry.TOOLS), 743)
+		self.assertEqual(len(self.registry.READ_TOOLS), 371)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 372)
 
 

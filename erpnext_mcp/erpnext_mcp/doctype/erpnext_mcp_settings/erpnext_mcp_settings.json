@@ -309,6 +309,7 @@
   "allow_get_compliance_calendar",
   "allow_get_compliance_alert",
   "allow_get_audit_readiness",
+  "allow_get_owner_dashboard",
   "allow_list_compliance_rules",
   "calendar_col",
   "allow_refresh_compliance_alerts",
@@ -2935,6 +2936,13 @@
    "fieldname": "allow_get_audit_readiness",
    "fieldtype": "Check",
    "label": "Audit Readiness Score"
+  },
+  {
+   "default": "1",
+   "description": "READ. The one screen an owner opens: crews, harvest, compliance, camp, financial KPIs, weather and what is waiting — with a ranked list of what needs attention.",
+   "fieldname": "allow_get_owner_dashboard",
+   "fieldtype": "Check",
+   "label": "Get Owner Dashboard"
   },
   {
    "default": "1",

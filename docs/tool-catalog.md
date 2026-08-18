@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 742 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 743 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 370 read tools are **on** by default and can be switched off individually. A
+All 371 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16600,3 +16600,70 @@ It invents no link the site did not record. `bin_id` is free text, two bins
 called "17" in two seasons are two different bins, and this walks the ids that
 were actually stored within the window it was asked about rather than guessing
 which "17" was meant.
+
+
+## The one screen an owner opens (v0.93.0)
+
+### `get_owner_dashboard`
+
+Read-only, on by default. **No `available` gate** — it composes seven sources and
+reports the ones that could not answer, so gating the whole read on any single
+register would contradict what it exists to do, and would take the dashboard away
+from exactly the farm that most needs to see what is missing.
+
+Every number on it already existed and each lived behind its own call — crews in
+`list_shifts`, harvest in the bucket captures, compliance in
+`get_audit_readiness`, the camp in `get_housing_capacity`, money in
+`compute_all_kpis`, weather on the shift's own readings, work waiting in
+`list_pending_approvals` and `list_dispatch_board`. Seven calls, seven shapes,
+and no answer to the only question an owner asks at six in the morning: **is
+anything wrong today.**
+
+### `attention` is the product; everything else is its evidence
+
+A ranked list of what is wrong right now, each row carrying `severity`,
+`section`, `headline`, `detail`, `count` and **`read_it_with`** — the tool that
+answers that row in full. Ranked by severity rather than by section, because an
+open Critical compliance alert and a KPI two percent off target are not two items
+on one list, and presenting them as though they were is how somebody learns to
+stop reading a dashboard.
+
+**Nothing invents a threshold.** Every severity is read off the record that
+raised it — a Compliance Alert's own `severity`, a KPI definition's own bands.
+This tool decides *order*, never *gravity*. The test for that changes an alert's
+severity and watches the ranking follow.
+
+### Sections
+
+| Section | Source | What it raises |
+|---|---|---|
+| `crews` | `list_shifts` | a shift opened before today and still open — `end_shift` writes the Attendance, so an unclosed shift is a day of wages with no record behind it |
+| `harvest` | `list_bucket_entries` | captures whose badge resolved to no employee — those buckets pay nobody |
+| `compliance` | `get_audit_readiness` | open Critical and Warning alerts, at their own severity |
+| `sop_coverage` | `get_policy_coverage` | SOP categories with no policy in force |
+| `camp` | `get_housing_capacity` | the two backlogs **separately** — habitability walks and detector tests are different errands |
+| `financial` | `compute_all_kpis` | KPIs past their own thresholds, carrying the definition's own message |
+| `weather` | the open shifts' own readings | open shifts with **no** reading at all |
+| `approvals` · `dispatch` | `list_pending_approvals`, `list_dispatch_board` | documents parked, open Criticals, and tasks sitting in the pool |
+
+### An unavailable source is not a clean one
+
+This is the failure this read must never produce: **a dashboard showing no
+compliance alerts because the compliance source refused looks exactly like a farm
+with no compliance alerts.** So `sections_reporting` and `sections_unavailable`
+are both returned, `unavailable[]` carries the reason each source gave, and the
+summary counts both.
+
+A source that refuses is never fatal. The dashboard composes tools that each
+enforce their own role, so a caller holding some of those roles gets the sections
+they may see and a named refusal for the rest — rather than an error page, which
+is a dashboard nobody opens twice.
+
+### Weather comes off the shift, not off the internet
+
+`fetch_weather_now` exists and is deliberately not called here. It writes a
+reading, it refuses a closed shift, and a dashboard that reached Open-Meteo on
+every render would put an outbound HTTP request on the path of a screen somebody
+leaves open. The scheduled sweep already collects readings every fifteen minutes
+onto the open shifts; this reports the most recent of them **with its own
+timestamp and `source`**, so an hour-old reading cannot be read as a live one.
