@@ -34,13 +34,25 @@ apparent choice — except it would not be one, it would be the seed. So this
 is listed in `patches.txt` ABOVE `set_default_tool_switches`, and that
 ordering is load-bearing.
 
-READS AND WRITES GO THROUGH `frappe.db.get_single_value` / `frappe.db.set_value`
-rather than raw SQL. `ERPNext MCP Settings` is a Single: `tabSingles` is a
-(doctype, field, value) table with no schema of its own, so a field dropped
-from the DocType JSON leaves its stored row exactly where it was — an
-orphaned key, still readable by name, same as any other orphaned column. The
-standalone test double models this the same way (`STORE.singles`), which is
-what makes the patch's own test able to prove the carry actually happens.
+READS AND WRITES GO THROUGH RAW SQL ON `tabSingles`, NOT THE ORM. The first
+cut of this patch used `frappe.db.get_single_value` / `frappe.db.set_value`,
+and it failed on deploy: `ValidationError: Field allow_create_discipline_record
+does not exist on ERPNext MCP Settings`. The DocType JSON only declares the
+NEW fieldnames — the old ones are gone from the schema by the time this patch
+runs — and the ORM validates a Single's fieldname against that schema before
+it will touch `tabSingles`. Raw SQL is the only way to reach a row whose field
+no longer exists in the DocType at all, which is exactly the row this patch
+exists to read.
+
+`tabSingles` is a (doctype, field, value) table with no schema of its own, so
+a field dropped from the DocType JSON leaves its stored row exactly where it
+was — an orphaned key, still readable by name, same as any other orphaned
+column. Each pair is carried by INSERTing a new row for `allow_<new>` rather
+than renaming the old row in place: renaming would either collide with an
+already-stored `allow_<new>` row (two rows for the same field, whichever a
+plain SELECT happens to return first) or destroy the old row's audit trail.
+Leaving the old row where it is costs nothing and there is no cleanup patch
+provided for it.
 
 NEVER CLOBBERS AN EXPLICIT NEW-FIELD VALUE. If `allow_create_incident_record`
 already has a stored value — an operator who flipped it by hand after
@@ -73,31 +85,42 @@ def execute():
 
 	for old, new in PAIRS:
 		try:
-			old_value = frappe.db.get_single_value(settings.SETTINGS_DOCTYPE, old)
+			old_rows = frappe.db.sql(
+				"SELECT value FROM `tabSingles` WHERE doctype=%s AND field=%s",
+				(settings.SETTINGS_DOCTYPE, old),
+			)
 		except Exception as exc:  # pragma: no cover - reported, never fatal to a migrate
 			print(f"erpnext_mcp: could not read {old!r}: {type(exc).__name__}: {exc}")
 			continue
 
-		if old_value is None:
+		if not old_rows:
 			# Never stored on this site — a fresh install, or a site that has
 			# already migrated and has nothing left on the old key.
 			continue
 
+		old_value = old_rows[0][0]
+
 		try:
-			new_value = frappe.db.get_single_value(settings.SETTINGS_DOCTYPE, new)
+			new_rows = frappe.db.sql(
+				"SELECT value FROM `tabSingles` WHERE doctype=%s AND field=%s",
+				(settings.SETTINGS_DOCTYPE, new),
+			)
 		except Exception as exc:  # pragma: no cover
 			print(f"erpnext_mcp: could not read {new!r}: {type(exc).__name__}: {exc}")
 			continue
 
-		if new_value is not None:
+		if new_rows:
 			print(
-				f"erpnext_mcp: {new!r} already has a stored value ({new_value!r}) — "
+				f"erpnext_mcp: {new!r} already has a stored value ({new_rows[0][0]!r}) — "
 				f"leaving it, not overwriting from {old!r} ({old_value!r})."
 			)
 			continue
 
 		try:
-			frappe.db.set_value(settings.SETTINGS_DOCTYPE, settings.SETTINGS_DOCTYPE, new, old_value)
+			frappe.db.sql(
+				"INSERT INTO `tabSingles` (doctype, field, value) VALUES (%s, %s, %s)",
+				(settings.SETTINGS_DOCTYPE, new, old_value),
+			)
 			frappe.db.commit()
 		except Exception as exc:  # pragma: no cover
 			print(

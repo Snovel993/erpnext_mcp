@@ -74,7 +74,7 @@ def execute():
 		return
 
 	try:
-		frappe.rename_doc("DocType", OLD, NEW, force=True, ignore_permissions=True)
+		frappe.rename_doc("DocType", OLD, NEW, force=True)
 		frappe.db.commit()
 	except Exception as exc:  # pragma: no cover - reported, never fatal to a migrate
 		print(

@@ -4290,8 +4290,30 @@ class FakeDB:
 	def rollback(self):
 		STORE.rollback()
 
-	def sql(self, *args, **kwargs):  # pragma: no cover - app must not use raw SQL
-		raise AssertionError(
+	def sql(self, query, values=None, as_dict=0, **kwargs):
+		"""Deliberately extended for `tabSingles`, per this stub's own invitation.
+
+		`migrate_incident_tool_switches` (v0.95.0) has to reach a `tabSingles`
+		row whose field no longer exists in the DocType JSON — real Frappe's
+		`get_single_value`/`set_value` validate a Single's fieldname against
+		the current schema first, which is exactly what makes them unable to
+		read or write an old, renamed-away fieldname. Raw SQL is the only path
+		that still reaches that row, on the real bench and here. Every other
+		shape of query still hits the `AssertionError` below.
+		"""
+		normalized = " ".join(str(query).split()).upper()
+		if normalized.startswith("SELECT VALUE FROM `TABSINGLES` WHERE DOCTYPE=%S AND FIELD=%S"):
+			doctype, field = values
+			stored = STORE.singles.get(doctype) or {}
+			if field not in stored:
+				return []
+			value = stored[field]
+			return [{"value": value}] if as_dict else [(value,)]
+		if normalized.startswith("INSERT INTO `TABSINGLES` (DOCTYPE, FIELD, VALUE) VALUES (%S, %S, %S)"):
+			doctype, field, value = values
+			STORE.singles.setdefault(doctype, {})[field] = value
+			return []
+		raise AssertionError(  # pragma: no cover - app must not use raw SQL
 			"erpnext_mcp must not run raw SQL: every write goes through the ORM so "
 			"doctype validation runs. If a read genuinely needs SQL, extend this "
 			"stub deliberately."
