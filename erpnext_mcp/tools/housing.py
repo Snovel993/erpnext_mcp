@@ -66,6 +66,13 @@ EMPLOYEE = "Employee"
 #: what makes somebody go and look.
 INSPECTION_DAYS = 365
 
+#: How far past its last detector test a worker-facility building is called
+#: overdue. Annual, under OAR 437-004-1120 and the fire code the camp is
+#: inspected against, and it matches `alerts.rules.DETECTOR_DAYS` for the same
+#: reason INSPECTION_DAYS matches its counterpart: the camp register and the
+#: compliance calendar must not disagree about which cabins are behind.
+DETECTOR_DAYS = 365
+
 REGISTER_CAP = 500
 
 _UNIT_FIELDS = (
@@ -177,6 +184,15 @@ def _describe_unit(row: dict, today: str = "") -> dict:
 	lawful = int(row.get("max_occupants_per_or_law") or 0)
 	capacity = int(row.get("capacity") or 0)
 	inspection = _date_str(row.get("last_habitability_inspection"))
+	smoke = _date_str(row.get("smoke_detector_last_test"))
+	co = _date_str(row.get("co_detector_last_test"))
+	# The three conditions `housing_detector_test_stale` scopes on, read here so
+	# the register and the calendar name the same set of buildings.
+	required = (
+		compat.checked(row.get("fsma_worker_facility"))
+		and (row.get("unit_type") or "") not in NON_RESIDENTIAL_TYPES
+		and (row.get("condition") or "") != "Uninhabitable"
+	)
 	return {
 		"name": row.get("name"),
 		"unit_name": row.get("unit_name"),
@@ -200,8 +216,31 @@ def _describe_unit(row: dict, today: str = "") -> dict:
 		"capacity_over_lawful_occupancy": bool(lawful and capacity and capacity > lawful),
 		"last_habitability_inspection": inspection,
 		"inspection_overdue": _overdue(inspection, today),
-		"smoke_detector_last_test": _date_str(row.get("smoke_detector_last_test")),
-		"co_detector_last_test": _date_str(row.get("co_detector_last_test")),
+		"smoke_detector_last_test": smoke,
+		"co_detector_last_test": co,
+		# SCOPED THE SAME WAY `housing_detector_test_stale` IS, and reporting None
+		# rather than False when the unit is out of scope. A shed on the parcel is
+		# not a bunkhouse and is never asked for a detector test; answering False
+		# would read as "tested and fine", which is the one wrong answer — the
+		# same reason the safety rates come back None rather than 0.0 when nobody
+		# supplied the hours.
+		"detectors_required": required,
+		"smoke_detector_overdue": _stale(smoke, today, DETECTOR_DAYS) if required else None,
+		"co_detector_overdue": _stale(co, today, DETECTOR_DAYS) if required else None,
+		"detector_test_overdue": (
+			(_stale(smoke, today, DETECTOR_DAYS) or _stale(co, today, DETECTOR_DAYS))
+			if required
+			else None
+		),
+		"detectors_overdue": (
+			[
+				label
+				for label, value in (("smoke", smoke), ("CO", co))
+				if _stale(value, today, DETECTOR_DAYS)
+			]
+			if required
+			else []
+		),
 		"notes": row.get("notes") or None,
 	}
 
@@ -243,6 +282,23 @@ def check_coordinates(latitude, longitude) -> tuple:
 			"changed."
 		)
 	return latitude, longitude
+
+
+def _stale(anchor: str | None, today: str, days: int) -> bool:
+	"""Is `anchor` missing, or older than `days`?
+
+	NEVER COUNTS AS STALE, which is the whole point and the opposite of what a
+	naive date comparison does. A cabin nobody has ever inspected is the most
+	overdue cabin in the camp, and "no date, no flag" hides exactly the unit
+	somebody needs to walk. `alerts/rules.py` makes the same argument at length
+	for `missing_date_behaviour = Raise`.
+	"""
+	if not anchor:
+		return True
+	try:
+		return frappe.utils.date_diff(today or frappe.utils.today(), anchor) > days
+	except Exception:  # pragma: no cover - an unparseable stored date
+		return True
 
 
 def _overdue(inspection: str | None, today: str = "") -> bool:
@@ -352,6 +408,11 @@ def list_housing_units(args: dict) -> ToolResult:
 			"open_beds": max(0, capacity - assigned),
 			"by_unit_type": dict(sorted(by_type.items())),
 			"overdue_inspections": [unit["name"] for unit in residential if unit["inspection_overdue"]],
+			# The register used to name the habitability backlog and stay silent
+			# about the detector backlog, while the calendar raised warnings for
+			# both. A camp manager reading this to plan the morning walked the
+			# cabins it listed and left the detector warnings open.
+			"overdue_detector_tests": [unit["name"] for unit in units if unit["detector_test_overdue"]],
 			"uninhabitable": [unit["name"] for unit in units if unit["condition"] == "Uninhabitable"],
 			"fsma_worker_facilities": [unit["name"] for unit in units if unit["fsma_worker_facility"]],
 			"over_lawful_occupancy": [
@@ -1064,6 +1125,7 @@ def get_housing_capacity(args: dict) -> ToolResult:
 				"open_beds": 0,
 				"by_unit_type": {},
 				"overdue_inspections": [],
+				"overdue_detector_tests": [],
 				"uninhabitable": [],
 				"over_lawful_occupancy": [],
 			},
@@ -1075,6 +1137,13 @@ def get_housing_capacity(args: dict) -> ToolResult:
 			bucket["uninhabitable"].append(unit["name"])
 		if unit["capacity_over_lawful_occupancy"]:
 			bucket["over_lawful_occupancy"].append(unit["name"])
+		# Counted BEFORE the residential guard below. The detector obligation is
+		# scoped on `fsma_worker_facility` rather than on being somewhere people
+		# sleep, and `_describe_unit` has already applied the same three
+		# conditions the alert rule uses — so this reads its answer rather than
+		# re-deciding it here, where the two would drift.
+		if unit["detector_test_overdue"]:
+			bucket["overdue_detector_tests"].append(unit["name"])
 		if not unit["residential"]:
 			continue
 		bucket["residential_units"] += 1
@@ -1092,6 +1161,7 @@ def get_housing_capacity(args: dict) -> ToolResult:
 	capacity = sum(bucket["capacity"] for bucket in parcels)
 	assigned = sum(bucket["assigned"] for bucket in parcels)
 	overdue = sum(len(bucket["overdue_inspections"]) for bucket in parcels)
+	detectors = sum(len(bucket["overdue_detector_tests"]) for bucket in parcels)
 
 	lines = []
 	for bucket in parcels:
@@ -1102,6 +1172,8 @@ def get_housing_capacity(args: dict) -> ToolResult:
 		)
 		if bucket["overdue_inspections"]:
 			line += f" Overdue habitability inspections: {len(bucket['overdue_inspections'])}."
+		if bucket["overdue_detector_tests"]:
+			line += f" Overdue detector tests: {len(bucket['overdue_detector_tests'])}."
 		lines.append(line)
 
 	return ToolResult(
@@ -1114,13 +1186,15 @@ def get_housing_capacity(args: dict) -> ToolResult:
 			"currently_assigned": assigned,
 			"open_beds": max(0, capacity - assigned),
 			"overdue_inspection_count": overdue,
+			"overdue_detector_test_count": detectors,
 			"by_parcel": parcels,
 			"readout": lines,
 			"inspection_window_days": INSPECTION_DAYS,
+			"detector_window_days": DETECTOR_DAYS,
 		},
 		summary=(
 			f"capacity {capacity}, {assigned} assigned, {max(0, capacity - assigned)} open, "
-			f"{overdue} overdue inspection(s)"
+			f"{overdue} overdue inspection(s), {detectors} overdue detector test(s)"
 		),
 	)
 

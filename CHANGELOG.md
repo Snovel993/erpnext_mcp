@@ -115,6 +115,49 @@ carries `categories_expected`, `categories_without_a_policy` and a
 categories of expectation against three policies works this out in a minute;
 being shown it is strictly better than being found out.
 
+### The camp backlog the register named, and the one it did not
+
+Twenty open habitability warnings and seventeen open detector warnings, on an
+operation whose tools for clearing both have worked since Sprint 8. Every part of
+the loop was in fact fine, and this was verified end to end before anything was
+changed: `create_housing_inspection` and `create_detector_test` write the record,
+the controller advances `Housing Unit.last_habitability_inspection` and the two
+detector dates, and the next sweep auto-dismisses the alert because its condition
+stopped being true. Nothing there needed a fix.
+
+**What was missing is that the camp register named only one of the two
+backlogs.** `list_housing_units` reported `overdue_inspections` and said nothing
+about detectors; `get_housing_capacity` counted overdue inspections and nothing
+else. The compliance calendar knew about both. So a camp manager opening the
+register to plan a morning walked the cabins it listed, and every detector
+warning stayed open — which is exactly the shape of "20 and 17".
+
+Both reads now carry the detector backlog beside the inspection one:
+`overdue_detector_tests` on the register, `overdue_detector_test_count` and a
+`readout` line on the capacity report, and per unit `detectors_required`,
+`smoke_detector_overdue`, `co_detector_overdue`, `detector_test_overdue` and
+`detectors_overdue`.
+
+**The scope is copied from `housing_detector_test_stale`, not reinvented.** The
+`fsma_worker_facility` flag is what puts a building inside Subpart L; a shed on
+the parcel is not a bunkhouse, and an Uninhabitable unit takes no assignment.
+The register and the calendar naming different sets of cabins would be worse than
+the silence was, because it would mean somebody chose the wrong list.
+
+**Out of scope reports `None`, never `False`.** A shed is never asked for a
+detector test, and `False` reads as "tested and fine" — the one wrong answer, and
+the same reason the safety rates come back `None` rather than `0.0` when nobody
+supplied the hours.
+
+**`detectors_overdue` names WHICH detector**, because "a detector is overdue"
+sends somebody to test the wrong one — the argument the alert rule already made
+for its message, applied to the column.
+
+`TheRegisterAndTheCalendarNameTheSameCabins` asserts the agreement at camp scale:
+six cabins, both readers naming the same set before the work, the same set after
+one walk, and — the test that pins the original complaint — that walking a cabin
+does **not** clear its detector test.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

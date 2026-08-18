@@ -86,6 +86,103 @@ class HousingTestCase(V12TestCase):
 		return self.a_unit()
 
 
+# ── the two camp backlogs, and the one the register used to hide ────────────
+class TheDetectorBacklogIsInTheRegisterToo(HousingTestCase):
+	"""v0.93.0. The camp register named the habitability backlog and said nothing
+	about the detector backlog, while the compliance calendar raised warnings for
+	BOTH. A camp manager reading `list_housing_units` to plan the morning walked
+	the cabins it listed and left every detector warning open — twenty overdue
+	inspections and seventeen overdue detector tests are two different errands,
+	and only one of them was visible where somebody would look.
+
+	The scope is copied from `housing_detector_test_stale` rather than reinvented:
+	the flag is what puts a building inside Subpart L, and the register and the
+	calendar naming different sets of cabins would be worse than the silence.
+	"""
+
+	TODAY = "2026-07-24"
+
+	def a_facility(self, unit_name="MC-Cabin-01", **overrides):
+		payload = {"fsma_worker_facility": True}
+		payload.update(overrides)
+		return self.a_unit(unit_name, **payload)
+
+	def test_a_worker_facility_never_tested_is_named_by_the_register(self):
+		self.a_parcel()
+		unit = self.a_facility()["name"]
+		data = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertIn(unit, data["overdue_detector_tests"])
+		row = next(entry for entry in data["units"] if entry["name"] == unit)
+		self.assertTrue(row["detector_test_overdue"])
+		self.assertEqual(row["detectors_overdue"], ["smoke", "CO"])
+
+	def test_recording_both_dates_takes_it_off_the_list(self):
+		self.a_parcel()
+		unit = self.a_facility(
+			smoke_detector_last_test=self.TODAY, co_detector_last_test=self.TODAY
+		)["name"]
+		data = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertNotIn(unit, data["overdue_detector_tests"])
+		row = next(entry for entry in data["units"] if entry["name"] == unit)
+		self.assertFalse(row["detector_test_overdue"])
+		self.assertEqual(row["detectors_overdue"], [])
+
+	def test_one_stale_detector_names_which_one(self):
+		"""An alert saying only 'a detector is overdue' sends somebody to test the
+		wrong one, and so would a register column."""
+		self.a_parcel()
+		unit = self.a_facility(
+			smoke_detector_last_test=self.TODAY, co_detector_last_test="2024-01-01"
+		)["name"]
+		row = next(
+			entry
+			for entry in self.tool_data("list_housing_units", {"company": MAIN})["units"]
+			if entry["name"] == unit
+		)
+		self.assertEqual(row["detectors_overdue"], ["CO"])
+		self.assertFalse(row["smoke_detector_overdue"])
+		self.assertTrue(row["co_detector_overdue"])
+
+	def test_a_building_outside_subpart_l_reports_none_rather_than_false(self):
+		"""NOT False. A shed on the parcel is never asked for a detector test, and
+		False would read as 'tested and fine' — the one wrong answer. Same reason
+		the safety rates come back None rather than 0.0 with no hours supplied."""
+		self.a_parcel()
+		unit = self.a_unit("MC-Shed-01", fsma_worker_facility=False)["name"]
+		row = next(
+			entry
+			for entry in self.tool_data("list_housing_units", {"company": MAIN})["units"]
+			if entry["name"] == unit
+		)
+		self.assertFalse(row["detectors_required"])
+		self.assertIsNone(row["detector_test_overdue"])
+		self.assertNotIn(unit, self.tool_data("list_housing_units", {"company": MAIN})["overdue_detector_tests"])
+
+	def test_an_uninhabitable_facility_is_not_chased_for_a_detector_test(self):
+		"""Assignments into it are already refused, so there is nobody to protect
+		— the same gate the alert rule applies."""
+		self.a_parcel()
+		unit = self.a_facility("MC-Cabin-02", condition="Uninhabitable")["name"]
+		data = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertNotIn(unit, data["overdue_detector_tests"])
+
+	def test_the_capacity_report_counts_the_two_backlogs_separately(self):
+		"""They are different errands with different skills and different
+		evidence, and one number covering both is a number nobody can plan from."""
+		self.a_parcel()
+		self.a_facility("MC-Cabin-01", last_habitability_inspection=self.TODAY)
+		self.a_facility(
+			"MC-Cabin-02",
+			smoke_detector_last_test=self.TODAY,
+			co_detector_last_test=self.TODAY,
+		)
+		data = self.tool_data("get_housing_capacity", {"company": MAIN})
+		self.assertEqual(data["overdue_inspection_count"], 1)
+		self.assertEqual(data["overdue_detector_test_count"], 1)
+		self.assertEqual(data["detector_window_days"], 365)
+		self.assertTrue(any("Overdue detector tests: 1" in line for line in data["readout"]))
+
+
 # ── create_housing_unit ─────────────────────────────────────────────────────
 class CreateHousingUnit(HousingTestCase):
 	def test_it_registers_a_unit_under_a_docname_carrying_the_parcel(self):

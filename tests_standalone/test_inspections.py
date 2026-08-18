@@ -50,6 +50,7 @@ ALL_ON = {
 		"create_housing_unit",
 		"update_housing_unit",
 		"get_housing_unit",
+		"list_housing_units",
 		"get_irrigation_zone",
 		"get_field",
 		"list_housing_inspections",
@@ -549,6 +550,92 @@ class DoingTheWorkDismissesTheAlert(RecordTestCase):
 				and entry["outcome"] == "auto_dismissed"
 			]
 		)
+
+
+class TheRegisterAndTheCalendarNameTheSameCabins(RecordTestCase):
+	"""v0.93.0. The end-to-end loop this feature is, asserted at camp scale.
+
+	The complaint was twenty open habitability warnings and seventeen open
+	detector warnings on an operation whose tools for clearing both had worked
+	since Sprint 8. Every part of the loop was fine — the record writes, the
+	register advances, the sweep dismisses. What was missing was that the CAMP
+	REGISTER, which is what somebody actually opens to plan a morning, named only
+	one of the two backlogs. The calendar knew about both.
+
+	So the claim under test is agreement: `list_housing_units` and
+	`refresh_compliance_alerts` have to name the same cabins, before the work and
+	after it. Two readers disagreeing about which cabins are behind is worse than
+	either being wrong on its own, because it means somebody chose the wrong one.
+	"""
+
+	def a_camp_of(self, count):
+		return [self.a_camp(f"MC-Cabin-{index:02d}") for index in range(1, count + 1)]
+
+	def open_alerts(self, alert_type):
+		swept = self.tool_data("refresh_compliance_alerts", {"today": TODAY})
+		# `source` is "<DocType> <docname>" and the register names the docname,
+		# so the prefix comes off by NAME rather than by splitting on spaces — a
+		# camp docname has spaces in it ("MC-Cabin-01 - MC") and so does the
+		# doctype, which makes any positional split a guess.
+		return {
+			str(entry["source"]).removeprefix("Housing Unit ")
+			for entry in swept["alerts"]
+			if entry["alert_type"] == alert_type and entry["outcome"] != "auto_dismissed"
+		}
+
+	def test_both_backlogs_agree_before_any_work_is_done(self):
+		units = set(self.a_camp_of(6))
+		register = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertEqual(set(register["overdue_inspections"]), units)
+		self.assertEqual(set(register["overdue_detector_tests"]), units)
+		self.assertEqual(self.open_alerts("housing_inspection_overdue"), units)
+		self.assertEqual(self.open_alerts("housing_detector_test_stale"), units)
+
+	def test_walking_a_cabin_clears_it_from_the_register_and_the_calendar(self):
+		units = self.a_camp_of(6)
+		self.open_alerts("housing_inspection_overdue")
+		self.tool_data("create_housing_inspection", {"unit": units[0], "inspection_date": TODAY})
+		register = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertNotIn(units[0], register["overdue_inspections"])
+		self.assertEqual(len(register["overdue_inspections"]), 5)
+		self.assertNotIn(units[0], self.open_alerts("housing_inspection_overdue"))
+
+	def test_the_walk_does_not_clear_the_detector_test(self):
+		"""The one that made the two counts differ in the first place. Walking a
+		cabin is not testing its detectors, and a register that folded the two
+		into one number would report the camp as further along than it is."""
+		units = self.a_camp_of(6)
+		self.tool_data("create_housing_inspection", {"unit": units[0], "inspection_date": TODAY})
+		register = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertNotIn(units[0], register["overdue_inspections"])
+		self.assertIn(units[0], register["overdue_detector_tests"])
+		self.assertIn(units[0], self.open_alerts("housing_detector_test_stale"))
+
+	def test_clearing_the_whole_camp_empties_both_lists(self):
+		units = self.a_camp_of(6)
+		self.open_alerts("housing_inspection_overdue")
+		for unit in units:
+			self.tool_data("create_housing_inspection", {"unit": unit, "inspection_date": TODAY})
+			self.tool_data("create_detector_test", {"unit": unit, "test_date": TODAY})
+		register = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertEqual(register["overdue_inspections"], [])
+		self.assertEqual(register["overdue_detector_tests"], [])
+		self.assertEqual(self.open_alerts("housing_inspection_overdue"), set())
+		self.assertEqual(self.open_alerts("housing_detector_test_stale"), set())
+
+	def test_a_walk_that_found_something_still_clears_the_backlog(self):
+		"""Doing the work and finding a problem are two different facts. The
+		inspection date moves, the cabin leaves the backlog, and a Critical alert
+		stands against the finding — which is a different row somebody has to
+		close."""
+		units = self.a_camp_of(2)
+		data = self.tool_data(
+			"create_housing_inspection",
+			{"unit": units[0], "inspection_date": TODAY, "findings": "Water stain, north wall"},
+		)
+		self.assertEqual(data["workflow_state"], records.CORRECTIVE_ACTION_REQUIRED)
+		register = self.tool_data("list_housing_units", {"company": MAIN})
+		self.assertNotIn(units[0], register["overdue_inspections"])
 
 
 class TheCorrectiveActionRules(RecordTestCase):
