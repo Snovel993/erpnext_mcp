@@ -33,6 +33,8 @@ right call rather than an omission: a controller only runs when somebody saves,
 so the expired certificates would be exactly the ones still reading Active.
 """
 
+import datetime
+
 from .fixtures import MAIN, OTHER, V12TestCase
 from .harness import STORE
 
@@ -404,6 +406,35 @@ class RenewingACertificate(EvidenceTestCase):
 		got = self.tool_data("get_certification", {"certification": "GlobalGAP 2026"})
 		self.assertEqual(got["renewal_count"], 1)
 		self.assertEqual(got["renewals"][0]["previous_expiration"], "2026-08-15")
+
+	def test_it_renews_a_certificate_whose_stored_dates_are_date_objects(self):
+		"""The renewal the site could not do, and the double could not see.
+
+		A Date column read back from MariaDB is a `datetime.date`; the expiration
+		this tool assigns is the caller's 'YYYY-MM-DD' string. `Certification.validate`
+		compared the two and raised `TypeError: '<' not supported between instances
+		of 'str' and 'datetime.date'` — on the save, so a dry run passed and the
+		real renewal failed, and an expired applicator licence could not be cleared.
+
+		THE SET-UP IS THE POINT. This double stores whatever string it is handed
+		and hands the same string back, so every other test here compares str to
+		str and the fault is invisible. Putting the real types in the store is the
+		only way this suite can hold the site's half of the contract.
+		"""
+		row = STORE.get_raw("Certification", "GlobalGAP 2026")
+		for key in ("issued_date", "expiration_date"):
+			row[key] = datetime.date.fromisoformat(str(row[key]))
+
+		data = self.tool_data(
+			"renew_certification",
+			{
+				"certification": "GlobalGAP 2026",
+				"new_expiration": "2027-08-15",
+				"what_was_done": "passed the 2026 re-audit on 2026-07-10, fee paid",
+			},
+		)
+		self.assertEqual(data["new_expiration"], "2027-08-15")
+		self.assertEqual(data["previous_expiration"], "2026-08-15")
 
 	def test_editing_the_expiration_forward_is_refused_and_names_the_right_tool(self):
 		"""Editing it in place would produce a certificate that looks as though it

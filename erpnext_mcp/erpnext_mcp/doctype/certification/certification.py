@@ -32,6 +32,7 @@ make the agency faster; it makes the alert arrive too late to act on.
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import getdate
 
 #: Below this, a renewal window is not a lead time — it is a reminder, and the
 #: alert it drives arrives after the last day anything could have been done about
@@ -48,7 +49,22 @@ class Certification(Document):
 				_("Certificate Name is required — it is the docname, and it is what an audit asks for.")
 			)
 
-		if self.issued_date and self.expiration_date and self.expiration_date < self.issued_date:
+		# BOTH SIDES THROUGH `getdate` BECAUSE THEY ARRIVE AS DIFFERENT TYPES. A
+		# Date column read back from MariaDB is a `datetime.date`; a Date a tool
+		# has just assigned — `renew_certification` moving `expiration_date` out,
+		# `update_certification` correcting one — is still the caller's
+		# 'YYYY-MM-DD' string, because nothing converts it before the save. So a
+		# renewal that only ever compared the raw attributes was comparing a str
+		# to a date and raising `TypeError: '<' not supported between instances
+		# of 'str' and 'datetime.date'` — on the real save, never on the dry run,
+		# which is why it read as a renewal-only fault. The standalone double
+		# stores what it is handed and hands the same string back, so it cannot
+		# see this; the site is what has the two types.
+		if (
+			self.issued_date
+			and self.expiration_date
+			and getdate(self.expiration_date) < getdate(self.issued_date)
+		):
 			frappe.throw(
 				_(
 					"This certificate expires on {0} and was issued on {1} — it would have "
