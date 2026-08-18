@@ -1011,6 +1011,25 @@ def create_farm_task(args: dict) -> ToolResult:
 	draft = as_bool(args, "draft", False)
 	farm_shift = _shift_argument(args, company or "")
 
+	# THE PRE-HARVEST GUARD, RUN BEFORE ANYTHING IS INSERTED. Raising a Harvest
+	# task on a block is the moment a pick is planned, and it is the last moment
+	# the plan can be changed for free — a block moved back now costs a sentence,
+	# and the same decision discovered at the packing house costs a load. See
+	# `_refuse_harvest_inside_phi` for why this refuses where the REI below only
+	# warns. Read off the ARGUMENTS rather than the document, so nothing exists
+	# to roll back when it refuses.
+	phi_override = _refuse_harvest_inside_phi(
+		{
+			"task_type": as_str(args, "task_type"),
+			"location": location,
+			"asset": "",
+			"company": company or "",
+		},
+		args,
+		"created",
+		override_tool="create_farm_task",
+	)
+
 	doc = frappe.new_doc(FARM_TASK)
 	doc.task_name = as_str(args, "task_name", required=True)
 	doc.task_type = as_choice(FARM_TASK, "task_type", as_str(args, "task_type", required=True), "task_type")
@@ -1029,7 +1048,7 @@ def create_farm_task(args: dict) -> ToolResult:
 	doc.creates_record_data = json.dumps(
 		parse_json_object(args.get("creates_record_data"), "creates_record_data")
 	)
-	doc.notes = as_str(args, "notes")
+	doc.notes = _with_override_note(as_str(args, "notes"), phi_override)
 	# v0.79.0. A step of a longer piece of work — see the multi-day block below.
 	parent_doctype, parent = _parent_argument(args, "created")
 	if parent:
@@ -1081,6 +1100,12 @@ def create_farm_task(args: dict) -> ToolResult:
 	warnings.extend(_rei_warnings(dict(doc.as_dict())))
 
 	data = {**described, "assignment": assignment}
+	if phi_override:
+		data["phi_override"] = phi_override
+		warnings.append(
+			"This Harvest task was raised INSIDE a live pre-harvest interval on an override. "
+			f"Reason given: {phi_override['reason']}"
+		)
 	if warnings:
 		data["warnings"] = warnings
 	return ToolResult(
@@ -1241,6 +1266,12 @@ def assign_farm_task(args: dict) -> ToolResult:
 			"changed."
 		)
 
+	# Sending somebody to pick a block is the second moment harvest is initiated
+	# on it, and the one where a name goes onto the record. Same guard, same
+	# override, and it runs before the reassignment questions because a task
+	# nobody may work is not a task worth arguing about who holds.
+	phi_override = _refuse_harvest_inside_phi(row, args, "changed", override_tool="assign_farm_task")
+
 	held = live_assignment(row["name"])
 	reassigned_from = None
 	if held:
@@ -1310,6 +1341,14 @@ def assign_farm_task(args: dict) -> ToolResult:
 	rei_warnings = _rei_warnings(dict(task_doc.as_dict()))
 	if rei_warnings:
 		data["warnings"] = list(data.get("warnings") or []) + rei_warnings
+	if phi_override:
+		data["phi_override"] = phi_override
+		data["warnings"] = [
+			*(data.get("warnings") or []),
+			f"{worker_name} was dispatched to pick a block INSIDE a live pre-harvest interval, on "
+			f"an override. Reason given: {phi_override['reason']}",
+		]
+		_record_override_on_task(row["name"], phi_override)
 
 	return ToolResult(
 		data=data,
@@ -1347,6 +1386,183 @@ def _rei_warnings(task: dict) -> list[str]:
 	return [window["warning"] for window in windows]
 
 
+# ── the pre-harvest guard, and why it REFUSES where the REI above WARNS ──────
+#
+# THESE TWO LOOK LIKE THE SAME CHECK AND ARE OPPOSITE DECISIONS, so the
+# difference is worth stating before either is read.
+#
+# A RESTRICTED-ENTRY INTERVAL IS A CONDITION ON ENTRY, AND ENTRY INSIDE IT IS
+# LAWFUL. 40 CFR §170.607 permits early entry for specific tasks with the
+# label's PPE on. A server refusing that would be inventing a rule stricter than
+# the regulation and training foremen to route around this app — so `_rei_warnings`
+# tells the foreman and tells the worker, and dispatches.
+#
+# A PRE-HARVEST INTERVAL IS A CONDITION ON THE FRUIT, AND THERE IS NO PPE FOR IT.
+# Picking inside the interval produces a load with residue above tolerance (40
+# CFR 180), and that is discovered at the packing house, on somebody's shipment,
+# days later, traced back to a block and a date. Nothing a crew can wear changes
+# it and no amount of care makes it a near miss. There is no lawful early
+# harvest, so a warning would be a server that watched somebody do the one thing
+# the whole record exists to prevent and printed a sentence about it.
+#
+# SO: refused, and refused at the moment harvest is INITIATED on a block —
+# raising the task and sending somebody to it. `override_phi` exists and is
+# audited rather than absent, because the date on the record can genuinely be
+# wrong in the safe direction: a window stamped from a tank that only covered
+# part of a block, or a label corrected after the fact. That is a decision a
+# named foreman makes with a reason attached, which is exactly what an override
+# with a mandatory reason is.
+#
+# THE WORKER'S DOOR HAS NO OVERRIDE. `claim_farm_task` refuses and names the
+# foreman's tool, because "the picker on the block decided the interval did not
+# apply" is not a defence anybody can offer afterwards.
+
+#: The `task_type` this guard applies to. One value, and a constant so that the
+#: guard and any future reader of it cannot disagree about what harvest is.
+HARVEST_TASK_TYPE = "Harvest"
+
+
+def _phi_windows(task: dict) -> list[dict]:
+	"""Live pre-harvest intervals on the place this task sends somebody.
+
+	NEVER RAISES. See `spray.phi_windows_for_blocks`: an unreadable register
+	produces no windows rather than an outage in the one part of the year a farm
+	cannot pause. The dates are stamped on the spray records either way and the
+	scheduled compliance sweep raises `phi_harvest_window` off the same columns.
+	"""
+	# CASEFOLDED, because this guard runs on the ARGUMENTS in `create_farm_task` —
+	# before `as_choice` has normalised them against the doctype's own options.
+	# A caller that sent "harvest" would otherwise get a task of type Harvest and
+	# no guard at all, which is the worst of the three possible outcomes.
+	if str(task.get("task_type") or "").strip().casefold() != HARVEST_TASK_TYPE.casefold():
+		return []
+	candidates = [name for name in (str(task.get("location") or ""), str(task.get("asset") or "")) if name]
+	if not candidates:
+		return []
+	try:
+		from . import spray
+
+		return spray.phi_windows_for_blocks(candidates, str(task.get("company") or ""))
+	except Exception:  # pragma: no cover - a guard that cannot read refuses nothing
+		return []
+
+
+def _refuse_harvest_inside_phi(task: dict, args: dict, verb: str, override_tool: str = "") -> dict | None:
+	"""Refuse a harvest inside a live pre-harvest interval. Returns the override, or None.
+
+	`override_tool` empty means THIS CALLER HAS NO OVERRIDE — the worker's door.
+	It changes the sentence and nothing else: the refusal names the tool that
+	does, so somebody standing on a block is told who can act rather than only
+	that they cannot.
+	"""
+	windows = _phi_windows(task)
+	if not windows:
+		return None
+
+	# NOT `override_tool or ...`. An empty `override_tool` is the WORKER'S door,
+	# where there is no override to ask for; a non-empty one is a foreman's, where
+	# the argument decides. Getting this the wrong way round refuses every foreman
+	# and lets every worker through, which is exactly backwards and is what the
+	# `TheWorkersDoorHasNoOverride` tests exist to catch.
+	if not override_tool or not as_bool(args, "override_phi", False):
+		latest = windows[0]
+		opens_on = _phi_opens_on(latest)
+		raise ToolError(
+			f"{latest['block']} is inside a pre-harvest interval until {opens_on} "
+			+ (f"({latest['phi_source_item']}, " if latest.get("phi_source_item") else "(")
+			+ f"{latest['source']})"
+			+ (
+				f", and {len(windows) - 1} more spray(s) on it are still inside theirs"
+				if len(windows) > 1
+				else ""
+			)
+			+ ". A pick inside the interval is a residue violation on a shipped load — it is found "
+			"at the packing house, days later, and traced back to this block and this date. Unlike "
+			"a restricted-entry interval there is no PPE that makes it lawful, so this is refused "
+			"rather than warned about. "
+			+ (
+				f"A foreman who knows the stamped date is wrong — a tank that covered part of the "
+				f"block, a label corrected since — passes override_phi=true with "
+				f"phi_override_reason to {override_tool}, which records who decided and why."
+				if override_tool
+				else "There is no override on this tool: 'the picker decided the interval did not "
+				"apply' is not a defence anybody can offer at the packing house. A foreman "
+				"dispatches it with assign_farm_task if the stamped date is genuinely wrong."
+			)
+			+ f" Nothing was {verb}."
+		)
+
+	reason = as_str(args, "phi_override_reason").strip()
+	if not reason:
+		raise ToolError(
+			"override_phi=true needs phi_override_reason. An override with no reason is "
+			"indistinguishable afterwards from a guard that was never there, and the reason is "
+			f"the only part of this that survives to the packing house. Nothing was {verb}."
+		)
+	return {
+		"overridden": True,
+		"reason": reason,
+		"windows_overridden": [
+			{
+				"block": window["block"],
+				"opens_on": _phi_opens_on(window),
+				"phi_source_item": window.get("phi_source_item"),
+				"source_doctype": window["source_doctype"],
+				"source": window["source"],
+			}
+			for window in windows
+		],
+		"note": (
+			"This pick was authorised inside a live pre-harvest interval. The reason is on the "
+			"task and in the action log; the spray records that opened the interval are unchanged, "
+			"so the compliance alert stands until the date passes."
+		),
+	}
+
+
+def _record_override_on_task(task: str, override: dict) -> None:
+	"""Write the override onto an EXISTING task's notes. Never raises.
+
+	The dispatch path's half of `_with_override_note`, which the creation path
+	uses on a document that has not been inserted yet. A note that could not be
+	appended must not undo a dispatch that succeeded — the override is in the
+	action log either way — so this reports nothing and swallows nothing else.
+	"""
+	try:
+		current = str(frappe.db.get_value(FARM_TASK, task, "notes") or "")
+		frappe.db.set_value(FARM_TASK, task, "notes", _with_override_note(current, override))
+	except Exception:  # pragma: no cover - a note is never worth losing a dispatch
+		pass
+
+
+def _with_override_note(notes: str, override: dict | None) -> str:
+	"""Append the override to the task's own notes, or leave them alone.
+
+	THE REASON HAS TO SURVIVE ON THE TASK and not only in the action log. A load
+	questioned at the packing house is traced to a block and a date, and the
+	record somebody pulls up is the task — an override that lived only in a log
+	nobody opens is an override that was never explained.
+	"""
+	if not override:
+		return notes
+	stamp = (
+		"PRE-HARVEST INTERVAL OVERRIDDEN. This pick was authorised inside a live PHI window on "
+		+ ", ".join(
+			f"{entry['block']} (opens {entry['opens_on']}, {entry['source']})"
+			for entry in override["windows_overridden"]
+		)
+		+ f". Reason: {override['reason']}"
+	)
+	return f"{notes}\n\n{stamp}" if notes else stamp
+
+
+def _phi_opens_on(window: dict) -> str:
+	"""The first date the block may be picked, as the guard's messages say it."""
+	from . import spray
+
+	return spray._day_after(window.get("phi_clears_on") or "")
+
+
 # ── 3. claim_farm_task ──────────────────────────────────────────────────────
 def claim_farm_task(args: dict) -> ToolResult:
 	"""A worker takes one task from the pool. Capped at three at once, per worker."""
@@ -1371,6 +1587,11 @@ def claim_farm_task(args: dict) -> ToolResult:
 			"same work both believing it is theirs is exactly what a dispatch board exists to "
 			"prevent. Nothing was changed."
 		)
+
+	# THE WORKER'S DOOR, AND IT HAS NO OVERRIDE. `override_tool` names the
+	# foreman's tool instead, so somebody standing on a block is told who can act
+	# rather than only that they cannot.
+	_refuse_harvest_inside_phi(row, args, "changed")
 
 	if (row.get("dispatch_mode") or "Either") not in SELF_PICKABLE:
 		raise ToolError(

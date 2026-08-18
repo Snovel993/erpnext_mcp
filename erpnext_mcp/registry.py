@@ -9176,6 +9176,17 @@ TOOLS = {
 		"trained to disbelieve. An empty contract is refused; so is a misspelt key, "
 		'because `{"photo": true}` asks for nothing and looks like it asks for '
 		"something.\n\n"
+		"IT REFUSES A HARVEST TASK ON A BLOCK INSIDE ITS PRE-HARVEST INTERVAL, and "
+		"that is the one place this tool says no to work rather than warning about "
+		"it. A restricted-entry interval is a condition on ENTRY, and entry inside "
+		"one is lawful with the label's PPE on (40 CFR 170.607) — so a live REI comes "
+		"back as a warning on a task that WAS raised. A pre-harvest interval is a "
+		"condition on the FRUIT: picking inside it puts residue above tolerance on a "
+		"load that is found at the packing house days later and traced back to this "
+		"block and this date, and nothing anybody wears changes that. The refusal "
+		"names the block, the date it opens, the product and the spray record. "
+		"override_phi=true with phi_override_reason is the deliberate, recorded "
+		"exception, and it lands in the task's own notes.\n\n"
 		"REFUSES: a `creates_record` naming a DocType this site does not have — a "
 		"task promising a record nobody can write is a promise that fails in front "
 		"of a worker stood in a cabin; a location that does not exist; a "
@@ -9228,6 +9239,20 @@ TOOLS = {
 			),
 			"notes": _field(_STRING, "Instructions: where the key is, which breaker, who to ask."),
 			"materials_used": _MATERIALS_USED_FIELD,
+			"override_phi": _field(
+				_BOOLEAN,
+				"Raise this Harvest task anyway, on a block still inside a live pre-harvest "
+				"interval. Needs phi_override_reason. Default false — the guard refuses. Use it "
+				"when the STAMPED DATE is wrong rather than when the interval is inconvenient: a "
+				"window opened by a tank that only covered part of the block, or a label corrected "
+				"since. The reason is written onto the task and into the action log.",
+			),
+			"phi_override_reason": _field(
+				_STRING,
+				"Why this pick is authorised inside the interval. Required with override_phi. An "
+				"override with no reason is indistinguishable afterwards from a guard that was "
+				"never there.",
+			),
 		},
 		required=("task_name", "task_type", "evidence_required"),
 		mutating=True,
@@ -9332,7 +9357,15 @@ TOOLS = {
 		"reassign=true AND a reason, which is written onto their assignment. 'Taken "
 		"off them with no explanation' is a record nobody can defend. Refuses a task "
 		"that is already Completed, Rejected or Cancelled — reassigning finished "
-		"work rewrites history rather than dispatching anybody.",
+		"work rewrites history rather than dispatching anybody.\n\n"
+		"IT REFUSES TO SEND ANYBODY TO PICK A BLOCK INSIDE ITS PRE-HARVEST INTERVAL. "
+		"Sending somebody is the moment a name goes onto the record, and a pick "
+		"inside the interval is a residue violation found at the packing house days "
+		"later and traced back to this block and this date. Unlike a live "
+		"restricted-entry interval — which is lawful to work in with the label's PPE "
+		"on, and so comes back as a warning — nothing makes an early harvest lawful. "
+		"override_phi=true with phi_override_reason is the recorded exception, for "
+		"when the STAMPED DATE is wrong rather than inconvenient.",
 		{
 			"task": _field(_STRING, "The Farm Task docname."),
 			"assigned_to": _field(_STRING, "The Employee id to send."),
@@ -9343,6 +9376,20 @@ TOOLS = {
 				_STRING,
 				"The Farm Shift this dispatch belongs to. Written onto the task and the new "
 				"assignment; omitting it leaves whatever the task already carried alone.",
+			),
+			"override_phi": _field(
+				_BOOLEAN,
+				"Raise this Harvest task anyway, on a block still inside a live pre-harvest "
+				"interval. Needs phi_override_reason. Default false — the guard refuses. Use it "
+				"when the STAMPED DATE is wrong rather than when the interval is inconvenient: a "
+				"window opened by a tank that only covered part of the block, or a label corrected "
+				"since. The reason is written onto the task and into the action log.",
+			),
+			"phi_override_reason": _field(
+				_STRING,
+				"Why this pick is authorised inside the interval. Required with override_phi. An "
+				"override with no reason is indistinguishable afterwards from a guard that was "
+				"never there.",
 			),
 		},
 		required=("task", "assigned_to"),
@@ -9362,7 +9409,12 @@ TOOLS = {
 		"REFUSES a Dispatched task — somebody has to be SENT to that by name, and "
 		"self-picking it would put the wrong person on a regulated record. Refuses a "
 		"task somebody else already holds, and a Draft that is not in the pool yet. "
-		"Returns the evidence the worker will need to close it.",
+		"Returns the evidence the worker will need to close it.\n\n"
+		"REFUSES A HARVEST TASK ON A BLOCK INSIDE ITS PRE-HARVEST INTERVAL, AND HAS "
+		"NO OVERRIDE. 'The picker decided the interval did not apply' is not a "
+		"defence anybody can offer at the packing house, so this door only ever says "
+		"no — the refusal names assign_farm_task, where a foreman can take the "
+		"decision with a reason attached if the stamped date is genuinely wrong.",
 		{
 			"task": _field(_STRING, "The Farm Task docname."),
 			"worker_id": _field(_STRING, "The claiming Employee id."),

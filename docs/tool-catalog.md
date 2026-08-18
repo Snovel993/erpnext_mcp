@@ -16253,3 +16253,98 @@ cycle; everybody in a reporting cycle is their own supervisor, an escalation wal
 it forever, and a review ladder has no top. A cycle that was *already* in the data
 before this tool existed does not block an unrelated correction — the walk stops
 rather than making somebody else's mess the caller's problem.
+
+---
+
+## The pre-harvest interval, enforced at the pick (v0.68.1)
+
+PHI days live on the pesticide label and reach the site through `Item.phi_days`.
+Recording a spray stamps a **`phi_clears_on`** date on whatever recorded it, and
+until this release that date was a compliance *alert* (`phi_harvest_window`) and
+nothing more — the board said "no harvest until the 8th" and the tool that raises
+a harvest task did not read it.
+
+It reads it now, and **it refuses**.
+
+### Why this refuses where the restricted-entry guard warns
+
+These two look like the same check and are opposite decisions. Both are asserted
+in `tests_standalone/test_phi_harvest.py`, in both directions, for that reason.
+
+| | Restricted-entry interval | Pre-harvest interval |
+|---|---|---|
+| A condition on | **entry** | **the fruit** |
+| Work inside it | lawful with the label's PPE on (40 CFR 170.607) | nothing makes it lawful |
+| Discovered | at the block | at the packing house, days later, on a shipped load |
+| This app's response | **warns**, and dispatches | **refuses** |
+
+A server that refused work inside an REI would be inventing a rule stricter than
+the regulation and training foremen to route around the app. A server that only
+warned about a PHI would be watching somebody do the one thing the whole record
+exists to prevent, and printing a sentence about it.
+
+### Where the guard runs
+
+Both moments harvest is *initiated* on a block:
+
+* **`create_farm_task`** with `task_type: "Harvest"` and a `location` (or `asset`)
+  naming the block — the moment the pick is planned. Refused on the arguments,
+  before the document is inserted, so there is nothing to roll back.
+* **`assign_farm_task`** — the moment a name goes onto the record. A picking plan
+  made in advance and a cover spray landing on top of it is the ordinary order of
+  events, and this is the guard that catches it.
+* **`claim_farm_task`** — the worker's own door. Refused, and it names
+  `assign_farm_task` so somebody standing on a block is told who *can* act.
+
+Both mobile wrappers (`create_farm_task`, `assign_farm_task` on the FarmOps
+`/mobile` route) inherit the guard and forward the override.
+
+The refusal names the block, the first date it may be picked, the product and the
+spray record:
+
+```
+Yellow Camp Block 3 - MC is inside a pre-harvest interval until 2026-08-08
+(SURROUND-WP, SA-00001). A pick inside the interval is a residue violation on a
+shipped load — it is found at the packing house, days later, and traced back to
+this block and this date. …
+```
+
+### Two registers, and the longest window wins
+
+This app records a spray in two places on purpose, and a guard that read one of
+them would clear a block the other says is closed:
+
+* **`Spray Application`** — the record of the pass, with the wind and the
+  licence on it. Its blocks are a child table.
+* **A completed `Farm Task` of type Spray** — `stock_bridge.spray_windows`
+  stamps the window when the tank mix is drawn down, which is the path a spray
+  dispatched from the board takes.
+
+Both are read. Nothing is merged: each window keeps the register it came from,
+because "which spray was this" is the first question asked when somebody disputes
+a date.
+
+### The day the block opens
+
+`phi_clears_on` is the **last** day of the interval, not the first clear one. The
+`phi_harvest_window` compliance rule raises while `phi_clears_on >= today` and
+silences the day after, and this guard agrees with it to the day — a guard that
+cleared a block *on* that date would open it a day before the alert about it went
+out. Every message reports the day after.
+
+### The override
+
+`override_phi: true` with `phi_override_reason` (mandatory) raises or dispatches
+the task anyway. It is for a **stamped date that is wrong**, not for an interval
+that is inconvenient: a window opened by a tank that only covered part of the
+block, or a label corrected by the registrant since.
+
+* The reason is written into the task's **own `notes`**, not only into the action
+  log. A load questioned at the packing house is traced to a block and a date, and
+  the record somebody opens is the task.
+* `override_phi` with no reason is refused. An override with no reason is
+  indistinguishable afterwards from a guard that was never there.
+* The spray records are untouched, so the compliance alert stands until the date
+  passes.
+* **`claim_farm_task` has no override at all.** "The picker decided the interval
+  did not apply" is not a defence anybody can offer at the packing house.

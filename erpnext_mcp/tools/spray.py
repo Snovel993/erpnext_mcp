@@ -91,6 +91,12 @@ APPLIED = "Applied"
 PLANNED = "Planned"
 CANCELLED = "Cancelled"
 
+#: `Farm Task.task_type` for a spray. The same literal `dispatch.py` keeps under
+#: its own name — read as a constant here rather than spelled inline, because the
+#: pre-harvest read below filters on it and a typo would return an empty answer
+#: that looks exactly like "this block is clear".
+SPRAY_TASK_TYPE = "Spray"
+
 #: Block resolution is `spray_rei`'s, not a second copy. A block named on an
 #: application and the same block named on a restriction have to resolve to the
 #: same docname in the same register, or the application would open a window on a
@@ -192,6 +198,215 @@ def _number(value) -> float:
 
 def _checked(value) -> bool:
 	return compat.checked(value)
+
+
+# ── the pre-harvest interval, read back off the block ───────────────────────
+#
+# THE OTHER HALF OF THE INTERVAL PAIR, AND IT LIVES HERE RATHER THAN IN
+# `spray_rei.py` FOR ONE REASON: an REI has a REGISTER — one indexed Spray REI
+# row per block, opened by the application and closed by a sweep — and a PHI has
+# none. The pre-harvest interval is a DATE STAMPED ON WHATEVER RECORDED THE
+# SPRAY, and this app records a spray in two places on purpose: a Spray
+# Application (this module, with the wind and the licence on it) and a completed
+# Farm Task of type Spray (`stock_bridge.spray_windows` stamps the window when
+# the tank mix is drawn down). Both are real, both are current, and a reader that
+# consulted one of them would clear a block that the other says is closed.
+#
+# SO BOTH ARE READ, AND THE LONGEST WINS. Two products applied a week apart leave
+# two dates; the block opens on the later one. Nothing here merges the records —
+# each window keeps the register it came from, because "which spray was this" is
+# the first question asked when somebody disputes a date.
+#
+# THE BOUNDARY IS THE SAME ONE THE COMPLIANCE RULE USES, and it is the reason
+# `phi_harvest_window` and this function agree to the day: the interval is live
+# while `phi_clears_on >= today` and the block opens the day AFTER that date. A
+# day of over-caution against a residue violation on a shipped load is not a
+# close call, and a guard that cleared a block a day before the alert about it
+# went out would be worse than no guard.
+
+#: The two registers a spray leaves a pre-harvest date on. Named rather than
+#: derived so the two branches below read as one claim about where the fact is.
+PHI_SOURCES = (APPLICATION, FARM_TASK)
+
+#: `Farm Task.state` values whose stamped window counts. A DRAFT spray task has
+#: a `phi_clears_on` of nothing and an in-progress one has not finished spraying
+#: — the window is anchored on the completion, so only a task that reached one
+#: has a date worth reading. The same two states the `phi_harvest_window`
+#: compliance rule scopes on, and for the same reason.
+PHI_TASK_STATES = ("Awaiting-Review", "Completed")
+
+#: Most windows one call reports. A block with more than this many live
+#: pre-harvest intervals on it has a data problem, not a spray program.
+PHI_CAP = 100
+
+
+def _phi_from_applications(names: list, company: str, today: str) -> list[dict]:
+	"""Live pre-harvest windows off Spray Application, one query plus one.
+
+	The block lives on a CHILD TABLE, so this is the same two-step
+	`list_spray_applications` uses and for the same reason: a join would need raw
+	SQL, which this app does not write, and a per-row query would cost a round
+	trip per application on a handset at the end of a row.
+	"""
+	if not compat.doctype_exists(APPLICATION):
+		return []
+	filters: dict = {"status": APPLIED, "phi_clears_on": (">=", today)}
+	if company:
+		filters["company"] = company
+	try:
+		rows = frappe.db.get_all(
+			APPLICATION,
+			filters=filters,
+			fields=compat.existing_fields(
+				APPLICATION,
+				["name", "company", "phi_clears_on", "phi_days", "phi_source_item", "completed_at"],
+			),
+			order_by="phi_clears_on desc",
+			limit=PHI_CAP,
+		)
+	except Exception:  # pragma: no cover - a site shaping these columns differently
+		return []
+	rows = [dict(row) for row in rows or []]
+	if not rows:
+		return []
+
+	blocks = _blocks_by_application([row["name"] for row in rows])
+	out = []
+	for row in rows:
+		for entry in blocks.get(row["name"], []):
+			block = str(entry.get("block") or "")
+			if block not in names:
+				continue
+			out.append(
+				{
+					"block": block,
+					"block_doctype": str(entry.get("block_doctype") or "") or None,
+					"source_doctype": APPLICATION,
+					"source": row["name"],
+					"company": row.get("company") or None,
+					"phi_clears_on": str(row.get("phi_clears_on") or ""),
+					"phi_days": _number(row.get("phi_days")) or None,
+					"phi_source_item": row.get("phi_source_item") or None,
+					"sprayed_at": str(row.get("completed_at") or "") or None,
+				}
+			)
+	return out
+
+
+def _phi_from_tasks(names: list, company: str, today: str) -> list[dict]:
+	"""Live pre-harvest windows off a completed Spray Farm Task.
+
+	`stock_bridge.spray_windows` stamps `phi_clears_on` on the task when its tank
+	mix is drawn down, which is the path a spray dispatched from the board takes.
+	A site that files sprays that way and never writes a Spray Application would
+	get an empty answer from the branch above and a correct one from this.
+	"""
+	if not compat.doctype_exists(FARM_TASK) or not compat.has_field(FARM_TASK, "phi_clears_on"):
+		return []
+	filters: dict = {
+		"task_type": SPRAY_TASK_TYPE,
+		"state": ("in", list(PHI_TASK_STATES)),
+		"phi_clears_on": (">=", today),
+		"location": ("in", names),
+	}
+	if company:
+		filters["company"] = company
+	try:
+		rows = frappe.db.get_all(
+			FARM_TASK,
+			filters=filters,
+			fields=compat.existing_fields(
+				FARM_TASK,
+				[
+					"name",
+					"company",
+					"location",
+					"location_doctype",
+					"phi_clears_on",
+					"phi_source_item",
+					"spray_completed_at",
+				],
+			),
+			order_by="phi_clears_on desc",
+			limit=PHI_CAP,
+		)
+	except Exception:  # pragma: no cover
+		return []
+	return [
+		{
+			"block": str(dict(row).get("location") or ""),
+			"block_doctype": str(dict(row).get("location_doctype") or "") or None,
+			"source_doctype": FARM_TASK,
+			"source": str(dict(row).get("name") or ""),
+			"company": dict(row).get("company") or None,
+			"phi_clears_on": str(dict(row).get("phi_clears_on") or ""),
+			"phi_days": None,
+			"phi_source_item": dict(row).get("phi_source_item") or None,
+			"sprayed_at": str(dict(row).get("spray_completed_at") or "") or None,
+		}
+		for row in rows or []
+	]
+
+
+def phi_windows_for_blocks(blocks, company: str = "") -> list[dict]:
+	"""Every live pre-harvest interval on any of these blocks. NEVER RAISES.
+
+	The one read every surface that asks "may this be picked" shares — the same
+	shape and the same contract as `spray_rei.active_for_blocks`, which answers
+	the entry question. Returns `[]` where nothing is restricted, where the
+	doctypes have not migrated, or where a column this site shapes differently
+	will not answer: a harvest guard that failed CLOSED on an unreadable register
+	would stop a farm picking because of a schema question, and one that failed
+	open would be silent about the only thing it exists to say. It fails open and
+	`clears_on` is stamped on the records either way, which is what the scheduled
+	compliance sweep reads.
+
+	Sorted latest-clearing first, so the caller's first row is the date the block
+	actually opens.
+	"""
+	names = sorted({str(name).strip() for name in blocks or []} - {""})
+	if not names:
+		return []
+	today = frappe.utils.today()
+	found = []
+	try:
+		found = _phi_from_applications(names, company, today) + _phi_from_tasks(names, company, today)
+	except Exception:  # pragma: no cover - a warning, never a refusal
+		return []
+	for window in found:
+		window["days_remaining"] = _days_until(window["phi_clears_on"], today)
+		window["warning"] = (
+			f"PHI active on {window['block']} — no harvest until "
+			f"{_day_after(window['phi_clears_on'])}"
+			+ (f" ({window['phi_source_item']}" if window["phi_source_item"] else " (")
+			+ (f", sprayed {window['sprayed_at'].split(' ')[0]}" if window["sprayed_at"] else "")
+			+ f", {window['source']}). A pick inside the interval is a residue violation on a "
+			"shipped load."
+		)
+	return sorted(found, key=lambda window: window["phi_clears_on"], reverse=True)
+
+
+def _days_until(clears_on: str, today: str) -> int | None:
+	"""Whole days from today to the day the block opens. None where unreadable."""
+	try:
+		return int(frappe.utils.date_diff(_day_after(clears_on), today))
+	except Exception:  # pragma: no cover - a hand-edited date column
+		return None
+
+
+def _day_after(clears_on: str) -> str:
+	"""The first date the block may be picked.
+
+	`phi_clears_on` is the last date of the interval, not the first clear one —
+	the `phi_harvest_window` rule raises while it is `>= today` and silences the
+	day after. Reporting the raw column as "no harvest until X" would be off by
+	one in the dangerous direction, so it is added here, once, where every
+	message reads it.
+	"""
+	try:
+		return str(frappe.utils.add_days(str(clears_on).split(" ")[0], 1))
+	except Exception:  # pragma: no cover
+		return str(clears_on)
 
 
 # ── create_spray_nozzle_config ──────────────────────────────────────────────

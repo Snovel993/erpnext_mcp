@@ -6433,6 +6433,8 @@ def assign_farm_task(
 	reason=None,
 	shift=None,
 	farm_shift=None,
+	override_phi=None,
+	phi_override_reason=None,
 ) -> dict:
 	"""Send one named person to one task. v0.72.0.
 
@@ -6461,6 +6463,18 @@ def assign_farm_task(
 	`assigned_to_name` IS NOT ACCEPTED. The tools write it onto both records in
 	place of the name the Employee register holds, and a dispatch record that can
 	be made to name somebody who was never sent is not a dispatch record.
+
+	`override_phi` AND `phi_override_reason` ARE FORWARDED, and this is the one
+	place on this surface where a phone may set aside a compliance guard. The
+	tool refuses a Harvest task on a block still inside its pre-harvest interval
+	— see `dispatch._refuse_harvest_inside_phi` for why that one refuses where a
+	live restricted-entry interval only warns. The override is here rather than
+	MCP-only because the person who knows the stamped date is wrong is standing
+	on the block: a window opened by a tank that covered half of it, or a label
+	corrected since. `require_dispatch_role` already put a Foreman or a Farm
+	Manager on the other end, the reason is mandatory and lands in the task's own
+	notes, and the worker's own door — `claim_task_via_mobile` — has no override
+	at all.
 	"""
 	guard.require_dispatch_role(user, "Dispatching a task to somebody")
 	allowed = guard.require_scope(user)
@@ -6480,6 +6494,10 @@ def assign_farm_task(
 		inner["reassign"] = reassign
 	if reason is not None:
 		inner["reason"] = reason
+	if override_phi is not None:
+		inner["override_phi"] = override_phi
+	if phi_override_reason is not None:
+		inner["phi_override_reason"] = phi_override_reason
 
 	named_shift, shift_label = _one_spelling(farm_shift, shift, "farm_shift", "shift")
 	if named_shift:
@@ -6490,6 +6508,10 @@ def assign_farm_task(
 	out = shape.task(data, data.get("assignment") or {})
 	out["reassigned_from"] = data.get("reassigned_from")
 	out["concurrent_claims"] = data.get("concurrent_claims")
+	if data.get("phi_override"):
+		out["phi_override"] = data["phi_override"]
+	if data.get("warnings"):
+		out["warnings"] = data["warnings"]
 	return out
 
 
@@ -6513,6 +6535,8 @@ def create_farm_task(
 	employee=None,
 	shift=None,
 	farm_shift=None,
+	override_phi=None,
+	phi_override_reason=None,
 ) -> dict:
 	"""Raise one piece of work on the spot, with its evidence contract. v0.72.0.
 
@@ -6533,6 +6557,12 @@ def create_farm_task(
 	`creates_record_data`, `draft`, `source_alert` and `materials_used` — are set
 	out in the block that opens this set. Work that has to produce a compliance
 	record comes off a template.
+
+	`override_phi` AND `phi_override_reason` ARE THE TWO EXCEPTIONS TO THAT LIST,
+	and they are here for the same reason they are on `assign_farm_task`: the tool
+	refuses a Harvest task on a block still inside its pre-harvest interval, and
+	the person who knows the stamped date is wrong is standing on the block. The
+	reason is mandatory and lands in the task's own notes.
 	"""
 	guard.require_dispatch_role(user, "Raising a farm task")
 	allowed = guard.require_scope(user)
@@ -6562,9 +6592,16 @@ def create_farm_task(
 	if named_shift:
 		inner["farm_shift"] = guard.require_scoped_doc(FARM_SHIFT, named_shift, shift_label, allowed)
 
+	if override_phi is not None:
+		inner["override_phi"] = override_phi
+	if phi_override_reason is not None:
+		inner["phi_override_reason"] = phi_override_reason
+
 	result = dispatch.create_farm_task(inner)
 	data = result.data
 	out = shape.task(data, data.get("assignment") or {})
+	if data.get("phi_override"):
+		out["phi_override"] = data["phi_override"]
 	if data.get("warnings"):
 		out["warnings"] = data["warnings"]
 	return out
