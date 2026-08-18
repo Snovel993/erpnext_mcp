@@ -3,6 +3,85 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.92.2 — 2026-08-17 — three things the handset found
+
+iOS integration testing against v0.92.1 returned three server-side faults. All
+three are fixed here, and one of them was not what the report said it was.
+
+### The pay stub the law requires reached nowhere
+
+`get_my_pay_stub_pdf` answered with a `file_url`, and nothing could open it. The
+URL is a `/private/files/…` path; the FarmOps sidecar authenticates with
+`X-FarmOps-Token` rather than to Frappe, so a private link is a login page to the
+device holding it. This is the gap `get_document_preview` was published for in
+v0.63.0, one register over.
+
+**`get_attachment_content` cannot serve this one, and adding `Farm Payroll Entry`
+to `ATTACHMENT_PARENTS` would not have made it.** That door asks Frappe whether
+the caller may read the **parent**, and the parent is the payroll run — which
+grants `read` to System Manager, HR Manager and HR User and to nobody else,
+correctly, because one run holds a slip for every person on it. A picker holds no
+role that clears that check and must not be given one. The right they actually
+have is narrower than any role can express: not *this run*, but *the single file
+on it whose name is mine*.
+
+So **the statement travels in `get_my_pay_stub_pdf`'s own answer**, under
+`content`, `content_base64` and `base64` — the three spellings
+`submit_form_signature` and `get_employee_badge_pass` already use. The employee
+comes from the login, the file name from `pay_stub_pdf.file_name_for`, and a
+colleague's stub is a different name on the same run that no argument reaches.
+`files.read_attached_bytes_unchecked` is the reader behind it: the only function
+in that module that skips the parent permission, taking a parent and a file NAME
+rather than a File docname so it cannot be walked, refusing unless exactly one
+file matches, whitelisted nowhere and on no tool schema.
+
+`Farm Payroll Entry` **does** join `ATTACHMENT_PARENTS`, as a **personnel** parent
+(`True`, not `False`): an HR account can now open a run's attachment folder from a
+handset. The flag has to be `True` because that folder is a crew's wages, and
+`routes.py` already argues that putting those in front of every foreman is the
+reflex to avoid.
+
+### The training session gate was strict about the wrong half
+
+`get_training_session` and `list_training_sessions` took `require_hr_role`, so a
+Foreman could not read a sign-in sheet. **The report said a foreman could run a
+session end-to-end and not read one back; the first half was not true.** The gate
+lives in `tools/training_sessions.py` rather than in the mobile wrapper, and every
+tool in that module carried it — a Foreman could not create a session, add an
+attendee, take a signature or complete one either.
+
+The two **reads** now take `require_shift_role` — `HR_ROLES` plus Foreman and
+Crew Leader, the list `start_shift` and `end_shift` already use, on the argument
+`employee.py` makes for it: OAR 437-004-1131 puts the obligation on the named
+supervisor, and a tailgate briefing is that same afternoon. `list_training_sessions`
+has said "a foreman or an auditor" in its own docstring since it was written.
+
+The **writes are unchanged**. Completing a session writes a training record onto
+each attendee's personnel file, which is a personnel change and stays behind the
+personnel gate. A Foreman who should be running sessions rather than only reading
+them is a wider decision than an integration report can settle.
+
+### The quarter is now taken as a word or as a number
+
+The five tax remittance reads took `quarter` as `"Q3"`. The iOS picker is four
+buttons and posts the integer `3`, which came back as *quarter must be one of Q1,
+Q2, Q3, Q4, got '3'* — a refusal about spelling, on a value that was never
+ambiguous, raised where the caller has no other answer to give.
+
+`tax_remittance._window` normalises `"Q3"`, `"q3"`, `"3"` and `3` to one value.
+It is done there rather than in the route wrapper because `_window` is where all
+five reads take their period from, so the MCP surface and the handset agree about
+what a valid argument is — the same reason `fiscal_year` and `year` are accepted
+once rather than five times. **Normalising is not accepting:** 0, 5 and `"2026-Q2"`
+are still refused, and are quoted back as sent rather than guessed at. The four
+schemas advertise `["string", "integer"]`.
+
+### Not changed, and worth naming
+
+`render_training_sign_in_sheet` still takes `require_hr_role`, so the supervisor
+who may now read a sheet still cannot print one in the shed — which its own
+docstring argues they should. It writes a file, so it went with the writes.
+
 ## 0.92.1 — 2026-08-17 — a Spanish slot that held English
 
 `get_wizard_definition` sent the handset **the same string in both language

@@ -7427,6 +7427,13 @@ in one place so a read cannot say *ready* about a row the completion will skip.
 not block a completion, because a session where eleven of twelve signed should
 file eleven rather than nothing.
 
+**Both reads take `SHIFT_ROLES` rather than `HR_ROLES` (v0.92.2):** System
+Manager, HR Manager, HR User, Farm Manager, **Foreman** or **Crew Leader**. The
+supervisor who holds a tailgate session is the person who needs the sheet from it,
+and the same argument `Farm Shift` makes applies here. The **writes** are
+unchanged and still take an HR role — completing a session puts a training record
+on each attendee's own personnel file, which is a personnel change.
+
 `list_training_sessions` filters by `company`, `training_type`, `status`,
 `employee`, `conducted_by`, `regime` and period. **`employee` is what makes this
 more than a diary:** it answers "which sessions was Ana at" off the attendee rows
@@ -11184,6 +11191,15 @@ that field is the copy somebody printed and had signed. `stale` says whether the
 record has changed since the page was drawn, and `refresh=true` asks for a
 redraw. Showing a stale page to a signer means hashing something other than what
 they read.
+
+**The same gap, one register over (v0.92.2).** A worker's own pay stub is
+attached to the payroll run, and `get_my_pay_stub_pdf` answered with a private
+`file_url` nothing on the handset could open. `get_attachment_content` cannot
+serve that one either: it asks Frappe for `read` on the **parent**, and the parent
+is a run holding a slip for every person on it — HR-readable, correctly. So the
+statement travels in that route's own answer, under the same three spellings. The
+run itself joins `ATTACHMENT_PARENTS` as a **personnel** parent, so an HR account
+can open a run's folder from a handset and nobody else can.
 
 **Step 5 — the artefact is tamper-evident.** Flattening a form makes it tamper
 *resistant*: there is no annotation to delete and no field to clear, so altering it
@@ -15970,6 +15986,13 @@ depositor on a monthly schedule — the expensive direction. The result reports 
 many of the four quarters had data and warns below four; pass `lookback_total`
 off the filed 941s, or `schedule` directly.
 
+### The quarter is taken as a word or as a number
+
+All five reads accept `quarter` as `"Q3"` or as `3` — the string a model writes
+and the integer a picker posts are normalised to the same value before the period
+is computed. Anything outside 1–4 is still refused, and is quoted back as it was
+sent rather than guessed at.
+
 ### `get_tax_remittance_summary`
 
 **READ (default ON).** Everything owed to every authority for a period, broken
@@ -15986,7 +16009,7 @@ those columns are mirrored per row, and `warnings` says how many.
 |---|---|---|
 | `fiscal_year` | yes | Calendar year as `YYYY` (`year` is an alias) |
 | `company` | | Required on a multi-company site |
-| `quarter` | | `Q1`–`Q4`; omit for the whole calendar year |
+| `quarter` | | `Q1`–`Q4`, or the number `1`–`4`; omit for the whole calendar year |
 
 ### `get_941_prefill`
 
@@ -16002,7 +16025,7 @@ which is exactly why that one is stored. Read `warnings[0]`.
 | Parameter | Required | Description |
 |---|---|---|
 | `fiscal_year` | yes | Calendar year as `YYYY` |
-| `quarter` | yes | `Q1`–`Q4` |
+| `quarter` | yes | `Q1`–`Q4`, or the number `1`–`4` |
 | `company` | | Required on a multi-company site |
 | `deposits` | | Line 13 — federal deposits made for the quarter |
 | `ytd_wages_by_employee` | | Prior-quarter wages, for the Social Security base from Q2 on |
@@ -16028,7 +16051,7 @@ not an approximation — plus UI, Paid Family & Medical Leave and WA Cares.
 | Parameter | Required | Description |
 |---|---|---|
 | `fiscal_year` | yes | Calendar year as `YYYY` |
-| `quarter` | yes | `Q1`–`Q4` |
+| `quarter` | yes | `Q1`–`Q4`, or the number `1`–`4` |
 | `company` | | Required on a multi-company site |
 | `state` | | `OR` or `WA`; omit for both |
 | `ui_rate` | | The state's assigned rate, as a percent |
@@ -16055,7 +16078,7 @@ Saturday and the holiday lands on 31 December of the year before.
 |---|---|---|
 | `fiscal_year` | yes | Calendar year as `YYYY` |
 | `company` | | Required on a multi-company site |
-| `quarter` | | `Q1`–`Q4`; omit for the whole year |
+| `quarter` | | `Q1`–`Q4`, or the number `1`–`4`; omit for the whole year |
 | `lookback_total` | | Tax reported on the four returns in the lookback period |
 | `schedule` | | `Monthly` or `Semiweekly`, overriding the lookback test |
 | `payday_offset_days` | | 0–60; days between a period closing and the money moving |

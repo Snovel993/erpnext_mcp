@@ -734,6 +734,14 @@ ROUTES = (
 	# SIGNATURE, so this table's filter is what makes a redraw unreachable rather
 	# than merely refused — replacing a statement a worker was already handed is
 	# a correction, and a correction is made by whoever answers for the payroll.
+	#
+	# v0.92.2: IT CARRIES THE PDF IN THE ANSWER, like `get_document_preview` and
+	# the `.pkpass` above and for the identical reason — the funnel strips the
+	# credential a private `file_url` wants. `get_attachment_content` cannot serve
+	# this one: it asks Frappe for `read` on the PARENT, and the parent is a
+	# payroll run holding the whole crew's slips. There is no switch to turn the
+	# page off: every argument here is a key `bind` would deliver, and the screen
+	# that wants envelopes without pages is `list_my_pay_stubs`.
 	Route("/mobile", mobile_api.get_my_w4),
 	Route("/mobile", mobile_api.list_my_pay_stubs),
 	Route("/mobile", mobile_api.get_my_pay_stub_pdf),

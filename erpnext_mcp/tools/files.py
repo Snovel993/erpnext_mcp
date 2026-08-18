@@ -345,6 +345,59 @@ def read_file_bytes(name: str) -> bytes:
 	return _content_bytes(doc)
 
 
+def read_attached_bytes_unchecked(doctype: str, name: str, file_name: str) -> bytes:
+	"""ONE named file on ONE named parent, WITHOUT the Frappe read check above.
+
+	v0.92.2, AND IT IS THE ONLY FUNCTION IN THIS FILE THAT SKIPS `_authorize_file`.
+	Read the name. Everything else here honours Frappe's permission on the parent
+	document, which `docs/security.md` calls the one family of tools in this app
+	that does, and that rule is right for a door addressed by a File docname: a
+	File id is a global handle, so the parent's permission is the only thing
+	standing between a caller and any file on the site.
+
+	WHY ONE CALLER NEEDS THE EXCEPTION. A worker's own pay stub is attached to the
+	`Farm Payroll Entry` for the run, and `Farm Payroll Entry` grants `read` to
+	System Manager, HR Manager and HR User and to nobody else — correctly, because
+	the run holds a slip for every person on it and a picker must not read the
+	crew's wages. So Frappe's parent permission cannot express the one right the
+	worker actually has: not "this run", but "the single file on this run whose
+	name is mine". ORS 652.610 and RCW 49.46.020 say they are owed that statement,
+	and the check that proves it belongs to them is `api/mobile.get_my_pay_stub_pdf`'s,
+	which resolves the employee from the LOGIN and the file name from
+	`pay_stub_pdf.file_name_for` — a narrower right than a role can hold.
+
+	WHAT MAKES IT SAFE TO EXIST IS THE SIGNATURE. It takes a parent and a file
+	NAME, never a File docname, and it refuses unless exactly one file matches all
+	three. A caller cannot walk the File table with it, cannot reach an unattached
+	file, and cannot ask it for "whatever is on this record" — every call has to
+	already know the name of the one file it is entitled to, which is the whole of
+	the authorization it does not perform.
+
+	IT IS NOT WHITELISTED AND IS ON NO TOOL SCHEMA. `registry.py` does not publish
+	it and no route binds to it; it is a library function for a caller in this repo
+	that has done the check itself.
+	"""
+	rows = frappe.db.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": doctype,
+			"attached_to_name": name,
+			"file_name": file_name,
+		},
+		fields=["name"],
+		limit_page_length=2,
+	) or []
+	if len(rows) != 1:
+		raise ToolError(
+			f"{file_name!r} is not a file on {doctype} {name} — "
+			f"{len(rows)} matched, and this reader takes exactly one."
+		)
+	doc = frappe.get_doc("File", rows[0]["name"])
+	if doc.get("is_folder"):
+		raise ToolError(f"File {doc.name!r} is a folder, not a document")
+	return _content_bytes(doc)
+
+
 def check_attachable(
 	doctype: str,
 	name: str,

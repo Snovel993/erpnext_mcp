@@ -5,6 +5,10 @@ import base64
 import hashlib
 import json
 
+from erpnext_mcp import registry
+from erpnext_mcp.errors import ToolError
+from erpnext_mcp.tools import files
+
 from .fixtures import APPROVER, ATTACHED_JE, BUYER, MAIN, OTHER, V2TestCase
 from .harness import META, STORE, frappe, register_doctype
 
@@ -160,6 +164,65 @@ STATEMENT_SHA = hashlib.sha256(STATEMENT).hexdigest()
 #: records that evidence belongs on, which is the point of testing against both.
 SUBMITTED_JE = ATTACHED_JE
 DRAFT_JE = "ACC-JV-2026-00002"
+
+
+class ReadAttachedBytesUnchecked(V2TestCase):
+	"""The one reader in the module that skips Frappe's permission on the parent.
+
+	v0.92.2. It exists for a worker's own pay stub, which is attached to a payroll
+	run they may not read — see the function's own docstring for why that right is
+	narrower than any role. These are the checks that stand in place of the one it
+	does not make.
+	"""
+
+	def reader(self, doctype, name, file_name):
+		return files.read_attached_bytes_unchecked(doctype, name, file_name)
+
+	def test_it_returns_the_bytes_of_the_named_file(self):
+		content = self.reader("Journal Entry", ATTACHED_JE, "invoice.txt")
+		self.assertEqual(content, b"invoice line one\r\n---")
+
+	def test_it_reads_a_file_whose_parent_the_caller_may_not_read(self):
+		"""THE WHOLE POINT. `get_attachment_content` refuses this exact case."""
+		STORE.denied_permissions.add(("Journal Entry", ATTACHED_JE))
+		self.assertIn("not permitted to read", self.tool_error(
+			"get_attachment_content", {"name": "file-public-invoice"}
+		))
+		self.assertEqual(self.reader("Journal Entry", ATTACHED_JE, "invoice.txt"), b"invoice line one\r\n---")
+
+	def test_a_file_name_that_is_not_on_that_parent_is_refused(self):
+		"""It takes a parent and a NAME, so it cannot be walked like a docname."""
+		for doctype, name, file_name in (
+			("Journal Entry", ATTACHED_JE, "somebody-elses.pdf"),
+			("Journal Entry", "ACC-JV-2026-00002", "invoice.txt"),
+			("Farm Payroll Entry", ATTACHED_JE, "invoice.txt"),
+		):
+			with self.subTest(file_name=file_name):
+				with self.assertRaises(ToolError) as refusal:
+					self.reader(doctype, name, file_name)
+				self.assertIn("0 matched", str(refusal.exception))
+
+	def test_two_files_of_one_name_on_one_parent_are_refused_rather_than_guessed(self):
+		"""Which of two is 'the' file is not a question this reader may answer."""
+		STORE.seed(
+			"File",
+			[
+				{
+					"name": "file-duplicate-invoice",
+					"file_name": "invoice.txt",
+					"file_url": "/files/invoice.txt",
+					"attached_to_doctype": "Journal Entry",
+					"attached_to_name": ATTACHED_JE,
+				}
+			],
+		)
+		with self.assertRaises(ToolError) as refusal:
+			self.reader("Journal Entry", ATTACHED_JE, "invoice.txt")
+		self.assertIn("2 matched", str(refusal.exception))
+
+	def test_it_is_on_no_tool_schema(self):
+		"""A reader that skips the permission check must not be callable as a tool."""
+		self.assertNotIn("read_attached_bytes_unchecked", registry.TOOLS)
 
 
 class AttachFileToDocumentIsOffUntilAnOperatorSaysOtherwise(V2TestCase):

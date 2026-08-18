@@ -55,6 +55,16 @@ copied, for the reason `tools/training.py` gives: a training session is a
 personnel record, it names workers, it is read in a wage claim, and creating one
 for an entity you cannot see would put a crew's qualification history on a
 register you cannot read.
+
+THE TWO READS TAKE `require_shift_role` INSTEAD, SINCE v0.92.2, AND THE SPLIT IS
+THE POINT. Writing is a personnel change — a completion puts a training card on
+each attendee's own file — so `create_training_session`, `add_session_attendee`,
+`sign_session_attendance` and `complete_training_session` keep the personnel
+gate. Reading a sheet back is the supervisor's own work: `SHIFT_ROLES` adds
+Foreman and Crew Leader for a crew shift on the argument that the obligation sits
+on the named supervisor, and a tailgate session is that same afternoon. A gate
+that let somebody hold the briefing and not look at the sheet afterwards was
+strict about the wrong half.
 """
 
 from __future__ import annotations
@@ -1227,9 +1237,30 @@ def complete_training_session(args: dict) -> ToolResult:
 
 # ── 7. get_training_session ─────────────────────────────────────────────────
 def get_training_session(args: dict) -> ToolResult:
-	"""One session in full: the curriculum, the sheet, and what is still outstanding."""
+	"""One session in full: the curriculum, the sheet, and what is still outstanding.
+
+	`require_shift_role` RATHER THAN `require_hr_role`, SINCE v0.92.2. This is the
+	one register in the module where the reading is a supervisor's, and the gate
+	said otherwise: a Foreman holds the tailgate session, and could not open the
+	sheet from it. `SHIFT_ROLES` is `HR_ROLES` plus Foreman and Crew Leader and it
+	exists for exactly this shape of act — `employee.py` argues it at length for a
+	crew shift, and a heat-illness briefing at the row end is the same afternoon.
+
+	IT IS A READ, AND THE WRITES ARE UNCHANGED. `create_training_session`,
+	`add_session_attendee`, `sign_session_attendance` and
+	`complete_training_session` all keep `require_hr_role`: completing a session
+	WRITES A TRAINING RECORD onto each attendee's personnel file, which is a
+	personnel change and belongs behind the personnel gate. So this widens who may
+	READ a sheet, not who may put a card on somebody's record.
+
+	NOTHING ON THE SHEET IS BEHIND THE PERSONNEL GATE FOR ITS OWN SAKE. Attendee
+	names, who signed, the curriculum and what is outstanding — no wage, no
+	withholding, no immigration status, none of the four things `HR_ROLES` guards
+	elsewhere in this app. `require_company_scope` below is unchanged and still
+	refuses a session at an entity this actor cannot reach.
+	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_session(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1289,9 +1320,16 @@ def list_training_sessions(args: dict) -> ToolResult:
 	the one that produced no record and is therefore invisible to
 	`list_trainings`. That gap is exactly the thing somebody is looking for when
 	they ask.
+
+	`require_shift_role` RATHER THAN `require_hr_role`, SINCE v0.92.2, for the
+	reason `get_training_session` gives: the docstring above has said "a foreman
+	or an auditor" since this tool was written, and the gate refused the first of
+	them. A listing is the narrower of the two reads — the attendee rows are
+	omitted and the counts are not — so it is the one that could least afford to
+	be the stricter.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	limit = min(as_limit(args), SESSION_CAP)
 
 	filters: dict = {}

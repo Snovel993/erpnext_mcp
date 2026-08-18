@@ -4949,6 +4949,20 @@ def set_employee_contact_fields(
 #: personnel read `search_employees` and `assign_housing` both gate; a Farm Task's
 #: evidence and a Housing Inspection's photographs are field work, and the six
 #: gates `guard.endpoint` has already run are the whole of what those need.
+#:
+#: v0.92.2 ADDS `Farm Payroll Entry`, AND IT IS THE THIRD PERSONNEL PARENT. A pay
+#: stub is attached to the RUN rather than to the person — one run carries one
+#: file per crew member, which `_attached_stub_urls` matches by name — so the
+#: folder behind this docname is a crew's wages and the flag has to be True.
+#: `False` was the shape asked for and would have said, in this app's own voice,
+#: that a foreman may open it; only Frappe's DocPerm on the doctype would have
+#: been left refusing, and `routes.py` already argues that putting a crew's wages
+#: in front of every foreman is the reflex to avoid.
+#:
+#: THE WORKER'S OWN STUB DOES NOT COME THROUGH HERE AT ALL. `get_my_pay_stub_pdf`
+#: carries its bytes in its own answer, because the right a picker holds is not
+#: "this run" but "the one file on it that is mine" — narrower than any doctype
+#: flag can say, and narrower than Frappe's parent permission can express.
 ATTACHMENT_PARENTS = {
 	EMPLOYEE: True,
 	"I-9 Form": True,
@@ -4958,6 +4972,7 @@ ATTACHMENT_PARENTS = {
 	"Housing Inspection": False,
 	"Compliance Alert": False,
 	"Farm Shift": False,
+	payroll_tools.PAYROLL_ENTRY: True,
 }
 
 
@@ -7712,7 +7727,7 @@ _IOS_CHECKBOX_OPTIONS = (
 def _ios_bilingual(row: dict, key: str, en: str, es: str) -> None:
 	"""Write the English and the Spanish into their own slots.
 
-	THIS IS THE SECOND PASS THE FIRST VERSION SAID IT WANTED. Until v0.92.1 both
+	THIS IS THE SECOND PASS THE FIRST VERSION SAID IT WANTED. Until v0.92.2 both
 	slots got the SAME resolved string, because the wrapper only ever had one:
 	`get_wizard_definition` picks the worker's language off their Employee record
 	and answers in it. That worked on a handset set to the language the server
@@ -8050,7 +8065,7 @@ def get_wizard_definition(user: str, wizard=None, language=None) -> dict:
 
 	data = wizard_tools.get_wizard_definition(inner).data
 	# THE HANDSET GETS BOTH LANGUAGES AND PICKS, WHICH IS NOT WHAT THE TOOL DOES.
-	# v0.92.1: the app decodes `title_en`/`title_es` and switches on a setting
+	# v0.92.2: the app decodes `title_en`/`title_es` and switches on a setting
 	# the server cannot see, so one resolved string put the WRONG WORDS in the
 	# other slot rather than leaving it empty — a Spanish-reading picker read
 	# English out of `label_es` with nothing marking it as English.
@@ -10062,8 +10077,26 @@ def complete_training_session(
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_training_session", limit=guard.READ_LIMIT)
 def get_training_session(user: str, session=None) -> dict:
-	"""One session's sign-in sheet, and what is still short on it."""
-	personnel.require_hr_role()
+	"""One session's sign-in sheet, and what is still short on it.
+
+	THE HR GATE CAME OFF THIS WRAPPER IN v0.92.2 AND THE REAL ONE IS UNDERNEATH.
+	`training_sessions.get_training_session` now runs `require_shift_role` —
+	`HR_ROLES` plus Foreman and Crew Leader, the same list `start_shift` and
+	`end_shift` take — so a duplicate `require_hr_role` here would have been the
+	only thing still refusing a supervisor, and would have refused them AFTER the
+	tool had decided they may read it. One gate, in the layer that owns the
+	register.
+
+	WHY THE SUPERVISOR IS ON THE LIST is the argument `SHIFT_ROLES` makes for a
+	crew shift, and a tailgate session is the same act: the person who holds a
+	heat-illness or WPS briefing at the row end is the named supervisor, and one
+	who cannot open the sheet afterwards cannot tell whether the four who arrived
+	late ever signed it.
+
+	THE ENTITY GATE IS UNTOUCHED AND IS STILL THE ONE DOING MOST OF THE WORK. A
+	session at a company this account's User Permissions do not name reads as NOT
+	FOUND, both here and again inside the tool.
+	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(TRAINING_SESSION, session, "session", allowed)
 	return training_session_tools.get_training_session({"session": name}).data
@@ -10084,8 +10117,20 @@ def list_training_sessions(
 	to_date=None,
 	limit=None,
 ) -> dict:
-	"""The session register, scoped to the entities this account may reach."""
-	personnel.require_hr_role()
+	"""The session register, scoped to the entities this account may reach.
+
+	THE HR GATE CAME OFF THIS WRAPPER IN v0.92.2, for the reason
+	`get_training_session` above gives: the tool underneath now takes
+	`require_shift_role`, and a supervisor who may hold a session and may read one
+	back needs to be able to find it again tomorrow.
+
+	A LISTING IS THE NARROWER READ OF THE TWO. `tools/training_sessions.py` omits
+	the attendee rows from a listing and reports the counts instead, so what comes
+	back here is what happened, when, under which regime and how many signed —
+	not who. `employee=` still runs through `_employee_argument`, so filtering the
+	register by a person is refused for an Employee outside the entities this
+	account may reach, exactly as it was before.
+	"""
 	allowed = guard.require_scope(user)
 	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
 
@@ -10518,6 +10563,22 @@ def get_my_pay_stub_pdf(user: str, payroll_entry=None) -> dict:
 	where a statement's YTD belongs and where it is labelled as the CALENDAR year
 	it is; an envelope that carried it only on the periods that happened to be
 	rendered this minute would be a field a client could not rely on.
+
+	v0.92.2 CARRIES THE PDF ITSELF, and until it did this route answered with a
+	link nothing could open. `file_url` is a `/private/files/…` path, the funnel
+	authenticates with `X-FarmOps-Token` rather than to Frappe, and
+	`get_attachment_content` — the door built for exactly that gap — asks Frappe
+	whether the caller may read the PARENT. Here the parent is the payroll run,
+	which is HR-readable and must stay that way because it holds a slip for every
+	person on it. So the one document the law says this worker is owed was the one
+	this surface could name and not deliver. `_stub_bytes` says how it delivers it
+	and why that is narrower than any permission Frappe can hold.
+
+	THERE IS NO SWITCH TO TURN THE BYTES OFF, and the empty signature is the
+	reason. Every argument on one of these five methods is a key `routes.bind`
+	will deliver, so a knob costs a permanently wider door for a saving a client
+	already has: a statement is one page, and a screen walking a year of periods
+	wants `list_my_pay_stubs`, which carries the URL and never the page.
 	"""
 	allowed = guard.require_scope(user)
 	person = _employee(user)
@@ -10553,15 +10614,69 @@ def get_my_pay_stub_pdf(user: str, payroll_entry=None) -> dict:
 	file_name = pay_stub_pdf.file_name_for(shape_of_answer)
 	existing = _attached_stub_urls({run: file_name}).get(run)
 	if existing:
-		return {**shape_of_answer, "file_url": existing, "file_name": file_name, "rendered": False}
+		out = {**shape_of_answer, "file_url": existing, "file_name": file_name, "rendered": False}
+		return {**out, **_stub_bytes(run, file_name)}
 
 	data = payroll_tools.render_pay_stub({"payroll_entry": run, "employee": person}).data
-	return {
+	drawn = str(data.get("file_name") or "") or file_name
+	out = {
 		**shape_of_answer,
 		"file_url": data.get("file_url"),
 		"file_name": data.get("file_name"),
 		"rendered": True,
 		"note": data.get("note"),
+	}
+	return {**out, **_stub_bytes(run, drawn)}
+
+
+#: The bytes keys, all four of them empty. `_stub_bytes` and `_sealed_bytes` both
+#: answer in this shape whatever happens, so a client reads the same keys on the
+#: page it got and on the page it did not.
+_NO_BYTES = {"encoding": None, "content": None, "content_base64": None, "base64": None}
+
+
+def _stub_bytes(run: str, file_name: str) -> dict:
+	"""One worker's own stub, read back as base64. NEVER RAISES.
+
+	v0.92.2, AND THE FUNNEL IS THE WHOLE REASON. `file_url` on the answer above
+	is a `/private/files/…` link; this door authenticates with `X-FarmOps-Token`
+	rather than to Frappe, so that link is a login page to the handset holding it.
+	The same gap `get_document_preview` was published for, and the same fix: THE
+	BYTES TRAVEL IN THE ANSWER, in the three spellings `submit_form_signature`
+	and `get_employee_badge_pass` already use.
+
+	`get_attachment_content` CANNOT SERVE THIS ONE, which is why it is here. That
+	door asks Frappe whether the caller may read the PARENT, and the parent is the
+	payroll run — readable by HR and by nobody else, correctly, because it holds a
+	slip for every person on it. The right this worker holds is one file on that
+	run, and `read_attached_bytes_unchecked` takes the parent and the file NAME so
+	that the check which proves it is theirs stays where it can be made: `run` came
+	through `require_scoped_doc`, the employee came from `_employee(user)` and the
+	name came from `pay_stub_pdf.file_name_for` — a colleague's stub is a different
+	file name on the same run and there is no argument on this signature that
+	reaches it.
+
+	NEVER RAISES, for the reason `_sealed_bytes` does not: the statement exists and
+	the answer points at it whatever happens in here, and a storage read that failed
+	is not a reason to refuse the worker the URL, the period and the net pay.
+	"""
+	if not run or not file_name:
+		return dict(_NO_BYTES)
+	try:
+		content = file_tools.read_attached_bytes_unchecked(
+			payroll_tools.PAYROLL_ENTRY, run, file_name
+		)
+	except Exception:  # pragma: no cover - see the docstring
+		return dict(_NO_BYTES)
+	if not content:
+		return dict(_NO_BYTES)
+	encoded = base64.b64encode(content).decode("ascii")
+	return {
+		"encoding": "base64",
+		"content": encoded,
+		"content_base64": encoded,
+		"base64": encoded,
+		"content_type": "application/pdf",
 	}
 
 

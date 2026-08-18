@@ -158,6 +158,13 @@ _BOOLEAN = {"type": "boolean"}
 _OBJECT = {"type": "object"}
 _STRING_ARRAY = {"type": "array", "items": {"type": "string"}}
 
+#: `quarter` on the five tax remittance reads, WHICH TAKE EITHER SPELLING.
+#: v0.92.2. A model writes "Q3" because the description says so; the iOS quarter
+#: picker is four buttons and posts the integer 3. `tax_remittance._window`
+#: normalises both to "Q3", and a schema that advertised only one of them would
+#: make a client that sends the other look wrong when it is not.
+_QUARTER = {"type": ["string", "integer"]}
+
 
 def _field(kind: dict, description: str) -> dict:
 	return {**kind, "description": description}
@@ -14474,7 +14481,10 @@ TOOLS = {
 		"does not block a completion — their row simply produces no record — because "
 		"a session where eleven of twelve signed should file eleven rather than "
 		"nothing.\n\n"
-		"Scoped to the companies the calling account may reach.",
+		"Scoped to the companies the calling account may reach. Requires System "
+		"Manager, HR Manager, HR User, Farm Manager, Foreman or Crew Leader — the "
+		"supervisor who held the session may read the sheet from it. Writing the "
+		"training records a completion produces still takes an HR role.",
 		{
 			"session": _field(_STRING, "The Training Session docname — TRNS-2026-0001."),
 			"name": _field(_STRING, "Alias for session."),
@@ -14500,7 +14510,9 @@ TOOLS = {
 		"rather than by a report.\n\n"
 		"Attendee rows are omitted and the counts are not — forty sessions of twelve "
 		"is five hundred rows to answer 'what happened in June'. get_training_session "
-		"has the sheet.",
+		"has the sheet.\n\n"
+		"Requires System Manager, HR Manager, HR User, Farm Manager, Foreman or "
+		"Crew Leader, and is scoped to the companies that account may reach.",
 		{
 			"company": _COMPANY,
 			"training_type": _field(_STRING, "One curriculum by name."),
@@ -20160,7 +20172,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Omit for the whole calendar year."),
+			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."),
 		},
 		required=("fiscal_year",),
 		available=_needs_doctype("Farm Payroll Entry"),
@@ -20187,7 +20199,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Required — a 941 is quarterly."),
+			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — a 941 is quarterly."),
 			"deposits": _field(_NUMBER, "Line 13 — total federal deposits made for the quarter."),
 			"ytd_wages_by_employee": _field(
 				_OBJECT,
@@ -20224,7 +20236,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Required — both reports are quarterly."),
+			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — both reports are quarterly."),
 			"state": _field(_STRING, "OR or WA. Omit for both."),
 			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
 			"or_ui_wage_base": _field(_NUMBER, "Oregon's UI taxable wage base for the year."),
@@ -20269,7 +20281,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_STRING, "Q1, Q2, Q3 or Q4. Omit for the whole calendar year."),
+			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."),
 			"lookback_total": _field(
 				_NUMBER,
 				"Total employment tax reported on the four returns in the lookback period. "

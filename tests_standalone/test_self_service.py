@@ -45,6 +45,7 @@ actually have opened — is TWO ENROLLED WORKERS AT THE SAME COMPANY, because
 company scope is what they share. Cara exists in this file for that reason.
 """
 
+import base64
 import unittest
 
 import frappe
@@ -271,6 +272,11 @@ class SelfServiceTestCase(MobileAPITestCase):
 				}
 			],
 		)
+		# The bytes as well as the row. A statement whose File record exists and
+		# whose storage does not is a different test — `_stub_bytes` answers with
+		# the empty keys there and never raises — and this one is about the page
+		# reaching the phone.
+		STORE.file_contents[f"FILE-{run}-{employee}"] = STUB_PDF
 		return file_name
 
 
@@ -586,6 +592,11 @@ class MyPayStubs(SelfServiceTestCase):
 		self.assertIsNone(rows["PAY-2026-0002"]["file_url"])
 
 
+#: What a drawn statement holds, as far as this suite cares: bytes that are not
+#: the bytes of anything else on the run.
+STUB_PDF = b"%PDF-1.4 one worker's own statement"
+
+
 # ── 5. the statement itself ─────────────────────────────────────────────────
 class MyPayStubPdf(SelfServiceTestCase):
 	def test_an_already_attached_statement_comes_back_rather_than_being_redrawn(self):
@@ -600,6 +611,61 @@ class MyPayStubPdf(SelfServiceTestCase):
 		self.assertEqual(data["file_url"], f"/private/files/{file_name}")
 		self.assertEqual(data["employee"], WORKER_EMPLOYEE)
 		# 1000 gross less 100 federal, 60 state, 62 FICA and 14.50 Medicare.
+		self.assertEqual(data["net_pay"], 763.5)
+
+	def test_the_page_itself_comes_back_in_the_answer(self):
+		"""v0.92.2. `file_url` is a private path and the funnel cannot open it.
+
+		`get_attachment_content` cannot serve this one either: it asks Frappe for
+		`read` on the PARENT, and the parent is a payroll run holding the whole
+		crew's slips. So the bytes travel here, as they do for a `.pkpass` and a
+		document preview.
+		"""
+		self.two_runs()
+		self.a_stub_file()
+		self.be(WORKER)
+		data = mobile_api.get_my_pay_stub_pdf(payroll_entry="PAY-2026-0001")
+		self.assertEqual(data["encoding"], "base64")
+		self.assertEqual(base64.b64decode(data["content"]), STUB_PDF)
+		# Three spellings of one string, as `submit_form_signature` answers.
+		self.assertEqual(data["content"], data["content_base64"])
+		self.assertEqual(data["content"], data["base64"])
+		self.assertEqual(data["content_type"], "application/pdf")
+
+	def test_a_colleagues_stub_on_the_same_run_is_not_the_one_read(self):
+		"""THE FILE NAME IS THE GATE, since the run carries one file per person."""
+		self.two_runs()
+		mine = self.a_stub_file()
+		theirs = self.a_stub_file(employee=COLLEAGUE_EMPLOYEE)
+		self.assertNotEqual(mine, theirs)
+		STORE.file_contents[f"FILE-PAY-2026-0001-{COLLEAGUE_EMPLOYEE}"] = b"%PDF-1.4 Cara's"
+
+		self.be(WORKER)
+		data = mobile_api.get_my_pay_stub_pdf(payroll_entry="PAY-2026-0001")
+		self.assertEqual(data["file_name"], mine)
+		self.assertEqual(base64.b64decode(data["content"]), STUB_PDF)
+
+	def test_the_payroll_run_is_a_personnel_parent_on_the_attachment_door(self):
+		"""v0.92.2. `Farm Payroll Entry` joins `ATTACHMENT_PARENTS` — HR-gated.
+
+		THE FLAG IS True AND NOT False. The folder behind a run's docname is one
+		file per crew member, so `list_attachments` on it is a read of everybody's
+		wages; `False` would have said in this app's own voice that a foreman may
+		open it, leaving only Frappe's DocPerm refusing. The worker's own statement
+		does not come through this door at all — it is on the answer above.
+		"""
+		self.assertIs(mobile_api.ATTACHMENT_PARENTS[payroll_tools.PAYROLL_ENTRY], True)
+
+	def test_a_statement_whose_storage_is_gone_still_answers(self):
+		"""NEVER RAISES. The period, the net pay and the URL are still true."""
+		self.two_runs()
+		file_name = self.a_stub_file()
+		STORE.file_contents.pop(f"FILE-PAY-2026-0001-{WORKER_EMPLOYEE}")
+		self.be(WORKER)
+		data = mobile_api.get_my_pay_stub_pdf(payroll_entry="PAY-2026-0001")
+		self.assertIsNone(data["content"])
+		self.assertIsNone(data["encoding"])
+		self.assertEqual(data["file_name"], file_name)
 		self.assertEqual(data["net_pay"], 763.5)
 
 	@NEEDS_REPORTLAB

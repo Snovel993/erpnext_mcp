@@ -918,6 +918,51 @@ class RemittanceRefusals(RemittanceToolTestCase):
 		})
 		self.assertIn("quarter must be one of", error)
 
+	def test_the_quarter_is_taken_as_a_number_as_well_as_a_string(self):
+		"""v0.92.2. The iOS picker posts the integer; a model writes 'Q1'."""
+		self.seed_a_quarter()
+		for sent in ("Q1", "q1", "1", 1):
+			with self.subTest(quarter=sent):
+				data = self.tool_data("get_tax_remittance_summary", {
+					"company": MAIN, "fiscal_year": "2025", "quarter": sent,
+				})
+				self.assertEqual(data["quarter"], "Q1")
+				self.assertEqual(data["period_start"], "2025-01-01")
+				self.assertEqual(data["period_end"], "2025-03-31")
+				self.assertEqual(data["gross_pay"], 2000.0)
+
+	def test_a_number_satisfies_the_tools_that_require_a_quarter(self):
+		"""The refusal it used to draw was raised where a picker cannot correct it."""
+		self.seed_a_quarter()
+		for tool in ("get_941_prefill", "get_state_tax_remittance"):
+			with self.subTest(tool=tool):
+				data = self.tool_data(tool, {"company": MAIN, "fiscal_year": "2025", "quarter": 1})
+				self.assertEqual(data["quarter"], "Q1")
+
+	def test_a_number_outside_one_to_four_is_still_refused(self):
+		"""NORMALISING IS NOT ACCEPTING. 0, 5 and 13 are wrong in either spelling."""
+		for sent in (0, 5, 13, "Q0", "5"):
+			with self.subTest(quarter=sent):
+				error = self.tool_error("get_tax_remittance_summary", {
+					"company": MAIN, "fiscal_year": "2025", "quarter": sent,
+				})
+				self.assertIn("quarter must be one of", error)
+				self.assertIn("number 1 to 4", error)
+
+	def test_a_quarter_that_is_neither_is_quoted_back_unchanged(self):
+		"""A guess would be worse than the refusal: 2026-Q2 is another tool's format."""
+		error = self.tool_error("get_tax_remittance_summary", {
+			"company": MAIN, "fiscal_year": "2025", "quarter": "2026-Q2",
+		})
+		self.assertIn("2026-Q2", error)
+
+	def test_the_annual_futa_tool_refuses_a_numbered_quarter_too(self):
+		"""The normaliser runs BEFORE the annual check, so 1 is caught like 'Q1'."""
+		error = self.tool_error("get_futa_summary", {
+			"company": MAIN, "fiscal_year": "2025", "quarter": 1,
+		})
+		self.assertIn("ANNUAL return", error)
+
 	def test_a_quarterly_tool_needs_a_quarter(self):
 		for tool in ("get_941_prefill", "get_state_tax_remittance"):
 			with self.subTest(tool=tool):

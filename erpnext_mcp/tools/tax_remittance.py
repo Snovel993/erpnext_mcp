@@ -610,7 +610,7 @@ def _window(args: dict, quarter_required: bool = False, annual: bool = False) ->
 		)
 	year = int(year)
 
-	quarter = (as_str(args, "quarter") or "").strip().upper()
+	quarter = _quarter_argument(args)
 	if annual:
 		if quarter:
 			raise ToolError(
@@ -623,17 +623,49 @@ def _window(args: dict, quarter_required: bool = False, annual: bool = False) ->
 		return year, None, start, end
 
 	if quarter and quarter not in QUARTERS:
-		raise ToolError(f"quarter must be one of {', '.join(QUARTERS)}, got {quarter!r}.")
+		raise ToolError(
+			f"quarter must be one of {', '.join(QUARTERS)}, or the number 1 to 4, got "
+			f"{quarter!r}."
+		)
 	if quarter_required and not quarter:
 		raise ToolError(
-			f"quarter is required and must be one of {', '.join(QUARTERS)}. This is a "
-			"quarterly return. Nothing was computed."
+			f"quarter is required and must be one of {', '.join(QUARTERS)}, or the number "
+			"1 to 4. This is a quarterly return. Nothing was computed."
 		)
 	if quarter:
 		start, end = quarter_period(quarter, year)
 	else:
 		start, end = year_period(year)
 	return year, quarter or None, start, end
+
+
+def _quarter_argument(args: dict) -> str:
+	"""`quarter`, in whichever of its two spellings arrived. "Q3", "q3", 3 and "3".
+
+	v0.92.2. THE HANDSET SENDS THE NUMBER AND EVERY TOOL HERE WAS WRITTEN FOR THE
+	STRING. A quarter picker on a phone is four buttons and an integer 1 to 4; a
+	model asked for a quarter writes "Q3" because that is what the schema says.
+	Both had already decided the same thing, and the second one came back as
+	"quarter must be one of Q1, Q2, Q3, Q4, got '3'" — a refusal about spelling,
+	raised on a value that was never ambiguous, at the one place a caller cannot
+	correct it from (the picker has no other answer to give).
+
+	NORMALISED HERE RATHER THAN AT THE FIVE CALLERS, and here rather than in
+	`api/mobile.py`, because `_window` is the one function all five reads take
+	their period from — the MCP tools and the mobile routes alike. A conversion
+	in the route wrapper would have left the MCP surface strict and made the two
+	transports disagree about what a valid argument is, which is the failure this
+	file's `fiscal_year`/`year` pair already avoids by accepting both names once.
+
+	ANYTHING ELSE IS RETURNED UNCHANGED so the caller sees their own value in the
+	refusal `_window` raises. "Q5", "third" and "2026-Q2" are all wrong, and each
+	is more useful quoted back than replaced by a guess.
+	"""
+	text = (as_str(args, "quarter") or "").strip().upper()
+	body = text[1:] if text.startswith("Q") else text
+	if body.isdigit() and 1 <= int(body) <= 4:
+		return f"Q{int(body)}"
+	return text
 
 
 def _state_argument(args: dict) -> set:

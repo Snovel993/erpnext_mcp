@@ -54,7 +54,7 @@ from erpnext_mcp import form_pdf_renderer, roles, training, training_sessions
 from erpnext_mcp.tools import signatures
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
-from .harness import ROLES, STORE
+from .harness import ROLES, STORE, set_roles
 
 #: Every switch this suite needs. Listed rather than globbed so that turning one
 #: off in a test is visibly a change from the on-by-default posture.
@@ -838,6 +838,47 @@ class ReadingTheRegister(TrainingSessionTestCase):
 			"list_training_sessions", {"company": MAIN, "from_date": days_out(-7)}
 		)
 		self.assertEqual([row["name"] for row in data["sessions"]], [recent])
+
+	def test_the_supervisor_who_held_the_session_may_read_it_back(self):
+		"""v0.92.2. The two reads take SHIFT_ROLES; the gate was HR_ROLES.
+
+		A Foreman holds the tailgate briefing, and could open no sheet from one.
+		Seeded as HR to fill the register, then read as the foreman — which is the
+		order it happens in on a farm where the office schedules and the crew
+		leader runs it.
+		"""
+		session = self.a_full_session()
+		for role in ("Foreman", "Crew Leader"):
+			with self.subTest(role=role):
+				set_roles("Administrator", [role])
+				sheet = self.tool_data("get_training_session", {"session": session})
+				self.assertEqual(sheet["name"], session)
+				self.assertEqual(sheet["attendance"]["ready"], 2)
+				register = self.tool_data("list_training_sessions", {"company": MAIN})
+				self.assertEqual([row["name"] for row in register["sessions"]], [session])
+
+	def test_a_field_worker_may_still_read_neither(self):
+		"""RELAXED IS NOT OPEN. The sheet names a crew, and a picker is not on the list."""
+		session = self.a_full_session()
+		set_roles("Administrator", ["Field Worker"])
+		for tool, args in (
+			("get_training_session", {"session": session}),
+			("list_training_sessions", {"company": MAIN}),
+		):
+			with self.subTest(tool=tool):
+				self.assertIn("Foreman", self.tool_error(tool, args))
+
+	def test_the_writes_keep_the_personnel_gate(self):
+		"""A completion puts a training card on somebody's own file. That is HR's."""
+		session = self.a_full_session()
+		set_roles("Administrator", ["Foreman"])
+		for tool, args in (
+			("create_training_session", {"company": MAIN, "training_type": CURRICULUM}),
+			("add_session_attendee", {"session": session, "employee": SUPERVISOR}),
+			("complete_training_session", {"session": session}),
+		):
+			with self.subTest(tool=tool):
+				self.assertIn("HR Manager", self.tool_error(tool, args))
 
 
 # ── 9 ───────────────────────────────────────────────────────────────────────
