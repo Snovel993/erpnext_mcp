@@ -36,7 +36,7 @@ THE READS DEFAULT ON AND THE WRITES DEFAULT OFF, like everything else here.
 
 import frappe
 
-from .. import compat
+from .. import audit_packets, compat
 from ..args import (
 	as_bool,
 	as_choice,
@@ -48,6 +48,7 @@ from ..args import (
 )
 from ..errors import ToolError
 from ..result import ToolResult
+from . import files
 
 POLICY = "Compliance Policy"
 CERTIFICATION = "Certification"
@@ -266,7 +267,42 @@ def _reason(args: dict, key: str = "reason") -> str:
 
 
 # ── Compliance Policy ───────────────────────────────────────────────────────
-def _describe_policy(row: dict, today: str = "") -> dict:
+def _policy_attachments(names) -> dict:
+	"""`{policy: [file_url, ...]}` for a batch, in one query.
+
+	WHY THIS EXISTS AT ALL. `Compliance Policy.attached_document` is an Attach
+	field, and `attach_file_to_document` — the generic door, and the one an
+	operator reaches for — creates a File linked to the policy WITHOUT writing
+	that field, because it is a generic tool and knows nothing about which of a
+	doctype's fields is meant to hold a document. So a policy with the SOP
+	genuinely attached read as `has_document: false`, and both the register and
+	the audit packet reported a written procedure as an unsupported claim.
+
+	Reading the File table settles it. The field stays authoritative when it is
+	set — `create_compliance_policy` writes it — and this is the second place to
+	look rather than a replacement for the first.
+	"""
+	names = [str(name) for name in names if name]
+	if not names or not compat.doctype_exists("File"):  # pragma: no cover - every site has File
+		return {}
+	found: dict = {}
+	for row in frappe.db.get_all(
+		"File",
+		filters={"attached_to_doctype": POLICY, "attached_to_name": ("in", names)},
+		# `attached_to_name` is a framework column rather than one of File's own
+		# fields on some sites, so it is asked for by name: a batched read that
+		# lost it would file every attachment under one empty key.
+		fields=["name", "attached_to_name", "file_name", "file_url"],
+		limit=REGISTER_CAP * 4,
+	) or []:
+		entry = dict(row)
+		found.setdefault(str(entry.get("attached_to_name") or ""), []).append(
+			{"file": entry.get("name"), "file_name": entry.get("file_name"), "file_url": entry.get("file_url")}
+		)
+	return found
+
+
+def _describe_policy(row: dict, today: str = "", attachments=None) -> dict:
 	today = today or frappe.utils.today()
 	review = _date(row.get("review_due_date"))
 	overdue = False
@@ -293,7 +329,13 @@ def _describe_policy(row: dict, today: str = "") -> dict:
 		"supersedes": row.get("supersedes") or None,
 		"superseded_by": row.get("superseded_by") or None,
 		"attached_document": row.get("attached_document") or None,
-		"has_document": bool(row.get("attached_document")),
+		"attachments": list(attachments or []),
+		"has_document": bool(row.get("attached_document")) or bool(attachments),
+		"document_source": (
+			"attached_document"
+			if row.get("attached_document")
+			else ("file attachment" if attachments else None)
+		),
 		"notes": row.get("notes") or None,
 	}
 
@@ -346,7 +388,11 @@ def list_compliance_policies(args: dict) -> ToolResult:
 		order_by="category asc, policy_name asc",
 		limit=min(as_limit(args), REGISTER_CAP),
 	)
-	policies = [_describe_policy(dict(row), today) for row in rows]
+	attachments = _policy_attachments(dict(row).get("name") for row in rows)
+	policies = [
+		_describe_policy(dict(row), today, attachments.get(str(dict(row).get("name")), []))
+		for row in rows
+	]
 	if as_bool(args, "in_force_only", False):
 		policies = [policy for policy in policies if policy["in_force"]]
 
@@ -379,6 +425,176 @@ def list_compliance_policies(args: dict) -> ToolResult:
 	)
 
 
+def get_policy_coverage(args: dict) -> ToolResult:
+	"""Which SOP categories each audit regime expects, and which this farm has none of.
+
+	THE QUESTION THIS ANSWERS IS "WHAT DO I STILL HAVE TO WRITE". Every other
+	read over this register answers a question about the policies that EXIST —
+	`list_compliance_policies` counts them, groups them and flags the stale ones.
+	None of them could say anything about the ones that do not, and an empty
+	policy section in a GAP packet is a statement about absent records that no
+	register view can make, because the absent records are not in it.
+
+	The expectation is not invented here. Each `AuditPacketType` already declares
+	the `policy_categories` its packet pulls — that declaration is what scopes the
+	section, so a DOL packet carries no GlobalGAP procedure — and this reads the
+	same declaration in the other direction. A category a regime pulls and this
+	company has no in-force policy for is a section that will be short in the
+	packet and a question at the audit.
+
+	A REGIME THAT NAMES NO CATEGORIES IS REPORTED AS SUCH, never as satisfied.
+	An empty `policy_categories` means the packet includes every policy of every
+	kind, which makes it impossible for this function to say what is missing — and
+	that is a gap in what this app encodes about the regime, not evidence about the
+	farm. Answering "nothing missing" for GLOBALG.A.P. because nobody wrote its
+	category list down would be the most flattering possible lie.
+
+	COVERAGE IS ACTIVE-AND-EFFECTIVE, NOT MERELY PRESENT. A Draft was never
+	adopted and a policy effective next month was not in force today, so neither
+	covers anything. And a covered category whose policy has no document attached
+	is reported separately rather than counted as a gap: the procedure exists on
+	the record, which is a different problem from it not existing at all, and it
+	needs a different fix.
+	"""
+	_require(POLICY)
+	company = _entity(args)
+	as_of = as_date(args, "as_of") or frappe.utils.today()
+
+	wanted = as_str(args, "audit_type")
+	if wanted:
+		spec = audit_packets.get(wanted)
+		if spec is None:
+			raise ToolError(
+				f"no audit packet type {wanted!r}. This app knows: "
+				f"{', '.join(audit_packets.names())}. Nothing was read."
+			)
+		specs = [spec]
+	else:
+		specs = [audit_packets.TYPES[key] for key in audit_packets.names()]
+	specs = [spec for spec in specs if "policies" in spec.sections]
+
+	rows = frappe.db.get_all(
+		POLICY,
+		filters={"company": company} if company else {},
+		fields=compat.existing_fields(POLICY, _POLICY_FIELDS),
+		order_by="category asc, policy_name asc",
+		limit=REGISTER_CAP,
+	) or []
+	attachments = _policy_attachments(dict(row).get("name") for row in rows)
+
+	#: `{category: [policy, ...]}` for the policies actually in force on the day.
+	in_force: dict = {}
+	undocumented: dict = {}
+	for raw in rows:
+		row = dict(raw)
+		policy = _describe_policy(row, as_of, attachments.get(str(row.get("name")), []))
+		if not policy["in_force"]:
+			continue
+		if policy["effective_date"] and str(policy["effective_date"]) > str(as_of):
+			continue
+		category = policy["category"] or "(uncategorised)"
+		in_force.setdefault(category, []).append(policy["name"])
+		if not policy["has_document"]:
+			undocumented.setdefault(category, []).append(policy["name"])
+
+	regimes = []
+	unscoped = []
+	every_gap: set = set()
+	for spec in specs:
+		expected = list(spec.policy_categories)
+		if not expected:
+			unscoped.append(spec.key)
+			regimes.append(
+				{
+					"audit_type": spec.key,
+					"title": spec.title,
+					"expected_categories": [],
+					"covered": [],
+					"missing": [],
+					"covered_without_a_document": [],
+					"coverage_percent": None,
+					"note": (
+						f"The {spec.key} packet pulls EVERY policy category rather than a named "
+						"list, so no gap can be computed for it. That is a gap in what this app "
+						"encodes about the regime and not a statement about this farm — read "
+						"another regime's row for the categories that are genuinely missing."
+					),
+				}
+			)
+			continue
+		covered = [category for category in expected if in_force.get(category)]
+		missing = [category for category in expected if not in_force.get(category)]
+		every_gap.update(missing)
+		regimes.append(
+			{
+				"audit_type": spec.key,
+				"title": spec.title,
+				"expected_categories": expected,
+				"covered": covered,
+				"missing": missing,
+				"covered_without_a_document": sorted(
+					category for category in covered if undocumented.get(category)
+				),
+				"coverage_percent": round(100.0 * len(covered) / len(expected), 1),
+				"ready": not missing,
+			}
+		)
+
+	work_list = [
+		{
+			"category": category,
+			"needed_by": sorted(
+				spec.key for spec in specs if category in (spec.policy_categories or ())
+			),
+			"register_it_with": (
+				"create_compliance_policy(policy_name=…, category="
+				f"{category!r}, company=…, version=…, effective_date=…, review_due_date=…, "
+				"file_content=<base64 of the SOP>, file_name=…)"
+			),
+		}
+		for category in sorted(every_gap)
+	]
+
+	notes = []
+	if work_list:
+		notes.append(
+			f"{len(work_list)} SOP category/categories have no policy in force on {as_of}. "
+			"Each one is a section an audit packet will produce short, and the packet says so "
+			"— which is better than silence and is not the same as having the procedure."
+		)
+	undocumented_policies = sorted({name for names in undocumented.values() for name in names})
+	if undocumented:
+		notes.append(
+			f"{len(undocumented_policies)} in-force policy/policies have no document attached. The "
+			"record asserts a procedure exists; an auditor asks to read it. Attach it with "
+			"update_compliance_policy(policy=…, file_content=…, file_name=…)."
+		)
+	if unscoped:
+		notes.append(
+			f"{', '.join(unscoped)} name no policy categories in this app, so nothing was "
+			"computed for them. Their rows say so rather than reporting full coverage."
+		)
+
+	scoped = [row for row in regimes if row["expected_categories"]]
+	return ToolResult(
+		data={
+			"company": company,
+			"as_of": as_of,
+			"regimes": regimes,
+			"categories_in_force": dict(sorted(in_force.items())),
+			"categories_with_no_policy": sorted(every_gap),
+			"in_force_without_a_document": dict(sorted(undocumented.items())),
+			"policies_without_a_document": undocumented_policies,
+			"work_list": work_list,
+			"notes": notes,
+		},
+		summary=(
+			f"{len(scoped)} regime(s) scored, {len(every_gap)} SOP category/categories missing, "
+			f"{len(undocumented_policies)} in-force policy/policies with no document"
+		),
+	)
+
+
 def get_compliance_policy(args: dict) -> ToolResult:
 	"""One procedure in full, with its version chain and every audit that cited it."""
 	_require(POLICY)
@@ -391,7 +607,7 @@ def get_compliance_policy(args: dict) -> ToolResult:
 		"list_compliance_policies",
 		company or "",
 	)
-	described = _describe_policy(row)
+	described = _describe_policy(row, "", _policy_attachments([row["name"]]).get(str(row["name"]), []))
 
 	chain = _policy_chain(row["name"])
 	citing = _audits_citing(row["name"])
@@ -516,17 +732,66 @@ def create_compliance_policy(args: dict) -> ToolResult:
 		doc.status = as_choice(POLICY, "status", status, "status")
 
 	doc.insert(ignore_permissions=True)
-	described = _describe_policy(dict(doc.as_dict()))
+	attached = _attach_the_procedure(args, doc, tail="The policy WAS created.")
+	described = _describe_policy(dict(doc.as_dict()), "", attached)
 
 	return ToolResult(
 		data={**described, "warnings": _policy_notes(described)},
 		summary=(
 			f"registered compliance policy {doc.name} ({described['category']}"
 			+ (f", {described['version']}" if described["version"] else "")
+			+ (", document attached" if attached else "")
 			+ ")"
 		),
 		docstatus_delta="none → 0 (created)",
 	)
+
+
+def _attach_the_procedure(args: dict, doc, tail: str) -> list:
+	"""Put the SOP itself on the policy record, in the same call that made it.
+
+	WHY THIS IS NOT LEFT TO `attach_file_to_document`. It could be done in two
+	calls and for a long time that was the only way — which is why the register
+	filled up with policy records asserting procedures nobody had uploaded.
+	`_policy_notes` has always said what that means ("This record asserts that a
+	procedure exists, which is not the same as a procedure existing"), and saying
+	it is not the same as making the right thing easy. Registering an SOP is ONE
+	act, so it is one call.
+
+	THE ATTACH FIELD IS WRITTEN TOO, not just the File link. `attached_document`
+	is what the audit packet reads first and what the Desk form shows; a File
+	linked to the policy with that field left empty is the exact disagreement
+	`_policy_attachments` exists to paper over, and papering over it here as well
+	would be choosing to keep producing it.
+
+	IT VALIDATES BEFORE THE INSERT AND ATTACHES AFTER. `file_name` without
+	`file_content` is refused up front by `create_compliance_policy`'s caller
+	path; a decode failure here happens with the policy already on the record,
+	which is why `tail` says so rather than claiming nothing was created.
+	"""
+	file_content = as_str(args, "file_content")
+	if not file_content:
+		return []
+	file_name = as_str(args, "file_name")
+	if not file_name:
+		raise ToolError(
+			"file_name is required with file_content — a procedure whose file has no name is "
+			f"one nobody can identify later. {tail}"
+		)
+	content = files.decode_base64_content(file_content, tail=tail)
+	attachment = files.insert_attachment(
+		file_name,
+		content,
+		is_private=True,
+		doctype=POLICY,
+		name=doc.name,
+		attached_to_field="attached_document",
+	)
+	url = attachment.get("file_url")
+	if url:
+		doc.db_set("attached_document", url)
+		doc.attached_document = url
+	return [{"file": attachment.name, "file_name": file_name, "file_url": url}]
 
 
 def _resolve_user(user: str) -> str | None:
@@ -596,14 +861,22 @@ def update_compliance_policy(args: dict) -> ToolResult:
 	if "company" in args:
 		_stage(changes, doc, "company", company or "")
 
-	if not changes:
+	if not changes and not as_str(args, "file_content"):
 		raise ToolError(
 			"nothing to change. Pass at least one of: category, version, status, "
-			"effective_date, review_due_date, policy_owner, company, attached_document, notes."
+			"effective_date, review_due_date, policy_owner, company, attached_document, notes "
+			"— or file_content with file_name to attach the procedure itself."
 		)
 
 	doc.save(ignore_permissions=True)
-	described = _describe_policy(dict(doc.as_dict()))
+	attached = _attach_the_procedure(args, doc, tail="The other changes WERE saved.")
+	if attached:
+		changes["attached_document"] = [row["attached_document"], doc.attached_document]
+	described = _describe_policy(
+		dict(doc.as_dict()),
+		"",
+		attached or _policy_attachments([doc.name]).get(str(doc.name), []),
+	)
 	return ToolResult(
 		data={
 			**described,

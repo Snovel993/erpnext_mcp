@@ -284,6 +284,7 @@
   "evidence_read_section",
   "allow_list_compliance_policies",
   "allow_get_compliance_policy",
+  "allow_get_policy_coverage",
   "allow_list_certifications",
   "allow_get_certification",
   "evidence_read_col",
@@ -2765,6 +2766,13 @@
    "fieldname": "allow_get_compliance_policy",
    "fieldtype": "Check",
    "label": "Get Compliance Policy"
+  },
+  {
+   "default": "1",
+   "description": "READ. Which SOP categories each audit regime expects and this company has no policy in force for.",
+   "fieldname": "allow_get_policy_coverage",
+   "fieldtype": "Check",
+   "label": "Get Policy Coverage"
   },
   {
    "default": "1",

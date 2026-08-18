@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 739 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 740 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 367 read tools are **on** by default and can be switched off individually. A
+All 368 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16439,3 +16439,92 @@ Foreman; this role is the board-less half of it.
   `roles.py` would have been a silent no-op *and* a lie — `describe_role` reads
   that tuple, so the catalogue would have advertised read-only on a register the
   role can already write.
+
+
+## The SOP library, and the procedures that are not in it (v0.93.0)
+
+### `get_policy_coverage`
+
+Read-only, on by default. **The only read over this register that is about the
+policies which do not exist.**
+
+`list_compliance_policies` counts them, groups them by category and flags the
+ones overdue for review. `get_compliance_policy` walks one version chain. Neither
+can report an absence, for the ordinary reason that the absent records are not in
+the register — and "zero compliance policies registered, audit packets have empty
+policy sections" is a statement about absence, so nothing in the app could say
+it.
+
+**The expectation is read off the packet types rather than invented here.** Every
+`AuditPacketType` already declares the `policy_categories` its packet pulls; that
+declaration is what keeps a GLOBALG.A.P. procedure out of a DOL packet. This
+reads the same declaration backwards: a category a regime pulls, for which this
+company has no policy in force, is a section that packet will produce short.
+
+| Field | What it says |
+|---|---|
+| `regimes[].expected_categories` | What that audit type's packet pulls |
+| `regimes[].missing` | Expected, and no policy in force on `as_of` |
+| `regimes[].covered_without_a_document` | Covered on paper only — see below |
+| `regimes[].coverage_percent` | Covered over expected |
+| `categories_with_no_policy` | The union across every scored regime |
+| `work_list[]` | One row per missing category, with the `create_compliance_policy` call that fills it and which regimes are waiting on it |
+
+**Coverage is active-and-effective, not merely present.** A Draft was never
+adopted and a policy effective next month was not in force today, so neither
+covers anything.
+
+**A covered category whose policy has no document attached is reported
+separately, never as a gap.** The procedure existing on the record and the
+procedure existing are different problems that need different fixes, and folding
+them together would send somebody off to write an SOP that is already written.
+
+**A regime that names no categories reports as unscored.** `GlobalGAP` and
+`Other` pull every policy of every kind, which makes it impossible to say what is
+missing for them. Their rows say so. Answering "nothing missing" for a scheme
+because nobody wrote its category list into this app would be the most flattering
+possible lie, and the one this table would most reward.
+
+### Registering an SOP is now one call
+
+`create_compliance_policy` and `update_compliance_policy` take `file_content`
+(base64) and `file_name`. The document is attached to the policy **and written
+into `attached_document`**, which is the field the audit packet and the Desk form
+both read.
+
+```
+create_compliance_policy(
+    policy_name="Harvest Hygiene SOP",
+    category="Harvest Hygiene",
+    company="Orchard Meadow, LLC",
+    version="v3",
+    effective_date="2026-03-01",
+    review_due_date="2027-03-01",
+    policy_owner="…@…",
+    file_content="<base64 of the PDF>",
+    file_name="Harvest Hygiene SOP v3.pdf",
+)
+```
+
+For a document too large for one JSON call, upload it with `stage_file_chunk` +
+`commit_staged_file` and pass `attached_document` instead.
+
+**Why this was worth changing.** It could always be done in two calls —
+`create_compliance_policy` then `attach_file_to_document` — and that is how the
+register filled up with policy records asserting procedures nobody had uploaded.
+`_policy_notes` has said what such a record means since it was written ("this
+record asserts that a procedure exists, which is not the same as a procedure
+existing"); saying it is not the same as making the right thing the easy thing.
+
+### A policy could have its document and be reported as having none
+
+`attach_file_to_document` is the generic door and knows nothing about which of a
+DocType's fields is meant to hold a document, so it created the File and left
+`attached_document` empty. Everything downstream read that one field — so a
+policy with the SOP genuinely attached came back `has_document: false`,
+`without_a_document` listed it, and the audit packet printed a written procedure
+as an unsupported claim.
+
+`has_document` now falls back to the File table, batched in one query for the
+whole register. The attach field stays authoritative when it is set;
+`document_source` says which of the two answered.

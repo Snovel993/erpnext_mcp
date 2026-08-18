@@ -7433,6 +7433,40 @@ TOOLS = {
 		available=_needs_doctype("Compliance Policy"),
 		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
+	"get_policy_coverage": _tool(
+		evidence.get_policy_coverage,
+		"Which SOP categories each audit regime EXPECTS and this company has no "
+		"policy in force for — the work list of procedures still to be written. "
+		"Read-only.\n\n"
+		"THE ONLY READ HERE THAT IS ABOUT THE POLICIES THAT DO NOT EXIST. "
+		"list_compliance_policies counts, groups and ages the ones that do, and no "
+		"register view can report an absence, because the absent records are not in "
+		"it. An empty policy section in a GAP packet is exactly that absence.\n\n"
+		"THE EXPECTATION IS NOT INVENTED. Each audit type already declares the "
+		"policy categories its packet pulls — the same declaration that keeps a "
+		"GlobalGAP procedure out of a DOL packet — read here in the other "
+		"direction.\n\n"
+		"COVERAGE IS ACTIVE-AND-EFFECTIVE. A Draft was never adopted and a policy "
+		"effective next month was not in force today. A covered category whose "
+		"policy has NO DOCUMENT attached is reported separately rather than counted "
+		"as a gap: the procedure existing on the record and the procedure existing "
+		"are different problems with different fixes.\n\n"
+		"A REGIME THAT NAMES NO CATEGORIES REPORTS AS UNSCORED, NEVER AS SATISFIED. "
+		"Answering 'nothing missing' for a scheme because nobody wrote its category "
+		"list into this app would be the most flattering possible lie.",
+		{
+			"company": _COMPANY,
+			"audit_type": _field(
+				_STRING,
+				"Score one regime instead of every one: FSMA, GAP, GlobalGAP, OSHA, DOL, EPA, "
+				"USDA_NIFA or Other. list_audit_packet_types names them.",
+			),
+			"as_of": _field(_STRING, "YYYY-MM-DD. In force on this day. Defaults to today."),
+		},
+		title="SOP coverage against each audit regime",
+		available=_needs_doctype("Compliance Policy"),
+		requires="the Compliance Policy DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
 	"create_compliance_policy": _tool(
 		evidence.create_compliance_policy,
 		"MUTATING (default OFF). Register one written procedure at one version: "
@@ -7445,7 +7479,12 @@ TOOLS = {
 		"REFUSES a review date before the effective date, which would be a procedure "
 		"overdue for review before it took effect. WARNS about a missing document, a "
 		"missing effective date and a missing review date, without refusing any of "
-		"them.",
+		"them.\n\n"
+		"PASS file_content AND file_name TO REGISTER THE PROCEDURE AND ITS DOCUMENT "
+		"IN ONE CALL. It is attached to the policy and written into "
+		"attached_document. Doing it in two calls was the only way for a long time, "
+		"which is why registers fill up with policy records asserting procedures "
+		"nobody ever uploaded.",
 		{
 			"policy_name": _field(
 				_STRING,
@@ -7469,9 +7508,17 @@ TOOLS = {
 			"review_due_date": _field(_STRING, "When it is next due to be read and re-adopted."),
 			"attached_document": _field(
 				_STRING,
-				"file_url of the procedure itself. Upload it with stage_file_chunk + "
-				"commit_staged_file, or attach_file_to_document afterwards.",
+				"file_url of a procedure ALREADY uploaded. To upload it in this call, pass "
+				"file_content and file_name instead.",
 			),
+			"file_content": _field(
+				_STRING,
+				"The SOP itself, base64. Attached to the policy AND written into "
+				"attached_document, so registering a procedure is one act rather than two. "
+				"Ceiling 8 MB — for anything larger use stage_file_chunk + commit_staged_file "
+				"and pass attached_document.",
+			),
+			"file_name": _field(_STRING, "Required with file_content: 'Harvest Hygiene SOP v3.pdf'."),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
 		},
 		required=("policy_name", "category"),
@@ -7497,7 +7544,14 @@ TOOLS = {
 			"effective_date": _field(_STRING, "New effective date, YYYY-MM-DD."),
 			"review_due_date": _field(_STRING, "New review date, YYYY-MM-DD."),
 			"policy_owner": _field(_STRING, "New owner. Empty string clears it."),
-			"attached_document": _field(_STRING, "New file_url."),
+			"attached_document": _field(_STRING, "New file_url of a document already uploaded."),
+			"file_content": _field(
+				_STRING,
+				"The procedure itself, base64. Attached to the policy and written into "
+				"attached_document — this is how a policy registered without its document gets "
+				"one. Ceiling 8 MB.",
+			),
+			"file_name": _field(_STRING, "Required with file_content."),
 			"notes": _field(_STRING, "New notes."),
 			"policy_name": _field(_STRING, "Always refused — see the description."),
 			"supersedes": _field(_STRING, "Always refused — see the description."),

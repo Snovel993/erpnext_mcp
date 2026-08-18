@@ -834,8 +834,12 @@ class ToolRegistration(unittest.TestCase):
 		# Branch, Employment Type and Employee Grade. Every one of them was a
 		# register `create_employee` refused a value against and nothing could
 		# add to, so the refusal named an answer the caller could not act on.
-		self.assertEqual(len(self.registry.TOOLS), 739)
-		self.assertEqual(len(self.registry.READ_TOOLS), 367)
+		# v0.93.0 adds ONE read and no write: `get_policy_coverage`, the only
+		# read over the SOP library that is about the policies which do NOT
+		# exist. Nothing about the ML model registry changed; the totals moved
+		# because the catalogue did.
+		self.assertEqual(len(self.registry.TOOLS), 740)
+		self.assertEqual(len(self.registry.READ_TOOLS), 368)
 		self.assertEqual(len(self.registry.MUTATING_TOOLS), 372)
 
 

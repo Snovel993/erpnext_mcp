@@ -483,7 +483,7 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 	"""
 	filters = _company_filter(company)
 	rows = []
-	for row in _rows(
+	found = _rows(
 		"Compliance Policy",
 		filters,
 		(
@@ -499,7 +499,9 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 			"attached_document",
 		),
 		order_by="category asc, policy_name asc",
-	):
+	)
+	attached = _files_attached_to("Compliance Policy", [row["name"] for row in found])
+	for row in found:
 		if spec.policy_categories and str(row.get("category") or "") not in spec.policy_categories:
 			continue
 		if str(row.get("status") or "") == "Draft":
@@ -518,10 +520,13 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 				"effective_date": effective or None,
 				"in_force_at_period_end": str(row.get("status") or "") == "Active",
 				"superseded_by": row.get("superseded_by") or None,
-				"document_attached": bool(row.get("attached_document")),
+				# The Attach FIELD or a File linked to the record. `attach_file_to_document`
+				# is a generic door and writes the second without the first, so reading only
+				# the field printed a written procedure as an unsupported claim.
+				"document_attached": bool(row.get("attached_document")) or bool(attached.get(row["name"])),
 			}
 		)
-	return _section(
+	section = _section(
 		"Written procedures in force",
 		(
 			"The procedures the operation was working to during this period — including any "
@@ -532,6 +537,65 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 		("policy", "category", "version", "status", "effective_date", "document_attached"),
 		absent="No compliance policies are recorded for this company and audit type at all.",
 	)
+
+	# WHAT IS NOT HERE, which no list of what IS here can state. This regime
+	# declares the categories its packet pulls; a category it pulls and this
+	# company has no in-force policy for is a hole the section cannot show by
+	# listing rows, because the missing procedure has no row. An auditor reading
+	# six categories' worth of expectation against three policies works this out
+	# in a minute — being shown it is strictly better than being found out.
+	expected = list(spec.policy_categories)
+	section["categories_expected"] = expected
+	if expected:
+		in_force = {
+			row["category"]
+			for row in rows
+			if row["in_force_at_period_end"] and row["category"]
+		}
+		gaps = [category for category in expected if category not in in_force]
+		section["categories_without_a_policy"] = gaps
+		if gaps:
+			section["problem_note"] = (
+				f"{len(gaps)} of the {len(expected)} procedure categories this audit asks about "
+				f"have NO policy in force at the end of the period: {', '.join(gaps)}. "
+				"get_policy_coverage has the work list."
+			)
+	else:
+		section["scope_note"] = (
+			"This audit type pulls every policy category rather than a named list, so this "
+			"packet cannot say which procedures it expected and did not find."
+		)
+	undocumented = [row["policy"] for row in rows if not row["document_attached"]]
+	if undocumented:
+		section["without_a_document"] = undocumented
+		section["document_note"] = (
+			f"{len(undocumented)} of these records assert a procedure with no document attached. "
+			"An auditor asks to read the procedure, and the record is not the procedure."
+		)
+	return section
+
+
+def _files_attached_to(doctype: str, names: list) -> dict:
+	"""`{docname: [file, ...]}` for a batch, in one query.
+
+	`attached_to_name` is asked for BY NAME rather than through
+	`compat.existing_fields`: it is a framework column, `existing_fields` drops
+	those, and a batched read that loses it files every attachment under one
+	empty key.
+	"""
+	names = [str(name) for name in names if name]
+	if not names or not compat.doctype_exists("File"):  # pragma: no cover - every site has File
+		return {}
+	found: dict = {}
+	for row in frappe.db.get_all(
+		"File",
+		filters={"attached_to_doctype": doctype, "attached_to_name": ("in", names)},
+		fields=["name", "attached_to_name", "file_name", "file_url"],
+		limit=SECTION_CAP * 4,
+	) or []:
+		entry = dict(row)
+		found.setdefault(str(entry.get("attached_to_name") or ""), []).append(entry)
+	return found
 
 
 def _certifications(spec: AuditPacketType, company: str, start: str, end: str) -> dict:

@@ -64,6 +64,57 @@ register a packet reads ships with this app or with ERPNext, so an assertion tha
 the prediction is non-empty would otherwise have passed with the mechanism
 switched off entirely.
 
+### The SOPs nobody registered, and the ones registered without their document
+
+"Zero compliance policies registered. Audit packets have empty policy sections."
+Both halves are statements about ABSENCE, and nothing in this app could make
+either: `list_compliance_policies` counts, groups and ages the policies that
+exist, and the missing procedures have no rows to count. Three separate things
+were wrong.
+
+**`get_policy_coverage` is the only read here about the policies that do not
+exist.** Every `AuditPacketType` already declares the `policy_categories` its
+packet pulls — the declaration that keeps a GLOBALG.A.P. procedure out of a DOL
+packet — and this reads it backwards. Per regime: what is expected, what is
+covered, what is missing, a coverage percentage, and a `work_list` naming the
+`create_compliance_policy` call that fills each gap and which regimes are waiting
+on it.
+
+Coverage is **active-and-effective**: a Draft was never adopted and a policy
+effective next month was not in force today. A regime that names no categories
+(GlobalGAP, Other) reports as **unscored, never as satisfied** — answering
+"nothing missing" for a scheme because nobody wrote its category list into this
+app would be the most flattering possible lie, and the one an arithmetic default
+tells.
+
+**A policy could have its document and be reported as having none.**
+`attach_file_to_document` is the generic door; it knows nothing about which of a
+DocType's fields is meant to hold a document, so it created the File and left
+`Compliance Policy.attached_document` empty. Every reader consulted that one
+field — so a policy with the SOP genuinely attached came back
+`has_document: false`, `without_a_document` listed it, and the audit packet
+printed a written procedure as an unsupported claim. `has_document` now falls
+back to the File table, batched in one query for the whole register, with
+`document_source` saying which of the two answered. `attached_to_name` is asked
+for BY NAME rather than through `compat.existing_fields`, which drops framework
+columns — a batched read that lost it would file every attachment under one empty
+key.
+
+**Registering an SOP is one call now.** `create_compliance_policy` and
+`update_compliance_policy` take `file_content` and `file_name`; the document is
+attached to the policy AND written into `attached_document`. It could always be
+done in two calls, and that is exactly how a register fills up with policy
+records asserting procedures nobody uploaded. `_policy_notes` has said what such
+a record means since it was written — "this record asserts that a procedure
+exists, which is not the same as a procedure existing" — and saying it is not the
+same as making the right thing the easy thing.
+
+**The packet's policy section says what it expected and did not find.** It now
+carries `categories_expected`, `categories_without_a_policy` and a
+`problem_note` naming them, plus `without_a_document`. An auditor holding six
+categories of expectation against three policies works this out in a minute;
+being shown it is strictly better than being found out.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All

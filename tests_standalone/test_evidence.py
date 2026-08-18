@@ -46,6 +46,8 @@ ALL_ON = {
 		"create_compliance_policy",
 		"update_compliance_policy",
 		"supersede_compliance_policy",
+		"get_policy_coverage",
+		"attach_file_to_document",
 		"list_certifications",
 		"get_certification",
 		"create_certification",
@@ -132,6 +134,158 @@ class EvidenceTestCase(V12TestCase):
 		}
 		payload.update(overrides)
 		return self.tool_data("create_audit_event", payload)
+
+
+# ── the procedures that are NOT in the register ─────────────────────────────
+class TheSopsNobodyRegistered(EvidenceTestCase):
+	"""v0.93.0: `get_policy_coverage`, and the two holes it was written for.
+
+	"Zero compliance policies registered, audit packets have empty policy
+	sections" is a statement about ABSENCE, and no read over this register could
+	make it — the absent procedures have no rows, so `list_compliance_policies`
+	counting and grouping and ageing the ones that exist can never mention them.
+
+	The expectation is not invented here. Every `AuditPacketType` already declares
+	the `policy_categories` its packet pulls; this reads the declaration backwards.
+	The tests that matter are the two that keep it honest: a regime that names NO
+	categories must report as unscored rather than as fully covered, and a policy
+	that exists on paper with no document attached must not be counted as covering
+	anything an auditor would accept.
+	"""
+
+	def test_a_farm_with_no_policies_is_told_which_ones_each_regime_wants(self):
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		epa = next(row for row in data["regimes"] if row["audit_type"] == "EPA")
+		self.assertEqual(epa["missing"], list(epa["expected_categories"]))
+		self.assertEqual(epa["coverage_percent"], 0.0)
+		self.assertIn("Spray SOP", data["categories_with_no_policy"])
+
+	def test_the_work_list_names_the_call_that_fills_each_gap(self):
+		"""A gap report that does not say what to do about it is a longer way of
+		saying the same nothing."""
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		row = next(entry for entry in data["work_list"] if entry["category"] == "Spray SOP")
+		self.assertIn("create_compliance_policy", row["register_it_with"])
+		self.assertIn("EPA", row["needed_by"])
+
+	def test_registering_one_closes_that_category_for_every_regime_that_wanted_it(self):
+		self.a_policy("Spray Drift Management SOP", category="Spray SOP")
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		self.assertNotIn("Spray SOP", data["categories_with_no_policy"])
+		epa = next(row for row in data["regimes"] if row["audit_type"] == "EPA")
+		self.assertIn("Spray SOP", epa["covered"])
+		self.assertNotIn("Spray SOP", epa["missing"])
+
+	def test_a_draft_covers_nothing(self):
+		"""It was written and never adopted. Counting it would report a farm as
+		covered by a procedure nobody is working to."""
+		self.a_policy("Spray Drift Management SOP", category="Spray SOP", status="Draft")
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		self.assertIn("Spray SOP", data["categories_with_no_policy"])
+
+	def test_a_policy_effective_after_the_day_covers_nothing_on_that_day(self):
+		self.a_policy("Spray Drift Management SOP", category="Spray SOP", effective_date="2026-09-01")
+		data = self.tool_data("get_policy_coverage", {"company": MAIN, "as_of": "2026-07-24"})
+		self.assertIn("Spray SOP", data["categories_with_no_policy"])
+		later = self.tool_data("get_policy_coverage", {"company": MAIN, "as_of": "2026-09-02"})
+		self.assertNotIn("Spray SOP", later["categories_with_no_policy"])
+
+	def test_a_covered_category_with_no_document_is_reported_apart_from_the_gaps(self):
+		"""Different problem, different fix. Folding them together would send
+		somebody off to write an SOP that is already written."""
+		created = self.a_policy("Spray Drift Management SOP", category="Spray SOP")
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		epa = next(row for row in data["regimes"] if row["audit_type"] == "EPA")
+		self.assertIn("Spray SOP", epa["covered"])
+		self.assertIn("Spray SOP", epa["covered_without_a_document"])
+		self.assertIn(created["name"], data["policies_without_a_document"])
+
+	def test_a_regime_that_names_no_categories_reports_unscored_not_satisfied(self):
+		"""The most flattering possible lie this table could tell, and the one it
+		would tell by default: GLOBALG.A.P. pulls every category rather than a
+		named list, so nothing can be missing from it by arithmetic."""
+		data = self.tool_data("get_policy_coverage", {"company": MAIN})
+		globalgap = next(row for row in data["regimes"] if row["audit_type"] == "GlobalGAP")
+		self.assertEqual(globalgap["expected_categories"], [])
+		self.assertIsNone(globalgap["coverage_percent"])
+		self.assertNotIn("ready", globalgap)
+		self.assertIn("gap in what this app encodes", globalgap["note"])
+
+	def test_one_regime_can_be_asked_for_on_its_own(self):
+		data = self.tool_data("get_policy_coverage", {"company": MAIN, "audit_type": "DOL"})
+		self.assertEqual([row["audit_type"] for row in data["regimes"]], ["DOL"])
+
+	def test_an_unknown_regime_is_refused_and_the_known_ones_named(self):
+		error = self.tool_error("get_policy_coverage", {"company": MAIN, "audit_type": "SQF"})
+		self.assertIn("SQF", error)
+		self.assertIn("FSMA", error)
+
+
+# ── the SOP document, and the two places it could hide ──────────────────────
+class TheProcedureItself(EvidenceTestCase):
+	"""v0.93.0. A policy record asserts that a procedure exists. The procedure
+	existing is a different fact, and these are the two ways this app used to get
+	the difference wrong."""
+
+	PDF = "JVBERi0xLjQKJVBvbGljeQo="  # a few bytes; the content is not the subject
+
+	def test_the_document_can_be_attached_in_the_call_that_registers_it(self):
+		data = self.a_policy(file_content=self.PDF, file_name="Harvest Hygiene SOP v3.pdf")
+		self.assertTrue(data["has_document"])
+		self.assertTrue(data["attached_document"])
+		self.assertEqual(data["document_source"], "attached_document")
+		self.assertEqual(data["attachments"][0]["file_name"], "Harvest Hygiene SOP v3.pdf")
+		self.assertEqual(data["warnings"], [])
+
+	def test_file_content_without_a_name_is_refused(self):
+		error = self.tool_error(
+			"create_compliance_policy",
+			{"policy_name": "Nameless", "category": "Other", "company": MAIN, "file_content": self.PDF},
+		)
+		self.assertIn("file_name is required", error)
+
+	def test_a_policy_registered_without_one_can_be_given_one_later(self):
+		created = self.a_policy()
+		self.assertFalse(self.tool_data("get_compliance_policy", {"policy": created["name"]})["has_document"])
+		updated = self.tool_data(
+			"update_compliance_policy",
+			{"policy": created["name"], "file_content": self.PDF, "file_name": "SOP.pdf"},
+		)
+		self.assertTrue(updated["has_document"])
+		self.assertIn("attached_document", updated["changed"])
+
+	def test_attaching_only_a_document_is_not_nothing_to_change(self):
+		"""It used to be: `update_compliance_policy` counted changed FIELDS, and
+		attaching the procedure changed none of them."""
+		created = self.a_policy()
+		data = self.tool_data(
+			"update_compliance_policy",
+			{"policy": created["name"], "file_content": self.PDF, "file_name": "SOP.pdf"},
+		)
+		self.assertTrue(data["has_document"])
+
+	def test_a_file_attached_by_the_generic_door_still_counts_as_a_document(self):
+		"""THE REGRESSION. `attach_file_to_document` knows nothing about which of
+		a DocType's fields holds a document, so it linked the File and left
+		`attached_document` empty — and every reader consulted that one field. A
+		policy with the SOP genuinely attached reported as an unsupported claim,
+		in the register AND in the audit packet."""
+		created = self.a_policy()
+		self.tool_data(
+			"attach_file_to_document",
+			{
+				"doctype": "Compliance Policy",
+				"name": created["name"],
+				"file_content": self.PDF,
+				"file_name": "Harvest Hygiene SOP v3.pdf",
+			},
+		)
+		fetched = self.tool_data("get_compliance_policy", {"policy": created["name"]})
+		self.assertTrue(fetched["has_document"])
+		self.assertEqual(fetched["document_source"], "file attachment")
+		self.assertIsNone(fetched["attached_document"])
+		listing = self.tool_data("list_compliance_policies", {"company": MAIN})
+		self.assertEqual(listing["without_a_document"], [])
 
 
 # ── Compliance Policy ───────────────────────────────────────────────────────
