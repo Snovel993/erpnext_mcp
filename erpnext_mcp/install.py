@@ -3,7 +3,7 @@
 
 Eleven jobs. The second arrived in v0.12.0, the third and fourth in v0.15.0,
 the fifth — the Farm Task Dispatch Kanban board — in v0.16.0, the sixth —
-the six mobile roles — in v0.17.0, the seventh — the compliance vocabulary
+the mobile roles — in v0.17.0, the seventh — the compliance vocabulary
 and the training curricula — in v0.19.2, the eighth — the Weather Settings
 defaults — in v0.19.4, and the ninth — the Sustainable CF/Acre dashboard charts
 — in v0.19.5, which v0.19.6 turned into two charts rather than a tenth job. The
@@ -53,9 +53,9 @@ workspace that lands somebody on it. Built exactly like the fourth and for
 exactly the same reasons — an existing board is left alone, including every
 column somebody has since reordered or deleted.
 
-The sixth arrived in v0.17.0: the six mobile roles — Field Worker, Foreman,
-Compliance Officer, Farm Manager, Family Member, Advisor — and their Custom
-DocPerm rows. It is the second job here that touches something outside this app's
+The sixth arrived in v0.17.0: the mobile roles — Field Worker, Foreman,
+Compliance Officer, Farm Manager, Family Member, Advisor, and Crew Leader since
+v0.68.1 — and their Custom DocPerm rows. It is the second job here that touches something outside this app's
 own records, and it is the one with the sharpest edge, which `roles.py` spends
 forty lines on: **the moment any Custom DocPerm row exists for a doctype, Frappe
 ignores every STANDARD permission on that doctype, for every role on the site.**
@@ -158,6 +158,7 @@ def after_install() -> None:
 	_breakeven_account_fields()
 	_agricultural_masters()
 	_employment_types()
+	_farm_designations()
 	frappe.db.commit()
 
 
@@ -200,6 +201,7 @@ def after_migrate() -> None:
 	_breakeven_account_fields()
 	_agricultural_masters()
 	_employment_types()
+	_farm_designations()
 
 
 def _agricultural_masters() -> None:
@@ -309,6 +311,60 @@ def _employment_types() -> None:
 			)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(f"erpnext_mcp: the employment types were not seeded — {type(exc).__name__}: {exc}")
+
+
+#: v0.68.1. The farm job titles this app READS and never created.
+#:
+#: `Employee.designation` is the column `list_pending_threshold_acknowledgments`
+#: filters on to find every checker on the site, and the column a Position Wage
+#: Default keys a rate on. A stock Frappe HR ships an office's titles — Analyst,
+#: Consultant, Engineer — and none of these, so the app filtered on a master
+#: nothing ever seeded and correctly found nobody.
+#:
+#: DELIBERATELY THE FIVE `roles.JOB_TITLES` NAMES AND NOT ONE MORE. This tuple is
+#: read FROM that table rather than restated beside it, because a title seeded
+#: here with no row there is a title the mapping cannot explain, and a row there
+#: with nothing seeded here is a mapping that names a designation the site does
+#: not have. One list, two uses.
+FARM_DESIGNATIONS = tuple(entry["designation"] for entry in roles.JOB_TITLES)
+
+
+def _farm_designations() -> None:
+	"""Seed the job titles this app reads, so `Employee.designation` can name one.
+
+	SAME CONTRACT AS `_employment_types` ABOVE, for the same reason and with the
+	same one-sentence promise: it only ever creates what is not there, by
+	docname. An operator who renamed Checker, or deleted a title they do not
+	hire, keeps that decision through every later migrate. It adds options and
+	reclassifies nobody — every Employee already pointing at a title still points
+	at it.
+
+	IT IS NOT WHAT DECIDES WHAT SOMEBODY MAY DO. A designation is a job title and
+	a role is a permission set; `roles.JOB_TITLES` is the mapping between them and
+	`create_mobile_user` writes the role. Seeding a title grants nothing.
+
+	SKIPPED WHOLE ON A BENCH WITH NO FRAPPE HR, where the doctype is absent.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "Designation"):
+			return
+		created = []
+		for name in FARM_DESIGNATIONS:
+			if frappe.db.exists("Designation", name):
+				continue
+			doc = frappe.get_doc({"doctype": "Designation", "designation_name": name})
+			doc.flags.ignore_permissions = True
+			doc.insert()
+			created.append(name)
+		if created:
+			print(
+				f"erpnext_mcp: seeded {len(created)} Designation record(s) — "
+				f"{', '.join(created)}. They are OPTIONS on the Employee form and grant "
+				"nothing: what somebody may do is their mobile ROLE, and list_mobile_users "
+				"returns the mapping between the two."
+			)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: the farm designations were not seeded — {type(exc).__name__}: {exc}")
 
 
 def _translations() -> None:
@@ -1068,7 +1124,7 @@ def _kpi_charts() -> None:
 
 
 def _mobile_roles() -> None:
-	"""Create the six v0.17.0 mobile roles and their permissions.
+	"""Create the v0.17.0 mobile roles and their permissions.
 
 	Reported through the same printer as the two dashboard builders, and for the
 	same v0.16.1 reason: a builder that cannot raise and is never read cannot

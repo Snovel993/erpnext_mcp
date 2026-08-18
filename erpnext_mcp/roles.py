@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""The six mobile roles, and the installer that puts them on a site.
+"""The seven mobile roles, and the installer that puts them on a site.
 
 v0.17.0. Sprint 8 gave the operation a dispatch board. This is what makes it
-safe to point a phone at from outside the LAN: six roles that say what KIND of
+safe to point a phone at from outside the LAN: roles that say what KIND of
 work somebody does, and Frappe's own User Permissions that say WHOSE.
 
 THAT SPLIT IS THE WHOLE DESIGN, AND IT IS WHY NO COMPANY NAME APPEARS IN THIS
@@ -19,12 +19,18 @@ Constancy Farms", "Field Worker — Highland", and a new role every time a famil
 adds an LLC. It would also have made this app specific to one install, which is
 the promise the module docstring in `hooks.py` opens with.
 
-So: SIX ROLES, and `create_mobile_user` writes the User Permissions.
+So: SEVEN ROLES, and `create_mobile_user` writes the User Permissions.
 
   Field Worker        the phone in the orchard. Reads the pool and the job,
                       writes their own assignment and the evidence on it.
   Foreman             the dispatch board. Raises work, sends people to it,
                       reads the compliance calendar for the operating company.
+  Crew Leader         v0.68.1. The board-less half of a Foreman: forms the crew,
+                      calls the breaks, closes the shift and writes its
+                      Attendance. Cannot raise, assign or cancel work. For sites
+                      where the crew lead is not the foreman — a distinction
+                      `employee.SHIFT_ROLES` and the iOS toolbar already made,
+                      against a role this file did not create until now.
   Compliance Officer  the registers: policies, certificates, filings, audits.
                       Cannot dispatch anybody — see below.
   Farm Manager        operations and the ground under them: tasks, compliance,
@@ -34,6 +40,16 @@ So: SIX ROLES, and `create_mobile_user` writes the User Permissions.
                       day-to-day task list.
   Advisor             the narrowest role in the app: governance documents,
                       related parties and regulatory filings, read-only.
+
+"CHECKER" AND "TRACTOR DRIVER" ARE NOT ROLES AND ARE NOT MEANT TO BE. They are
+JOB TITLES — `Employee.designation` — and this app already reads that column:
+`list_pending_threshold_acknowledgments` finds every checker on the site by
+filtering Active Employees on it. The test for a role is not "is it a distinct
+job", it is "does it touch a DIFFERENT SET OF RECORDS", and neither of those two
+does: v0.68.1 gave the Field Worker role the one read a checker was missing (the
+fill band) instead of inventing a role for it. `JOB_TITLES` below is that mapping
+written down and returned by `list_mobile_users`, so "we hired a checker, what do
+we give them" has a machine-readable answer.
 
 TWO REFUSALS WORTH ARGUING FOR, BECAUSE BOTH LOOK LIKE OVERSIGHTS:
 
@@ -88,8 +104,8 @@ TWO RULES FOLLOW, AND THE INSTALLER ENFORCES BOTH IN CODE:
 
   2. **The standard perms are mirrored first, per doctype, before any row for
      one of these roles is added.** So the set of permissions in force after
-     the installer runs is the set that was in force before it, PLUS the six
-     roles — which is the same promise the rest of this app makes.
+     the installer runs is the set that was in force before it, PLUS this
+     app's own roles — which is the same promise the rest of this app makes.
 
 Rule 1 has a consequence worth stating plainly rather than hiding: a Field
 Worker who needs to read their own Employee record needs a role from the app
@@ -156,7 +172,7 @@ _FLAG_DEFAULTS = {
 def _perm(read=0, write=0, create=0, delete=0, if_owner=0) -> dict:
 	"""One permission row's flags, with the reading conveniences filled in.
 
-	`delete` is here and is used exactly nowhere in the six specs below. It is
+	`delete` is here and is used exactly nowhere in the specs below. It is
 	kept as a parameter so that a future role which genuinely needs it has to
 	pass it by name in a diff somebody reviews, rather than discovering that the
 	helper cannot express it and reaching for a raw dict.
@@ -433,6 +449,39 @@ WAGE_TABLES = ("Piecework Rate", "Position Wage Default")
 #: of its own for it.
 SIGNING_EVIDENCE = ("Signing Evidence",)
 
+#: v0.68.1. THE BAND A CHECKER IS ASKED TO ENFORCE, and it is a POLICY NUMBER
+#: rather than anybody's pay — which is the whole reason it is a group of its own
+#: and not part of the one below it.
+#:
+#: `Container Fill Threshold` is the percentage range a bucket has to be filled
+#: to before it counts, `Fill Threshold Change Log` is every time somebody moved
+#: it and why. A checker standing at the bin enforces that number all day and
+#: could not read it: `update_fill_threshold` gates on Foreman-or-above, which is
+#: right, and nothing granted the person applying it so much as a read. So a
+#: handset showed a band it had no permission to fetch, and the acknowledgment
+#: loop — `list_pending_threshold_acknowledgments`, which finds checkers by
+#: DESIGNATION — asked people to confirm a number they were not allowed to see.
+#:
+#: READ FOR EVERYBODY IN THE FIELD, READ_WRITE FOR FOREMAN AND ABOVE. That is the
+#: same split `fill_pipeline.FOREMAN_ROLES` already enforces one layer up, said
+#: in Frappe's own permissions so the two cannot drift.
+FILL_STANDARDS = ("Container Fill Threshold", "Fill Threshold Change Log")
+
+#: v0.68.1. What a crew actually turned in: the session, and the buckets on it.
+#:
+#: NOT GRANTED TO A FIELD WORKER, and that is deliberate in the direction that
+#: looks unhelpful. A Bucket Log Entry is a piece-rate count, which is to say it
+#: is somebody's pay — and a User Permission scopes by COMPANY, not by employee,
+#: so a picker granted read here could read the whole crew's day. `permissions.py`
+#: makes the same argument about Housing Assignment. A worker's own count comes
+#: back through their own session on the mobile surface, where the caller is
+#: resolved to an Employee first.
+#:
+#: The three roles that DO get it are the three that run the crew, and read-only:
+#: the rows are written by `sync_bucket_entries` running as the MCP System User,
+#: so a write grant would describe an editing path nobody takes.
+HARVEST_LOG = ("Bucket Log Session", "Bucket Log Entry")
+
 
 def _grant(perm: dict, *groups) -> tuple:
 	"""(doctype, flags) pairs — one permission applied across several groups."""
@@ -477,11 +526,23 @@ ROLE_SPECS = (
 			# whole argument for a foreman-driven shift — a worker who could edit
 			# the crew list could edit their own hours.
 			*_grant(READ, SHIFTS),
+			# v0.68.1. THE BAND, FOR THE CHECKER. A "Checker" is a DESIGNATION and
+			# not a role — see `JOB_TITLES` below for why — so the person doing that
+			# job holds this role, and this is the one thing the job needs that the
+			# role did not carry. Read only: `update_fill_threshold` is Foreman and
+			# above, and a checker who could move the number they are being asked to
+			# trust is the exact shape that gate exists to prevent.
+			*_grant(READ, FILL_STANDARDS),
 		),
 		cannot=(
 			"read the SOP library (Compliance Policy) — a task's instructions belong in its notes",
 			"read the compliance calendar",
 			"raise, assign or cancel work",
+			"move the container fill threshold — a checker enforces the band, a Foreman or "
+			"above sets it",
+			"read the bucket log — a bucket count is somebody's piece-rate pay, and a User "
+			"Permission scopes by company rather than by person, so a read here would be a "
+			"read of the whole crew's day",
 			"see any company but the one their User Permission names",
 		),
 	),
@@ -502,13 +563,81 @@ ROLE_SPECS = (
 			# they were not standing on.
 			*_grant(FULL, DISPATCH, FIELD_RECORDS, SHIFTS),
 			*_grant(READ_WRITE, CALENDAR),
-			*_grant(READ, COMPLIANCE_REGISTERS, CAMP, GROUND),
+			# v0.68.1. The fill band is READ_WRITE here and read-only below it,
+			# which is `fill_pipeline.FOREMAN_ROLES` said in Frappe's own
+			# permissions: a foreman may move the number, a checker may only read
+			# the one they are enforcing. The bucket log itself is read — the rows
+			# are written by the sync running as the MCP System User.
+			*_grant(READ_WRITE, FILL_STANDARDS),
+			*_grant(READ, COMPLIANCE_REGISTERS, CAMP, GROUND, HARVEST_LOG),
 		),
 		cannot=(
 			"touch accounting — no account, journal entry or ledger permission is granted "
 			"to this role anywhere",
 			"edit the certificate or SOP registers (read only)",
 			"see the cap table, member events or governance archive",
+		),
+	),
+	# ── v0.68.1: the seventh, and the one this app already half had ─────────
+	#
+	# "Crew Leader" WAS ALREADY A ROLE NAME IN THIS APP AND WAS NOT A ROLE.
+	# `employee.SHIFT_ROLES` is `HR_ROLES` plus Foreman and Crew Leader, and it
+	# has been since v0.19.3 — the iOS `ShiftToolsToolbar` offers Crew Clock to a
+	# Crew Leader, and the shift tools accept one. What `roles.py` never did was
+	# CREATE the role or grant it anything, so:
+	#
+	#   * a site that wanted one had to build it by hand in the Desk, and
+	#   * `create_mobile_user` refused to enrol one at all — `_role_spec` rejects
+	#     anything outside this tuple by name.
+	#
+	# So the app named a role in two gates and in a shipped iOS build, and had no
+	# way to make one. That is the gap this closes, and it is why Crew Leader is a
+	# role while Checker and Tractor Driver are not: see `JOB_TITLES` below.
+	#
+	# IT IS NOT A SECOND FOREMAN. The crew lead runs the SHIFT — who is clocked
+	# on, the breaks called, the heat record — because OAR 437-004-1131 puts the
+	# water, shade, rest-cycle and observation obligations on the supervisor who
+	# was standing on the block, and on a site where the crew lead is not the
+	# foreman that is this person. They do not run the BOARD: raising work,
+	# sending people to it and cancelling it stay the Foreman's, which is the same
+	# separation this file keeps between the Compliance Officer and the dispatch
+	# register one role up.
+	RoleSpec(
+		name="Crew Leader",
+		description=(
+			"The crew on the block for one operating company: the shift, who is on it, the "
+			"breaks called, and what the day turned in. Not the dispatch board."
+		),
+		summary=(
+			"You run the crew in front of you: who is clocked on, the breaks you called, and "
+			"the buckets they turned in."
+		),
+		# A phone role. Same reasoning as the Field Worker: the crew lead is
+		# standing on a block, and `/app` is a surface with a search bar that
+		# reaches further than it looks like it should.
+		desk_access=0,
+		companion_roles=("Employee",),
+		permissions=(
+			# THE SHIFT IS THEIRS, in full, and it is the only register where that
+			# is true. `end_shift` writes one submitted Attendance per crew member
+			# from their own joined_at/left_at, so a crew lead who cannot close is
+			# a crew with no wage record for the day — which is the same argument
+			# `employee.SHIFT_ROLES` already makes one layer up.
+			*_grant(FULL, SHIFTS),
+			# The board is READ. They see the work their crew is holding and they
+			# do not raise, assign or cancel it.
+			*_grant(READ, DISPATCH, CAMP, GROUND, FILL_STANDARDS, HARVEST_LOG),
+		),
+		cannot=(
+			"raise, assign or cancel work — the board is the Foreman's, and a crew lead who "
+			"could dispatch could send their own crew to their own work",
+			"move the container fill threshold — read-only here, the same as it is for the "
+			"checker applying it",
+			"hire, edit an Employee, or touch an I-9 or a W-4 — running a shift is not the "
+			"personnel register, which is why `employee.HR_ROLES` and `employee.SHIFT_ROLES` "
+			"are two lists",
+			"read the compliance calendar, the SOP library or the certificate register",
+			"touch accounting",
 		),
 	),
 	RoleSpec(
@@ -603,6 +732,17 @@ ROLE_SPECS = (
 			# what the whole company's next payroll pays. See WAGE_TABLES.
 			*_grant(READ_WRITE, WAGE_TABLES),
 			*_grant(READ, PAPER, SIGNING_EVIDENCE),
+			# v0.68.1. `FILL_STANDARDS` AND `HARVEST_LOG` ARE DELIBERATELY NOT
+			# LISTED HERE, and the omission is the accurate thing rather than the
+			# lazy one. All four of those doctypes SHIP a standard DocPerm giving
+			# Farm Manager read, write and create — so the installer's mirror
+			# copies it and `_ensure_permission` finds the row already there and
+			# leaves it. A grant written here would be a silent no-op AND a lie:
+			# `describe_role` reads this tuple, so the catalogue would advertise
+			# read-only on a register this role can already write. What a role
+			# actually holds and what this file says it holds have to be the same
+			# sentence. The Foreman, the Crew Leader and the Field Worker are all
+			# granted above because none of them is on those doctypes at all.
 		),
 		cannot=(
 			"see the cap table or member events — the operating side does not read the "
@@ -661,18 +801,142 @@ ROLE_NAMES = tuple(spec.name for spec in ROLE_SPECS)
 BY_NAME = {spec.name: spec for spec in ROLE_SPECS}
 
 
+# ── v0.68.1: the job titles, and which role carries each ────────────────────
+#
+# THIS TABLE EXISTS BECAUSE THE QUESTION KEEPS BEING ASKED IN THE WRONG SHAPE.
+# "We need a Checker role" and "we need a Tractor Driver role" both sound like
+# requests for a seventh and eighth entry above, and neither is — because a
+# Frappe role answers a different question from a job title:
+#
+#   A ROLE SAYS WHAT KIND OF RECORD SOMEBODY MAY TOUCH. It is the thing a
+#   Custom DocPerm hangs off, it is coarse on purpose, and adding one is a
+#   permanent widening of this app's permission surface.
+#
+#   A JOB TITLE SAYS WHAT SOMEBODY DOES ALL DAY. It is `Employee.designation`,
+#   it is a master an operator adds to in ten seconds, and this app ALREADY
+#   reads it: `list_pending_threshold_acknowledgments` finds every checker on
+#   the site by filtering Active Employees on `designation == "Checker"`, and
+#   `Position Wage Default` keys a wage rate on the same column.
+#
+# So the test for "should this be a role" is not "is it a distinct job" — it is
+# "does it touch a DIFFERENT SET OF RECORDS". Applying that:
+#
+#   Checker          Reads the fill band, checks buckets into a session that the
+#                    sync writes. Same records as any Field Worker plus the band
+#                    — which is why v0.68.1 granted Field Worker `FILL_STANDARDS`
+#                    rather than inventing a role for one read.
+#   Tractor Driver   Completes tasks and files evidence, exactly as any other
+#                    Field Worker does. A tractor is an Asset Register row that
+#                    `resolve_asset_tag` scans and the task names; nothing about
+#                    driving one touches a register a picker does not.
+#   Crew Leader      Runs the SHIFT — forms the crew, calls the breaks, closes
+#                    it and writes the Attendance rows. A register no Field
+#                    Worker may write and no Foreman-less site had an account
+#                    for. That is a different set of records, so it IS a role,
+#                    and it is the one this release added.
+#
+# WHAT THIS TABLE IS FOR. It is the answer to "we hired a checker, what do we
+# give them", returned by `list_mobile_users` beside the role catalogue so the
+# mapping is machine-readable rather than a paragraph in a release note. Each
+# entry names the DESIGNATION to put on the Employee and the ROLE to pass to
+# `create_mobile_user` — two different fields, set by two different tools, and
+# the pair is the whole configuration.
+#
+# THE DESIGNATIONS ARE SEEDED BY `install._farm_designations`, create-only, so
+# `Checker` resolves on a stock Frappe HR install rather than being a title the
+# app filters on and nothing ever creates.
+JOB_TITLES = (
+	{
+		"designation": "Picker",
+		"mobile_role": "Field Worker",
+		"why": (
+			"The job the Field Worker role was written for: take work from the pool, file the "
+			"evidence that closes it, see the shift you are standing on."
+		),
+	},
+	{
+		"designation": "Checker",
+		"mobile_role": "Field Worker",
+		"why": (
+			"A checker is a Field Worker who also reads the container fill threshold — the band "
+			"they enforce at the bin all day. v0.68.1 granted that read to the role rather than "
+			"making a role of the title. They may NOT move the band: `update_fill_threshold` is "
+			"Foreman and above, because a checker who could move the number they are asked to "
+			"trust is the shape that gate exists to prevent. `list_pending_threshold_"
+			"acknowledgments` finds them by this designation."
+		),
+	},
+	{
+		"designation": "Tractor Driver",
+		"mobile_role": "Field Worker",
+		"why": (
+			"Nothing about driving a tractor touches a register a picker does not. The machine is "
+			"an Asset Register row the task names and `resolve_asset_tag` scans; the work is a "
+			"Farm Task with an evidence contract. Where a job genuinely needs a named licence "
+			"holder, that is `skill_required` on the task and dispatch_mode=Dispatched — a "
+			"property of the WORK, which is where it belongs, rather than of the account."
+		),
+	},
+	{
+		"designation": "Crew Leader",
+		"mobile_role": "Crew Leader",
+		"why": (
+			"The one of the three that IS a role, because it is the one that writes a register "
+			"nobody else in the field may: the Farm Shift. Forming the crew, calling the breaks "
+			"and closing the day writes one submitted Attendance per crew member. On a site "
+			"where the crew lead IS the foreman, give them Foreman instead — this role is the "
+			"board-less half of it."
+		),
+	},
+	{
+		"designation": "Foreman",
+		"mobile_role": "Foreman",
+		"why": (
+			"The dispatch board as well as the shift: raise work, send people to it, read the "
+			"compliance calendar that generated it."
+		),
+	},
+)
+
+#: Designation → the mobile role that carries it, for a caller that wants the
+#: lookup rather than the table.
+ROLE_FOR_JOB_TITLE = {entry["designation"]: entry["mobile_role"] for entry in JOB_TITLES}
+
+
+def job_titles() -> list:
+	"""The job-title → mobile-role mapping, with what each designation resolves to.
+
+	`designation_exists` is asked of the site rather than assumed, because the
+	mapping is only actionable if the master is there — a site whose `Checker`
+	designation was renamed should see that here rather than discover it when
+	`list_pending_threshold_acknowledgments` returns nobody.
+	"""
+	out = []
+	for entry in JOB_TITLES:
+		row = dict(entry)
+		row["role_installed"] = bool(_role_installed(entry["mobile_role"]))
+		try:
+			row["designation_exists"] = bool(
+				frappe.db.exists("Designation", entry["designation"])
+			)
+		except Exception:  # pragma: no cover - a site without Frappe HR
+			row["designation_exists"] = False
+		out.append(row)
+	return out
+
+
 def spec_for(role: str) -> RoleSpec | None:
 	return BY_NAME.get((role or "").strip())
 
 
 def permission_targets() -> set:
-	"""Every doctype any of the six roles is granted something on."""
+	"""Every doctype any of these roles is granted something on."""
 	return {doctype for spec in ROLE_SPECS for doctype, _flags in spec.permissions}
 
 
 # ── the installer ───────────────────────────────────────────────────────────
 def install_roles() -> dict:
-	"""Create the six roles and their permissions. Idempotent, never raises.
+	"""Create the roles and their permissions. Idempotent, never raises.
 
 	Runs from `after_install` and `after_migrate`. Everything it could not do
 	lands in `report["failed"]` for `install.py` to print.
@@ -902,7 +1166,7 @@ def _role_installed(role: str) -> bool:
 
 
 def roles_of(user: str) -> list:
-	"""Which of THIS APP'S six roles a user holds, in spec order.
+	"""Which of THIS APP'S own roles a user holds, in spec order.
 
 	Deliberately not every role they hold: a Farm Manager who is also a System
 	Manager is a fact about the site's own configuration, and this app's tools

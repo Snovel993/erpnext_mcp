@@ -16348,3 +16348,94 @@ block, or a label corrected by the registrant since.
   passes.
 * **`claim_farm_task` has no override at all.** "The picker decided the interval
   did not apply" is not a defence anybody can offer at the packing house.
+
+---
+
+## Mobile roles and farm job titles (v0.68.1)
+
+"We need a Checker role." "We need a Tractor Driver role." "We need a Crew Leader
+role." Two of those are not requests for a role and one of them is, and the test
+that tells them apart is not *is it a distinct job* — it is **does it touch a
+different set of records**.
+
+* **A role** says what kind of record somebody may touch. It is what a Custom
+  DocPerm hangs off, it is coarse on purpose, and adding one permanently widens
+  this app's permission surface.
+* **A job title** says what somebody does all day. It is `Employee.designation`,
+  an operator adds one in ten seconds, and **this app already reads it** —
+  `list_pending_threshold_acknowledgments` finds every checker on the site by
+  filtering Active Employees on `designation == "Checker"`, and a Position Wage
+  Default keys a rate on the same column.
+
+### The mapping
+
+`list_mobile_users` returns this as `job_titles`, so it is machine-readable
+rather than a paragraph in a release note.
+
+| Designation (`update_employee`) | Mobile role (`create_mobile_user`) | Why |
+|---|---|---|
+| Picker | Field Worker | The job the role was written for. |
+| **Checker** | Field Worker | Same records as any Field Worker **plus the container fill threshold**, which v0.68.1 granted to the role. |
+| **Tractor Driver** | Field Worker | Nothing about driving a tractor touches a register a picker does not. |
+| **Crew Leader** | **Crew Leader** | Forming and closing a shift writes a register no Field Worker may. |
+| Foreman | Foreman | The dispatch board as well as the shift. |
+
+Two fields, two tools. `update_employee` sets the designation;
+`create_mobile_user` sets the role. Seeding a designation grants nothing.
+
+The designations are seeded by the installer, **create-only** — an operator who
+renames one, or deletes a title they do not hire, keeps that decision through
+every later migrate.
+
+### Crew Leader: the seventh role
+
+This app *already named* Crew Leader and did not have one.
+`employee.SHIFT_ROLES` has been `HR_ROLES` plus Foreman and Crew Leader since
+v0.19.3, and the iOS `ShiftToolsToolbar` offers Crew Clock to it — but `roles.py`
+never created the role or granted it anything, so a site that wanted one had to
+build it by hand and `create_mobile_user` refused to enrol one at all.
+
+**It is not a second Foreman.** The crew lead runs the *shift* — who is clocked
+on, the breaks called, the heat record — because OAR 437-004-1131 puts the water,
+shade, rest-cycle and observation obligations on the supervisor who was standing
+on the block, and `end_shift` writes one submitted Attendance per crew member, so
+a crew lead who cannot close is a crew with no wage record for the day.
+
+They do **not** run the *board*. Raising, assigning and cancelling work stay the
+Foreman's — the same separation this app keeps between a Compliance Officer and
+the dispatch register. On a site where the crew lead *is* the foreman, give them
+Foreman; this role is the board-less half of it.
+
+| | Field Worker | Crew Leader | Foreman |
+|---|---|---|---|
+| Farm Shift | read | **full** | full |
+| Farm Task | read | read | full |
+| Farm Task Assignment | full (their own) | read | full |
+| Container Fill Threshold | read | read | read/write |
+| Bucket Log Session / Entry | — | read | read |
+| Compliance calendar, SOP library | — | — | read |
+| Desk access | no | no | yes |
+
+### The permission adjustments inside the existing roles
+
+* **Field Worker gains read on `Container Fill Threshold` and
+  `Fill Threshold Change Log`.** `update_fill_threshold` is Foreman-and-above,
+  which is right — and nothing granted the person *applying* the band so much as
+  a read, so a handset showed a number it had no permission to fetch and the
+  acknowledgment loop asked people to confirm a number they could not see. They
+  still may not move it: a checker who could change the number they are asked to
+  trust is the exact shape that gate exists to prevent.
+* **Field Worker does not gain the bucket log**, and that is deliberate in the
+  direction that looks unhelpful. A Bucket Log Entry is a piece-rate count, which
+  is somebody's pay — and a User Permission scopes by *company*, not by person,
+  so a picker granted read there could read the whole crew's day. A worker's own
+  count comes back through their own session on the mobile surface, where the
+  caller is resolved to an Employee first.
+* **Foreman and Crew Leader gain the bucket log, read-only.** The rows are
+  written by `sync_bucket_entries` running as the MCP System User, so a write
+  grant would describe an editing path nobody takes.
+* **Farm Manager gains nothing here**, because all four of those doctypes already
+  ship a standard DocPerm giving Farm Manager read/write/create. A grant in
+  `roles.py` would have been a silent no-op *and* a lie — `describe_role` reads
+  that tuple, so the catalogue would have advertised read-only on a register the
+  role can already write.

@@ -10236,10 +10236,19 @@ TOOLS = {
 	"list_mobile_users": _tool(
 		mobile.list_mobile_users,
 		"EVERY MOBILE ACCOUNT AND WHAT IS WRONG WITH IT. Who has a phone, which of "
-		"the six roles they hold, which entities their User Permissions actually "
+		"this app's roles they hold, which entities their User Permissions actually "
 		"allow, how old their credential is, and — the part worth reading — a "
 		"`concerns` list per account. Also returns the role catalogue, so a client "
 		"can show what each role is for without a second call. Read-only.\n\n"
+		"IT ALSO RETURNS `job_titles`, WHICH IS THE ANSWER TO 'WE HIRED A CHECKER, "
+		"WHAT DO WE GIVE THEM'. A Checker and a Tractor Driver are DESIGNATIONS on "
+		"the Employee and not roles: they touch the same records any Field Worker "
+		"does, so they hold that role and are told apart by their designation — "
+		"which is how `list_pending_threshold_acknowledgments` finds every checker "
+		"on the site. A Crew Leader IS a role, because forming and closing a shift "
+		"writes a register no Field Worker may. Two fields, two tools: "
+		"update_employee sets the designation, create_mobile_user sets the role."
+		"\n\n"
 		"THE CONCERNS ARE THE POINT. Each one is a state that looks fine on a list "
 		"and is not: an account with NO Company User Permission (which in Frappe "
 		"means it sees EVERY entity), a grant that says one set of entities while "
@@ -10456,9 +10465,15 @@ TOOLS = {
 	"create_mobile_user": _tool(
 		mobile.create_mobile_user,
 		"MUTATING (default OFF). One call for what four Desk forms do in ten "
-		"minutes: the User, one of the six mobile roles, a Company User Permission "
-		"per entity, the Mobile Access Grant, and the API credential — WHICH IS "
-		"READABLE IN THE RESULT EXACTLY ONCE.\n\n"
+		"minutes: the User, one of this app's mobile roles, a Company User "
+		"Permission per entity, the Mobile Access Grant, and the API credential — "
+		"WHICH IS READABLE IN THE RESULT EXACTLY ONCE.\n\n"
+		"THE ROLE IS NOT THE JOB TITLE. A role says what KIND of record somebody "
+		"may touch; a job title is `Employee.designation` and says what they do all "
+		"day. A Checker and a Tractor Driver both hold Field Worker — see the "
+		"`job_titles` mapping list_mobile_users returns — while a Crew Leader has a "
+		"role of its own, because forming and closing a shift writes a register no "
+		"Field Worker may.\n\n"
 		"`entity_access` IS MANDATORY AND THERE IS NO OVERRIDE. In Frappe a user "
 		"with NO User Permission on Company sees EVERY company on the site, so an "
 		"account created without entities would be the LEAST scoped account here, "
@@ -11258,8 +11273,10 @@ TOOLS = {
 			),
 			"role": _field(
 				_STRING,
-				"Their mobile role. Default 'Field Worker'. One of the six — list_mobile_users "
-				"returns what each is for.",
+				"Their mobile role, NOT their job title. Default 'Field Worker'. "
+				"list_mobile_users returns what each role is for and which role each farm job "
+				"title maps onto — a Checker and a Tractor Driver are Field Workers told apart "
+				"by their designation; a Crew Leader has a role of its own.",
 			),
 			"entity_access": _field(
 				{"type": "array", "items": _STRING},

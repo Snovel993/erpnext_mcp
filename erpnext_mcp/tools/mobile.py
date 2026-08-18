@@ -215,8 +215,11 @@ def _role_spec(args: dict) -> roles.RoleSpec:
 	spec = roles.spec_for(role)
 	if spec is None:
 		raise ToolError(
-			f"{role!r} is not one of this app's mobile roles. The six are: "
-			f"{', '.join(roles.ROLE_NAMES)}. list_mobile_users returns what each one is for."
+			f"{role!r} is not one of this app's mobile roles. The {len(roles.ROLE_NAMES)} are: "
+			f"{', '.join(roles.ROLE_NAMES)}. list_mobile_users returns what each one is for, "
+			"and the job-title mapping — which mobile role a Checker, a Tractor Driver or a "
+			"Crew Leader gets — beside it. A job title is a Designation on the Employee, not "
+			"a role."
 		)
 	return spec
 
@@ -567,7 +570,8 @@ def list_mobile_users(args: dict) -> ToolResult:
 		spec = roles.spec_for(role)
 		if spec is None:
 			raise ToolError(
-				f"{role!r} is not one of this app's mobile roles. The six are: {', '.join(roles.ROLE_NAMES)}."
+				f"{role!r} is not one of this app's mobile roles. The {len(roles.ROLE_NAMES)} are: "
+				f"{', '.join(roles.ROLE_NAMES)}."
 			)
 		filters["mobile_role"] = spec.name
 	state = as_str(args, "state")
@@ -679,6 +683,11 @@ def list_mobile_users(args: dict) -> ToolResult:
 		users.append(entry)
 
 	catalogue = [roles.describe_role(spec, include_permissions=False) for spec in roles.ROLE_SPECS]
+	# v0.68.1. THE ANSWER TO "WE HIRED A CHECKER, WHAT DO WE GIVE THEM", returned
+	# beside the roles rather than left in a release note. A job title is a
+	# Designation on the Employee and a role is what `create_mobile_user` takes;
+	# they are two fields set by two tools, and the pair is the configuration.
+	job_titles = roles.job_titles()
 	flagged = [entry for entry in users if entry["concerns"]]
 	return ToolResult(
 		data={
@@ -687,10 +696,21 @@ def list_mobile_users(args: dict) -> ToolResult:
 			"needing_attention": len(flagged),
 			"company_filter": company,
 			"roles": catalogue,
+			"job_titles": job_titles,
 			"note": (
 				"entity_access is read from the LIVE User Permission rows, not from the grant — "
 				"so a scoping somebody changed in the Desk shows here as drift rather than "
 				"agreeing with a record that is out of date."
+			),
+			"job_title_note": (
+				"`job_titles` maps the farm job titles onto the mobile roles that carry them. A "
+				"Checker and a Tractor Driver are DESIGNATIONS on the Employee, not roles — they "
+				"touch the same records any Field Worker does, so they hold that role and are "
+				"told apart by their designation, which is how "
+				"list_pending_threshold_acknowledgments finds every checker on the site. A Crew "
+				"Leader IS a role, because forming and closing a shift writes a register no "
+				"Field Worker may. Set the designation with update_employee and the role with "
+				"create_mobile_user."
 			),
 		},
 		summary=f"{len(users)} mobile account(s), {len(flagged)} needing attention",
