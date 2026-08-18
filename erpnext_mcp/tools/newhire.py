@@ -94,6 +94,9 @@ from ..args import as_bool, as_date, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import dispatch, files, i9, mobile
+from . import housing as housing_tool
+from . import shifts as shift_tool
+from . import w4 as w4_tool
 from . import employee as employee_tool
 from .housing import EMPLOYEE, hr_installed
 
@@ -167,13 +170,19 @@ def onboard_employee(args: dict) -> ToolResult:
 		"link": None,
 		"qr": None,
 		"tasks": [],
+		# v0.93.0. The three steps that used to be somebody's next four calls.
+		"w4_form": None,
+		"housing": None,
+		"crew": None,
 	}
 
 	employee = _employee(args, full_name, company, report)
 	report["employee"] = employee
 
 	_i9_form(args, employee, company, report)
+	_w4_form(args, employee, company, report)
 	_paperwork(args, employee, report)
+	_housing(args, employee, full_name, company, report)
 
 	if email:
 		_mobile_access(args, email, full_name, company, employee, report)
@@ -196,6 +205,8 @@ def onboard_employee(args: dict) -> ToolResult:
 			}
 		)
 
+	_crew(args, employee, report)
+
 	if as_bool(args, "first_day_tasks", False):
 		_first_day(args, employee, full_name, company, report)
 
@@ -210,21 +221,88 @@ def onboard_employee(args: dict) -> ToolResult:
 				"Whoever can read the Employee can read them; nobody else can."
 			),
 			"next_step": _next_step(report, linked),
+			# WHAT DID NOT HAPPEN, AS A LIST RATHER THAN A SENTENCE. `next_step`
+			# names ONE thing on purpose; a single-pass onboarding that touches
+			# nine registers can leave several undone, and an orchestrator whose
+			# gaps are only readable by diffing `steps` against what was asked for
+			# is an orchestrator whose gaps nobody reads.
+			"incomplete": [entry["step"] for entry in report["skipped"]],
 		},
 		summary=(
 			f"onboarded {full_name} at {company}: employee {employee}"
 			+ (f", {len(report['documents'])} document(s)" if report["documents"] else "")
+			+ (", W-4 filed" if report["w4_form"] else "")
+			+ (", housed" if report["housing"] else "")
+			+ (", on a crew" if report["crew"] else "")
 			+ (", mobile access" if report["mobile"] else "")
 			+ (", linked" if linked else "")
 			+ (", QR issued" if report["qr"] else "")
 			+ (f", {len(report['tasks'])} first-day task(s)" if report["tasks"] else "")
+			+ (f"; {len(report['skipped'])} step(s) NOT done" if report["skipped"] else "")
 		),
 		docstatus_delta="none → 0 (Employee created)",
 	)
 
 
+def _crew(args: dict, employee: str, report: dict) -> None:
+	"""Roster them onto a shift that is already running.
+
+	LAST, AND AFTER THE LOGIN, because a crew row is the only step here that puts
+	somebody on the clock. Everything before it is paperwork that can be finished
+	at a desk; this one says a person is working right now, and doing it before
+	the account exists produces a worker on a crew who cannot be handed the phone
+	the crew is using.
+
+	It delegates for the usual reason and one specific to shifts:
+	`add_worker_to_shift` refuses a second open shift for the same person, which
+	no check written here could see — a worker rostered onto a second crew is
+	invisible from the first one's rows.
+	"""
+	shift = as_str(args, "shift")
+	if not shift:
+		return
+	payload = {"shift": shift, "employee": employee}
+	for key in ("role", "joined_at"):
+		value = as_str(args, f"crew_{key}") or as_str(args, key)
+		if value:
+			payload[key] = value
+	try:
+		result = shift_tool.add_worker_to_shift(payload)
+		report["crew"] = {
+			"shift": result.data.get("shift") or shift,
+			"crew_size": result.data.get("crew_size"),
+			"role": payload.get("role") or "Worker",
+		}
+		report["steps"].append({"step": "crew", "action": "rostered", "name": shift})
+	except Exception as exc:
+		report["skipped"].append({"step": "crew", "reason": f"{type(exc).__name__}: {exc}"})
+
+
 def _next_step(report: dict, linked: bool) -> str:
-	"""The one thing left to do, named. Never a list of everything that exists."""
+	"""The one thing left to do in the ENROLMENT chain, named — plus the W-4.
+
+	THE W-4 IS APPENDED RATHER THAN PUT IN FRONT, and that is a deliberate
+	restraint. This field has meant "the next step towards a working phone" since
+	the tool shipped, and callers read it that way; a missing W-4 is a different
+	kind of gap — it produces a WRONG NUMBER rather than a missing capability,
+	because somebody with no phone cannot pick and somebody with no W-4 is paid at
+	the default and finds out in April. Two different gaps, so two sentences,
+	rather than one of them silently displacing the other in a field somebody
+	already parses.
+	"""
+	return _enrolment_step(report, linked) + _withholding_step(report)
+
+
+def _withholding_step(report: dict) -> str:
+	if report["w4_form"] or not any(entry["step"] == "w4_form" for entry in report["skipped"]):
+		return ""
+	return (
+		" AND: submit_w4 files this person's withholding elections. Until it does, payroll "
+		"withholds at the default for them — list_employees_missing_w4 is the register."
+	)
+
+
+def _enrolment_step(report: dict, linked: bool) -> str:
 	if not report["mobile"] and not linked:
 		return "create_mobile_user gives this person a login when they need one."
 	if not linked:
@@ -341,6 +419,71 @@ def _i9_form(args: dict, employee: str, company: str, report: dict) -> None:
 		report["skipped"].append({"step": "i9_form", "reason": f"{type(exc).__name__}: {exc}"})
 
 
+# ── 1c. the structured W-4 ──────────────────────────────────────────────────
+def _w4_form(args: dict, employee: str, company: str, report: dict) -> None:
+	"""File the withholding elections as a W-4 Form, not only as a scanned page.
+
+	v0.93.0, AND THE ASYMMETRY IT CLOSES. `_i9_form` has created a structured I-9
+	since v0.27.0 while the W-4 could only arrive here as a PDF under
+	`documents["w4"]` — a picture of a form, which nothing computes from. The
+	payroll engine reads the ELECTIONS: filing status, the dependent counts, the
+	extra withholding. A farm that onboarded forty pickers through this tool and
+	attached forty W-4 scans still had forty people in
+	`list_employees_missing_w4`, and the first payroll run withheld at the default
+	for every one of them.
+
+	So the scan and the elections are different facts and both are kept: this
+	files the record, `_paperwork` still attaches the signed page beside it, and
+	neither replaces the other — the signed page is what an IRS examiner asks to
+	see and the record is what the engine computes from.
+
+	NOT FATAL, and skipped LOUDLY. A W-4 that could not be filed must not undo an
+	onboarding that otherwise worked, but it must also not vanish: the reason
+	lands in `skipped`, the step name lands in `incomplete`, and
+	`list_employees_missing_w4` finds the person either way.
+	"""
+	elections = args.get("w4")
+	if not elections:
+		if compat.doctype_exists(w4_tool.W4_FORM):
+			report["skipped"].append(
+				{
+					"step": "w4_form",
+					"reason": (
+						"no `w4` elections were given, so nothing computes this person's "
+						"withholding and the first payroll run uses the default. A scanned W-4 "
+						"under documents['w4'] is the signed page and not the elections. "
+						"submit_w4 files them later; list_employees_missing_w4 names everybody "
+						"still in this state."
+					),
+				}
+			)
+		return
+	if not isinstance(elections, dict):
+		raise ToolError(
+			'w4 must be an object like {"filing_status": "Married Filing Jointly", '
+			'"dependents_under_17_count": 2}. Nothing further was done — the Employee record '
+			f"({employee}) stands."
+		)
+
+	joined = as_date(args, "date_of_joining") or str(frappe.utils.today())
+	payload = {
+		"employee": employee,
+		"company": company,
+		# THE YEAR THE ELECTIONS APPLY TO, defaulted from the hire date rather
+		# than from today. Somebody onboarded in December against a January start
+		# is filing for the year they will be paid in, and a W-4 filed under the
+		# wrong tax year is invisible to the engine that looks it up by year.
+		"tax_year": elections.get("tax_year") or int(str(joined)[:4]),
+		**{key: value for key, value in elections.items() if key != "tax_year"},
+	}
+	try:
+		result = w4_tool.submit_w4(payload)
+		report["w4_form"] = result.data.get("name")
+		report["steps"].append({"step": "w4_form", "action": "created", "name": result.data.get("name")})
+	except Exception as exc:
+		report["skipped"].append({"step": "w4_form", "reason": f"{type(exc).__name__}: {exc}"})
+
+
 # ── 2. the paperwork ────────────────────────────────────────────────────────
 def _paperwork(args: dict, employee: str, report: dict) -> None:
 	"""File each supplied document PRIVATELY on the Employee record.
@@ -398,6 +541,45 @@ def _paperwork(args: dict, employee: str, report: dict) -> None:
 			}
 		)
 		report["steps"].append({"step": f"document:{kind}", "action": "attached"})
+
+
+# ── 2b. the bed ─────────────────────────────────────────────────────────────
+def _housing(args: dict, employee: str, full_name: str, company: str, report: dict) -> None:
+	"""Put them in a unit, through the tool that owns occupancy.
+
+	DELEGATES rather than writes, like every other step here, and the delegation
+	is what matters: `create_housing_assignment` refuses an overlap, checks the
+	unit against Oregon's lawful occupancy, and knows that somebody moving out on
+	the 15th and somebody moving in on the 15th DID share the cabin that night.
+	Writing the row here would be a second implementation of all three, and the
+	one that got it wrong would be the one a camp actually used.
+
+	THE DATE DEFAULTS TO THE HIRE DATE, not to today. A worker hired on Monday and
+	onboarded in the office on Wednesday slept somewhere on Monday night, and an
+	assignment starting Wednesday says the camp had a bed empty that it did not.
+	"""
+	unit = as_str(args, "housing_unit")
+	if not unit:
+		return
+	payload = {
+		"unit": unit,
+		"employee": employee,
+		"employee_name": full_name,
+		"company": company,
+		"assigned_date": as_date(args, "housing_assigned_date")
+		or as_date(args, "date_of_joining")
+		or str(frappe.utils.today()),
+	}
+	for key in ("housing_deduction_from_wages", "end_date", "notes"):
+		value = args.get(key if key != "notes" else "housing_notes")
+		if value not in (None, ""):
+			payload[key if key != "notes" else "notes"] = value
+	try:
+		result = housing_tool.create_housing_assignment(payload)
+		report["housing"] = result.data.get("name") or result.data.get("assignment")
+		report["steps"].append({"step": "housing", "action": "assigned", "name": report["housing"]})
+	except Exception as exc:
+		report["skipped"].append({"step": "housing", "reason": f"{type(exc).__name__}: {exc}"})
 
 
 # ── 3. the login and the credential ─────────────────────────────────────────

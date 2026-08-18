@@ -16667,3 +16667,43 @@ every render would put an outbound HTTP request on the path of a screen somebody
 leaves open. The scheduled sweep already collects readings every fifteen minutes
 onto the open shifts; this reports the most recent of them **with its own
 timestamp and `source`**, so an hour-old reading cannot be read as a live one.
+
+
+## Single-pass onboarding (v0.93.0)
+
+### `onboard_employee` — three steps that were somebody's next four calls
+
+Hire → assign department → assign housing → assign crew → do the W-4 was five
+calls. It is one now.
+
+| Argument | What it does | Delegates to |
+|---|---|---|
+| `w4` | files the withholding **elections** as a W-4 Form | `submit_w4` |
+| `housing_unit` · `housing_assigned_date` | creates the assignment, not just the orientation task's target | `create_housing_assignment` |
+| `shift` · `crew_role` · `crew_joined_at` | rosters them onto an open crew | `add_worker_to_shift` |
+
+`department`, `designation`, `employment_type` and `branch` have been here since
+v0.54.0 and go through `create_employee`'s allowlist.
+
+**The scan is not the elections.** `documents["w4"]` attaches a signed page;
+`w4` files the filing status, the dependent counts and the extra withholding
+that the payroll engine actually reads. A farm that attached forty scans still
+had forty people in `list_employees_missing_w4` and forty pickers withheld at the
+default. Both are kept — the page is what an examiner asks to see, the record is
+what the engine computes from — and omitting `w4` is **reported in `skipped`**
+rather than passing quietly.
+
+**Dates default backwards, not forwards.** The W-4's tax year comes off
+`date_of_joining`; so does the housing assignment's start. Somebody hired on
+Monday and onboarded on Wednesday slept somewhere on Monday night.
+
+**Every new step delegates**, so the housing overlap refusal, Oregon's lawful
+occupancy, and the refusal to roster somebody onto a second open shift are the
+same code they are everywhere else. Each may fail without undoing the rest: the
+reason lands in `skipped` and the step name in the new **`incomplete`** list,
+beside the Employee that was still created.
+
+**`next_step` appends the W-4 rather than replacing the enrolment step.** Two
+different kinds of gap — one is a missing capability, the other is a wrong number
+— and the field has meant "the next step towards a working phone" since the tool
+shipped.

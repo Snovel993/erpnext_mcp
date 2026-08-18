@@ -35,7 +35,20 @@ from .harness import ROLES, STORE
 
 ON = {
 	f"allow_{name}": 1
-	for name in ("onboard_employee", "create_mobile_user", "create_farm_task", "attach_file_to_document")
+	for name in (
+		"onboard_employee",
+		"create_mobile_user",
+		"create_farm_task",
+		"attach_file_to_document",
+		"submit_w4",
+		"create_parcel",
+		"create_housing_unit",
+		"create_housing_assignment",
+		"list_housing_assignments",
+		"start_shift",
+		"add_worker_to_shift",
+		"list_employees_missing_w4",
+	)
 }
 
 A_PDF = base64.b64encode(b"%PDF-1.4 i9 form bytes").decode()
@@ -64,6 +77,195 @@ class NewHireTestCase(V12TestCase):
 
 	def attachments(self, employee):
 		return [row for row in STORE.rows("File") if row.get("attached_to_name") == employee]
+
+
+# ── 5: the four calls that used to come after ───────────────────────────────
+class ThePassIsActuallySinglePass(NewHireTestCase):
+	"""v0.93.0. Hire → department → housing → crew → W-4 was five calls, and the
+	step that got missed was never the same one twice.
+
+	THE W-4 IS THE ONE THAT MATTERED MOST and it is the least visible. It could
+	arrive here only as a SCANNED PAGE under `documents["w4"]` — a picture of a
+	form, which nothing computes from — while the I-9 had been structured since
+	v0.27.0. A farm that onboarded forty pickers through this tool and attached
+	forty scans still had forty people in `list_employees_missing_w4`, and the
+	first payroll run withheld at the default for all of them. The scan and the
+	elections are different facts and both are kept: the page is what an examiner
+	asks to see, the record is what the engine computes from.
+
+	EVERY NEW STEP DELEGATES. The housing overlap refusal, Oregon's lawful
+	occupancy, and the refusal to roster somebody onto a second open shift are all
+	rules this module does not restate — which is the only way they stay true here
+	as well as there.
+	"""
+
+	def a_cabin(self, unit_name="MC-Cabin-01"):
+		if not STORE.rows("Parcel"):
+			self.tool_data(
+				"create_parcel",
+				{"owning_entity": MAIN, "parcel_name": "Mill Creek", "acreage": 131.43},
+			)
+		return self.tool_data(
+			"create_housing_unit",
+			{
+				"parcel": "Mill Creek",
+				"unit_name": unit_name,
+				"unit_type": "Cabin",
+				"square_footage": 400,
+				"capacity": 4,
+			},
+		)["name"]
+
+	W4 = {"filing_status": "Married Filing Jointly", "dependents_under_17_count": 2}
+
+	def an_open_shift(self):
+		"""A shift needs a foreman, and the foreman is not the person being hired."""
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "HR-EMP-FOREMAN",
+					"employee_name": "R. Mendez",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				}
+			],
+		)
+		return self.tool_data(
+			"start_shift",
+			{"company": MAIN, "location": "Yellow Camp", "foreman": "HR-EMP-FOREMAN"},
+		)["name"]
+
+	# ── the W-4 ────────────────────────────────────────────────────────────
+	def test_the_elections_are_filed_as_a_w4_record_not_only_as_a_scan(self):
+		data = self.hire(date_of_joining="2026-03-02", w4=self.W4)
+		self.assertTrue(data["w4_form"])
+		row = frappe.db.get_value(
+			"W-4 Form", data["w4_form"], ["employee", "filing_status", "tax_year", "status"], as_dict=True
+		)
+		self.assertEqual(row["employee"], data["employee"])
+		self.assertEqual(row["filing_status"], "Married Filing Jointly")
+		self.assertEqual(row["status"], "Active")
+
+	def test_the_tax_year_comes_off_the_hire_date_not_off_today(self):
+		"""A W-4 filed under the wrong tax year is invisible to the engine that
+		looks it up by year."""
+		data = self.hire(date_of_joining="2025-11-14", w4=self.W4)
+		self.assertEqual(frappe.db.get_value("W-4 Form", data["w4_form"], "tax_year"), 2025)
+
+	def test_an_explicit_tax_year_wins(self):
+		data = self.hire(date_of_joining="2025-11-14", w4={**self.W4, "tax_year": 2026})
+		self.assertEqual(frappe.db.get_value("W-4 Form", data["w4_form"], "tax_year"), 2026)
+
+	def test_a_hire_with_no_elections_leaves_the_person_missing_a_w4_and_says_so(self):
+		"""The silent version of this is the whole bug: forty scans attached and
+		forty people withheld at the default."""
+		data = self.hire()
+		self.assertIsNone(data["w4_form"])
+		self.assertIn("w4_form", data["incomplete"])
+		reason = next(entry for entry in data["skipped"] if entry["step"] == "w4_form")["reason"]
+		self.assertIn("list_employees_missing_w4", reason)
+		# APPENDED, not substituted. `next_step` has meant "the next step towards
+		# a working phone" since the tool shipped and callers parse it that way;
+		# a missing W-4 is a different kind of gap and gets its own sentence
+		# rather than silently displacing the one already there.
+		self.assertIn("submit_w4", data["next_step"])
+		self.assertIn("create_mobile_user", data["next_step"])
+
+	def test_a_scanned_w4_alone_does_not_count_as_the_elections(self):
+		"""A picture of a form is not a filing status."""
+		data = self.hire(documents={"w4": {"file_name": "w4.pdf", "file_content": A_PDF}})
+		self.assertIsNone(data["w4_form"])
+		self.assertIn("w4_form", data["incomplete"])
+		self.assertEqual(len(data["documents"]), 1)
+
+	def test_the_scan_and_the_elections_are_both_kept(self):
+		data = self.hire(
+			w4=self.W4, documents={"w4": {"file_name": "w4.pdf", "file_content": A_PDF}}
+		)
+		self.assertTrue(data["w4_form"])
+		self.assertEqual([entry["kind"] for entry in data["documents"]], ["w4"])
+
+	# ── the bed ────────────────────────────────────────────────────────────
+	def test_naming_a_unit_puts_them_in_it(self):
+		"""`housing_unit` used to point the orientation task at a cabin and put
+		nobody in it — an argument named after a bed that assigned no bed."""
+		unit = self.a_cabin()
+		data = self.hire(housing_unit=unit, date_of_joining="2026-06-01")
+		self.assertTrue(data["housing"])
+		rows = [row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit]
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(str(rows[0].get("assigned_date"))[:10], "2026-06-01")
+
+	def test_the_assignment_starts_on_the_hire_date_not_on_the_onboarding_day(self):
+		"""Somebody hired on Monday and onboarded on Wednesday slept somewhere on
+		Monday night, and an assignment starting Wednesday says the camp had a bed
+		empty that it did not."""
+		unit = self.a_cabin()
+		self.hire(housing_unit=unit, date_of_joining="2026-05-04")
+		row = [row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit][0]
+		self.assertEqual(str(row.get("assigned_date"))[:10], "2026-05-04")
+
+	def test_an_explicit_housing_date_wins(self):
+		unit = self.a_cabin()
+		self.hire(housing_unit=unit, date_of_joining="2026-05-04", housing_assigned_date="2026-05-20")
+		row = [row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit][0]
+		self.assertEqual(str(row.get("assigned_date"))[:10], "2026-05-20")
+
+	def test_a_housing_refusal_is_reported_and_does_not_undo_the_hire(self):
+		"""The delegation is the point: create_housing_assignment owns the
+		refusal, and an onboarding must not lose the Employee over a full cabin."""
+		data = self.hire(housing_unit="MC-Cabin-NOT-A-THING")
+		self.assertTrue(data["employee"])
+		self.assertIsNone(data["housing"])
+		self.assertIn("housing", data["incomplete"])
+
+	def test_no_unit_named_assigns_nobody_and_reports_nothing(self):
+		data = self.hire()
+		self.assertIsNone(data["housing"])
+		self.assertNotIn("housing", data["incomplete"])
+
+	# ── the crew ───────────────────────────────────────────────────────────
+	def test_naming_an_open_shift_rosters_them_onto_it(self):
+		shift = self.an_open_shift()
+		data = self.hire(shift=shift)
+		self.assertIsNotNone(data["crew"])
+		self.assertEqual(data["crew"]["shift"], shift)
+		doc = frappe.get_doc("Farm Shift", shift)
+		self.assertIn(data["employee"], [str(row.get("employee")) for row in doc.crew])
+
+	def test_a_crew_refusal_is_reported_and_does_not_undo_the_hire(self):
+		data = self.hire(shift="SHIFT-NOT-A-THING")
+		self.assertTrue(data["employee"])
+		self.assertIsNone(data["crew"])
+		self.assertIn("crew", data["incomplete"])
+
+	# ── all of it at once ──────────────────────────────────────────────────
+	def test_one_call_does_hire_department_housing_crew_and_w4(self):
+		"""The whole point of the item: five calls collapsed into one pass, with
+		every step named in the report."""
+		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest"}])
+		unit = self.a_cabin()
+		shift = self.an_open_shift()
+		data = self.hire(
+			email="ana.ramos@example.com",
+			department="Harvest - ETC",
+			designation="Picker",
+			date_of_joining="2026-06-01",
+			housing_unit=unit,
+			shift=shift,
+			w4=self.W4,
+		)
+		self.assertTrue(data["employee"])
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "department"), "Harvest - ETC")
+		self.assertTrue(data["w4_form"])
+		self.assertTrue(data["housing"])
+		self.assertIsNotNone(data["crew"])
+		self.assertEqual(data["incomplete"], [])
+		done = {entry["step"] for entry in data["steps"]}
+		for step in ("employee", "w4_form", "housing", "crew"):
+			self.assertIn(step, done)
 
 
 # ── 1 ───────────────────────────────────────────────────────────────────────

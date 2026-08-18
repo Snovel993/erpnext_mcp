@@ -11319,10 +11319,21 @@ TOOLS = {
 	"onboard_employee": _tool(
 		newhire.onboard_employee,
 		"MUTATING (default OFF). One call for a new hire, in the only order that "
-		"works: the Employee record, their paperwork filed privately ON THAT "
-		"RECORD, a scoped login with a credential, THE LINK BETWEEN THE TWO, "
-		"optionally the login QR, and optionally the two first-day tasks nobody "
-		"skips.\n\n"
+		"works: the Employee record with their department and employment type, a "
+		"structured I-9, THEIR W-4 ELECTIONS, their paperwork filed privately ON "
+		"THAT RECORD, THEIR BED, a scoped login with a credential, THE LINK "
+		"BETWEEN THE TWO, optionally the login QR, THEIR CREW, and optionally the "
+		"two first-day tasks nobody skips.\n\n"
+		"v0.93.0 CLOSED THE THREE STEPS THAT WERE STILL SOMEBODY'S NEXT FOUR "
+		"CALLS. The W-4 could previously arrive only as a SCANNED PAGE under "
+		"documents['w4'] — a picture of a form, which nothing computes from — "
+		"while the I-9 had been structured since v0.27.0. A farm that onboarded "
+		"forty pickers here and attached forty scans still had forty people in "
+		"list_employees_missing_w4, and the first payroll run withheld at the "
+		"default for every one of them. `housing_unit` pointed the orientation "
+		"task at a cabin and put nobody in it. And a crew row was a separate call "
+		"to add_worker_to_shift. All three now run here, each DELEGATING to the "
+		"tool that owns the rule.\n\n"
 		"v0.18.1 ADDED THE LINK STEP AND FIXED THE ORDER. Until then this created "
 		"the Employee with `user_id` already filled in and THEN created the User — "
 		"and `Employee.user_id` is a Link, so Frappe refused the very first step of "
@@ -11347,10 +11358,16 @@ TOOLS = {
 		"in the payroll register once, and is far easier to make than to find.\n\n"
 		"IT STOPS AT THE FIRST REAL REFUSAL AND REPORTS WHAT IT ALREADY DID, step "
 		"by step. Re-running is safe: each underlying tool is idempotent about the "
-		"thing it owns. The first-day tasks are the one step allowed to fail "
-		"quietly — a training task that could not be raised must not undo an "
-		"onboarding that worked, so it lands in `skipped` for somebody to raise by "
-		"hand.\n\n"
+		"thing it owns. The steps that may fail without undoing the rest — the "
+		"first-day tasks, the W-4, the bed and the crew row — land in `skipped` "
+		"with the reason, and their names are collected into `incomplete`. A "
+		"training task that could not be raised must not undo an onboarding that "
+		"worked; nor must a cabin that turned out to be full. `next_step` names "
+		"the enrolment step still outstanding, and a "
+		"missing W-4 gets its own APPENDED sentence rather than displacing the "
+		"enrolment step already there — two different kinds of gap, and this "
+		"field has meant 'the next step towards a working phone' since the tool "
+		"shipped.\n\n"
 		"THE PLAINTEXT CREDENTIAL IS NOT REPEATED IN THIS RESULT. create_mobile_user "
 		"returns a secret exactly once; echoing it into an orchestrator's summary "
 		"would put a live credential in a second, much more pasteable place. "
@@ -11410,9 +11427,41 @@ TOOLS = {
 			"phone": _field(_STRING, "A mobile number for the Employee record."),
 			"housing_unit": _field(
 				_STRING,
-				"The Housing Unit they are moving into. Used to point the camp-orientation "
-				"task at the right cabin.",
+				"The Housing Unit they are moving into. v0.93.0 CREATES THE ASSIGNMENT as well "
+				"as pointing the camp-orientation task at the right cabin — it used to do only "
+				"the second, which made an argument named after a bed not put anybody in one. "
+				"Delegates to create_housing_assignment, so the overlap refusal and Oregon's "
+				"lawful-occupancy check are the same code.",
 			),
+			"housing_assigned_date": _field(
+				_STRING,
+				"YYYY-MM-DD. Defaults to date_of_joining, NOT to today: somebody hired on Monday "
+				"and onboarded on Wednesday slept somewhere on Monday night, and an assignment "
+				"starting Wednesday says the camp had a bed empty that it did not.",
+			),
+			"housing_deduction_from_wages": _field(
+				_STRING, "Yes or No, as create_housing_assignment records it."
+			),
+			"housing_notes": _field(_STRING, "Notes for the assignment row."),
+			"w4": _field(
+				{"type": "object"},
+				"The withholding ELECTIONS, filed as a W-4 Form: filing_status (required), "
+				"multiple_jobs, dependents_under_17_count, other_dependents_count, other_income, "
+				"deductions, extra_withholding_per_period, tax_year (defaults to the hire "
+				"date's year). NOT the same thing as documents['w4'], which is the signed page — "
+				"the page is what an examiner asks to see and these are what the payroll engine "
+				"computes from. Omitting this is REPORTED in `skipped`, because a hire with no "
+				"elections is withheld at the default and finds out in April.",
+			),
+			"shift": _field(
+				_STRING,
+				"A Farm Shift that is already open, to roster them onto. Delegates to "
+				"add_worker_to_shift, which refuses a second open shift for the same person — a "
+				"check no code here could make, since a worker on another crew is invisible from "
+				"this one.",
+			),
+			"crew_role": _field(_STRING, "Their role on that crew. Default Worker."),
+			"crew_joined_at": _field(_STRING, "When they joined the crew. Defaults to now."),
 			"first_day_tasks": _field(
 				_BOOLEAN,
 				"Raise safety training and camp orientation as Farm Tasks. Default false. Both "

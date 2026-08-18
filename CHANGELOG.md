@@ -268,6 +268,51 @@ timestamp and `source` so an hour-old reading cannot be read as a live one.
 outbound request on the path of a screen somebody leaves open would be the wrong
 trade.
 
+### Hire → department → housing → crew → W-4, in one pass
+
+`onboard_employee` already chained the Employee record, a structured I-9, the
+private paperwork, the scoped login, the link between the two and the first-day
+tasks. Three steps were still somebody's next four calls, and the one that got
+missed was never the same one twice.
+
+**The W-4 was the one that mattered most and was the least visible.** It could
+arrive here only as a SCANNED PAGE under `documents["w4"]` — a picture of a form,
+which nothing computes from — while the I-9 had been structured since v0.27.0. A
+farm that onboarded forty pickers through this tool and attached forty scans
+still had forty people in `list_employees_missing_w4`, and the first payroll run
+withheld at the default for every one of them. `w4` now files the ELECTIONS as a
+W-4 Form through `submit_w4`. The scan and the elections are different facts and
+both are kept: the page is what an examiner asks to see, the record is what the
+engine computes from. The tax year defaults from the HIRE DATE rather than from
+today — somebody onboarded in December against a January start files for the year
+they will be paid in, and a W-4 under the wrong year is invisible to the engine
+that looks it up by year.
+
+**`housing_unit` pointed the orientation task at a cabin and put nobody in it** —
+an argument named after a bed that assigned no bed. It now creates the assignment
+through `create_housing_assignment`, so the overlap refusal and Oregon's lawful
+occupancy are the same code rather than a second implementation. The date
+defaults to `date_of_joining`, not today: somebody hired on Monday and onboarded
+on Wednesday slept somewhere on Monday night, and an assignment starting
+Wednesday says the camp had a bed empty that it did not.
+
+**`shift` rosters them onto an open crew** through `add_worker_to_shift`, which
+refuses a second open shift for the same person — a check no code here could
+make, since a worker on another crew is invisible from this one's rows. It runs
+LAST, after the login: everything before it is paperwork that can be finished at
+a desk, and a crew row says somebody is working right now.
+
+**Every one of the three delegates**, which is the only way the rules stay true
+here as well as there — and each may fail without undoing the rest. A cabin that
+turned out to be full lands in `skipped` with the reason and its name in the new
+`incomplete` list, beside the Employee that was still created.
+
+**`next_step` gained the W-4 as an APPENDED sentence, not a replacement.** That
+field has meant "the next step towards a working phone" since the tool shipped
+and callers parse it that way; a missing W-4 is a different kind of gap — it
+produces a wrong NUMBER rather than a missing capability — so it gets its own
+sentence instead of silently displacing the one already there.
+
 ## 0.92.2 — 2026-08-17 — three things the handset found
 
 iOS integration testing against v0.92.1 returned three server-side faults. All
