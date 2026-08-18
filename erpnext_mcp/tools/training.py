@@ -820,9 +820,21 @@ def sign_training_supervisor_review(args: dict) -> ToolResult:
 	sequence, not a form field. A single call that took both signatures would make
 	it trivial to record both at the same instant, and simultaneous signatures are
 	the shape of a record an inspector reads as assembled rather than kept.
+
+	v0.94.0: `require_shift_role`, NOT `require_hr_role`. §112.161(b) asks for "a
+	supervisor or responsible party", and the supervisor it means is the one who
+	was standing there — so the gate that decides who may sign as one should be
+	the gate that names supervisors. The second-pair-of-eyes rule is enforced
+	below and is not a role check: this call still refuses a review signed by the
+	person the record says was trained, whoever they are.
+
+	`record_training` IN THIS SAME MODULE KEEPS `require_hr_role` and that is
+	deliberate — it writes a training card onto a personnel file with no session
+	and no attendee signature behind it, which is the register rather than the
+	tailgate.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_record(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 

@@ -140,7 +140,16 @@ FIRST_DAY_TASKS = (
 
 
 def onboard_employee(args: dict) -> ToolResult:
-	"""Create a new hire end to end: record, paperwork, mobile access, first tasks."""
+	"""Create a new hire end to end: record, paperwork, mobile access, first tasks.
+
+	v0.94.0: IT NOW CARRIES A GATE, AND IT HAD NONE. This is the one-call version
+	of `create_employee` + `create_i9_form` + `submit_w4` + housing + crew + login,
+	and every one of those carries `require_hiring_role` individually — so the
+	chained form was the widest door in the hiring surface precisely because it
+	did the most. `require_hiring_role` rather than `require_hr_role` because the
+	whole point of this release is that the foreman runs a hire; the point of the
+	gate is that the shortcut is not wider than the long way round.
+	"""
 	if not hr_installed():
 		raise ToolError(
 			"this site has no Employee register, so there is nobody to onboard. Frappe HR ships "
@@ -155,7 +164,10 @@ def onboard_employee(args: dict) -> ToolResult:
 			"the same person, and a record carrying one word names nobody findable. Nothing was "
 			"created."
 		)
-	company = resolve_company(as_str(args, "company"), required=True)
+	actor = employee_tool.require_hiring_role()
+	company = employee_tool.require_company_scope(
+		actor, resolve_company(as_str(args, "company"), required=True)
+	)
 	email = as_str(args, "email").strip().lower()
 
 	report = {

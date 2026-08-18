@@ -572,9 +572,18 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	gets THAT badge's QR back rather than a second identifier. `regenerate=true`
 	is the lost-card path: it mints a new ID and RETIRES the old one in the same
 	call, because a replacement that leaves its predecessor resolving is how a
-	found badge keeps earning."""
+	found badge keeps earning.
+
+	v0.94.0: `require_hiring_role`, NOT `require_hr_role`. A badge is an
+	IDENTIFIER, not PII — it carries a name and a designation, both of which are
+	already on the front of the worker's shirt — and issuing one is step 9 of a
+	hire, between the bunk and the crew. The person who has just filled in the
+	I-9 is the person who should hand over the card, and a gate that sent them
+	looking for an HR account meant a worker who was hired, housed and rostered
+	could not scan into the day's work. `link_badge_to_employee`, `resolve_badge`
+	and `get_employee_badge_pass` were already scope-only and are unchanged."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_hiring_role()
 
 	row = _employee_row(as_str(args, "employee", required=True))
 	company = resolve_company(as_str(args, "company") or str(row.get("company") or ""), required=True)
@@ -660,9 +669,13 @@ def generate_employee_badge_sheet(args: dict) -> ToolResult:
 	nobody, somebody who has left, an entity this actor cannot reach — each is
 	reported by name in `errors` and the other twenty-nine cards are still
 	printed, the same posture `sync_bucket_entries` takes for a batch. A hiring
-	day with one bad row in the list should not be a hiring day with no badges."""
+	day with one bad row in the list should not be a hiring day with no badges.
+
+	v0.94.0: `require_hiring_role`, for the reason above and one more that is
+	specific to the sheet — twelve badges printed at a shed door IS the foreman's
+	morning, and it is the case this tool was written for."""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_hiring_role()
 
 	names = args.get("employees") or args.get("employee_names")
 	if isinstance(names, str):

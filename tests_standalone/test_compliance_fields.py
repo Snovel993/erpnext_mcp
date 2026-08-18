@@ -299,9 +299,9 @@ class MigrateThreeTimes(V12TestCase):
 		# column either way, which is exactly why none of the nine is `reqd`.
 		self.assertEqual(
 			counts[0],
-			20,
-			"six Employee fields, the Attendance bridge, four Asset capex columns "
-			"and nine Item label columns",
+			21,
+			"six Employee fields, the Attendance bridge, four Asset capex columns, "
+			"nine Item label columns, and the v0.94.0 Company housing-deduction default",
 		)
 		self.assertEqual(counts, [counts[0]] * 3, f"custom fields multiplied across migrations: {counts}")
 

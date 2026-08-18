@@ -868,17 +868,58 @@ class ReadingTheRegister(TrainingSessionTestCase):
 			with self.subTest(tool=tool):
 				self.assertIn("Foreman", self.tool_error(tool, args))
 
-	def test_the_writes_keep_the_personnel_gate(self):
-		"""A completion puts a training card on somebody's own file. That is HR's."""
+	def test_the_supervisor_may_now_run_the_session_and_not_only_read_it(self):
+		"""v0.94.0, and it REVERSES the assertion this test used to make.
+
+		The old claim was that the writes keep the personnel gate because a
+		completion puts a training card on somebody's own file. What that missed
+		is that the card is the OUTPUT of an act OAR 437-004-1131 assigns to the
+		named supervisor: v0.92.2 had left the Foreman able to read the sheet from
+		a session only a desk could have opened, which is strict about the wrong
+		half twice over. The session is now his end to end.
+		"""
 		session = self.a_full_session()
+		for role in ("Foreman", "Crew Leader"):
+			with self.subTest(role=role):
+				set_roles("Administrator", [role])
+				opened = self.tool_data(
+					"create_training_session", {"company": MAIN, "training_type": CURRICULUM}
+				)
+				self.assertTrue(opened["name"])
+				self.tool_data(
+					"add_session_attendee", {"session": opened["name"], "employee": SUPERVISOR}
+				)
 		set_roles("Administrator", ["Foreman"])
+		self.assertTrue(self.tool_data("complete_training_session", {"session": session}))
+
+	def test_a_field_worker_still_may_not_run_one(self):
+		"""RELAXED IS NOT OPEN, on the writes as well as the reads. A tailgate
+		session names a crew and puts a card on each of their files; a picker is
+		on neither `HR_ROLES` nor `SHIFT_ROLES` and is refused by both."""
+		session = self.a_full_session()
+		set_roles("Administrator", ["Field Worker"])
 		for tool, args in (
 			("create_training_session", {"company": MAIN, "training_type": CURRICULUM}),
 			("add_session_attendee", {"session": session, "employee": SUPERVISOR}),
 			("complete_training_session", {"session": session}),
 		):
 			with self.subTest(tool=tool):
-				self.assertIn("HR Manager", self.tool_error(tool, args))
+				self.assertIn("Foreman", self.tool_error(tool, args))
+
+	def test_the_register_write_outside_a_session_is_still_HRs(self):
+		"""THE BOUNDARY THIS RELEASE DID NOT CROSS, and the negative control for
+		the widening above. `record_training` writes a training card with no
+		session and no attendee signature behind it — nothing in it happened in
+		front of the person calling it — so it keeps `require_hr_role` while every
+		session call moved."""
+		set_roles("Administrator", ["Foreman"])
+		self.assertIn(
+			"HR Manager",
+			self.tool_error(
+				"record_training",
+				{"employee": TRAINEE, "training_type": CURRICULUM, "completion_date": days_out(-1)},
+			),
+		)
 
 
 # ── 9 ───────────────────────────────────────────────────────────────────────

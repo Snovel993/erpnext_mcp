@@ -10,6 +10,10 @@
  "field_order": [
   "employee",
   "employee_name",
+  "reported_by",
+  "report_direction",
+  "resolution_state",
+  "resolution_summary",
   "discipline_type",
   "status",
   "identity_col",
@@ -66,15 +70,53 @@
    "label": "Employee Name"
   },
   {
-   "description": "Where in the chain this step sits. The order is the escalation and it is not a preference: skipping straight to a Final Warning for a first offence is exactly what a claim argues was arbitrary, and the tool refuses a jump unless somebody states a reason for it.",
+   "description": "Who OPENED this record, which is a different fact from `employee` — the person it is about. On a Supervisor Report these differ; on a Worker Report reporting themselves they may coincide. Resolved server-side from the calling account and never read from the request body, so a report cannot be attributed to somebody who did not make it.",
+   "fieldname": "reported_by",
+   "fieldtype": "Link",
+   "label": "Reported By",
+   "options": "Employee",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Supervisor Report",
+   "description": "WHICH DIRECTION THIS RECORD RUNS. The farm documenting a worker (Supervisor Report) and a worker raising a grievance or dispute (Worker Report) are one incident-reporting and resolution protocol with two directions, held in one table rather than two — the record already carried both voices (`employee_statement` beside `manager_signature`); what it could not express was the worker being the one who OPENS it.\n\nTHE PROGRESSIVE-DISCIPLINE CHAIN IS SUPERVISOR-DIRECTION ONLY, and that is not a nicety. Every chain read filters on this field, because three grievances a worker filed must never appear as steps 1-3 of an escalation against them in the document an HR manager hands a lawyer.",
+   "fieldname": "report_direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Direction",
+   "options": "Supervisor Report\nWorker Report",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "Reported",
+   "description": "The shared resolution machine, and a SECOND lifecycle beside `status` rather than an extension of it. `status` is Active/Expired/Rescinded and every chain read filters on status==Active by default, so folding resolution values into that Select would silently change what every existing chain read returns. Two fields, two lifecycles, no migration risk.",
+   "fieldname": "resolution_state",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Resolution State",
+   "options": "Reported\nAcknowledged\nUnder Review\nResolved",
+   "search_index": 1
+  },
+  {
+   "depends_on": "eval:doc.resolution_state==\"Resolved\"||doc.resolution_state==\"Under Review\"",
+   "description": "What was decided, for EITHER direction. A grievance the farm never resolved is the same evidentiary hole as a warning the worker never signed.",
+   "fieldname": "resolution_summary",
+   "fieldtype": "Text",
+   "label": "Resolution Summary"
+  },
+  {
+   "description": "Where in the chain this step sits, on a SUPERVISOR REPORT. The order is the escalation and it is not a preference: skipping straight to a Final Warning for a first offence is exactly what a claim argues was arbitrary, and the tool refuses a jump unless somebody states a reason for it. OPTIONAL SINCE v0.94.0, because a worker-initiated report has no warning level — discipline is an OUTCOME of the protocol rather than its container.",
    "fieldname": "discipline_type",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Type",
    "options": "Verbal Warning\nWritten Warning\nFinal Warning\nSuspension\nTermination",
-   "reqd": 1,
-   "search_index": 1
+   "search_index": 1,
+   "depends_on": "eval:doc.report_direction!=\"Worker Report\""
   },
   {
    "default": "Active",
@@ -136,7 +178,7 @@
    "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Prior Record",
-   "options": "Discipline Record",
+   "options": "Farm Incident Record",
    "search_index": 1
   },
   {
@@ -302,7 +344,7 @@
  "modified": "2026-08-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
- "name": "Discipline Record",
+ "name": "Farm Incident Record",
  "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [

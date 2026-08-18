@@ -15,6 +15,7 @@
   "business_ein",
   "signers_section",
   "authorized_signers",
+  "fail_closed_without_roster",
   "reminders_section",
   "reminder_days_before_doc_expiration",
   "reminder_days_before_destruction"
@@ -77,6 +78,14 @@
    "fieldtype": "Table",
    "label": "Authorized Signers",
    "options": "Authorized Signer"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.authorized_signers && doc.authorized_signers.length",
+   "description": "OFF, AND IT MUST SHIP OFF. With the roster EMPTY this site is unrestricted — submit_i9_section_2 accepts whatever verifier_name it is given — and that is deliberate, because a version that started refusing signatures on migrate would break the I-9 flow on every farm running this app. This switch closes that opening, and turning it on BEFORE the roster has rows would refuse every Section 2 on the farm. The order is: add the authorized signers (add_authorized_signer), confirm list_authorized_signers reports configured=true, THEN switch this on. Once on, an unconfigured roster is a refusal that names add_authorized_signer instead of a silent acceptance of any name the caller typed.",
+   "fieldname": "fail_closed_without_roster",
+   "fieldtype": "Check",
+   "label": "Refuse Employer Signatures When No Roster Is Configured"
   },
   {
    "fieldname": "reminders_section",

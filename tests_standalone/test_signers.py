@@ -20,7 +20,7 @@ import frappe
 
 from erpnext_mcp.tools import signers
 
-from .harness import STORE
+from .harness import STORE, set_roles
 from .test_i9 import I9TestCase
 
 #: The four tools this file is about.
@@ -60,6 +60,18 @@ class SignerTestCase(I9TestCase):
 				{"name": PICKER, "enabled": 1, "full_name": "Pat Picker"},
 			],
 		)
+		# v0.94.0. THE TWO SIGNERS HOLD A HIRING ROLE AND THE PICKER DOES NOT, and
+		# that split is the fixture's whole subject rather than housekeeping.
+		# `create_i9_form` and `submit_i9_section_1` now take `require_hiring_role`
+		# (F2a), so raising the form these tests then sign needs one — while the
+		# ROSTER is a per-person designation that no role grants and none
+		# substitutes for. Keeping the two facts separate here is what lets the
+		# tests below prove they are separate: Ana can raise a form because of her
+		# role and may sign Section 2 because of the roster, and losing either one
+		# stops her at a different step with a different sentence.
+		for account in (ANA, LUIS):
+			set_roles(account, ["Foreman"])
+		set_roles(PICKER, ["Field Worker"])
 		self.addCleanup(self._restore_session, frappe.session.user)
 
 	def _i9_switches(self) -> dict:
@@ -156,9 +168,21 @@ class TheFirstRowIsTheSwitch(SignerTestCase):
 		self.assertNotIn("note", data)
 
 	def test_an_account_not_on_the_roster_can_no_longer_sign(self):
+		"""THE FORM IS RAISED BY SOMEBODY WHO MAY RAISE ONE, and only the
+		SIGNATURE is attempted by the account off the roster.
+
+		v0.94.0 made that separation necessary and it makes the test sharper. The
+		picker holds no hiring role, so raising the I-9 as the picker would now
+		fail at `create_i9_form` — and this test would then be passing on the
+		wrong refusal, proving the hiring gate while claiming to prove the roster.
+		Ana raises the form because of her ROLE; the picker is refused at Section
+		2 because of the ROSTER, which is a designation on a person that no role
+		grants.
+		"""
 		self.add()
-		self.as_user(PICKER)
+		self.as_user(ANA)
 		self._section_1()
+		self.as_user(PICKER)
 		message = self.tool_error(
 			"submit_i9_section_2",
 			{
@@ -400,3 +424,75 @@ def _today():
 	from datetime import date
 
 	return date.today()
+
+
+# ── 9 ─────────────────────────────────────────────────────────────────────────
+class TheFailClosedSwitchAndWhyItShipsOff(SignerTestCase):
+	"""v0.94.0, F2b. The empty roster authorises everybody; this closes that.
+
+	AND IT SHIPS OFF, WHICH IS THE MOST IMPORTANT ASSERTION IN THIS CLASS. The
+	live Orchard Meadow bench reports `configured: false, count: 0` — the roster
+	is empty — so a release that turned this on by default would refuse every I-9
+	Section 2 on the farm the moment it deployed. The sequence is: populate the
+	roster, confirm `list_authorized_signers` says configured, THEN switch this
+	on. `test_it_is_off_by_default` is what stops a later edit reversing that.
+	"""
+
+	def _fail_closed(self, on=True):
+		STORE.singles.setdefault("I-9 Settings", {"doctype": "I-9 Settings"})[
+			"fail_closed_without_roster"
+		] = 1 if on else 0
+
+	def test_it_is_off_by_default_and_an_empty_roster_still_signs(self):
+		"""THE DEPLOY-SAFETY ASSERTION. Nothing about this release changes what an
+		unconfigured site does — which is what makes it safe to ship before the
+		operator has done the data entry."""
+		self.as_user(ANA)
+		self._section_1()
+		data = self._section_2(verifier_name="Ana Ramos")
+		self.assertTrue(data)
+		self.assertFalse(
+			frappe.db.get_single_value("I-9 Settings", "fail_closed_without_roster"),
+			"fail_closed_without_roster must ship OFF: the roster on the live bench is "
+			"empty, and defaulting this on would refuse every Section 2 on the farm.",
+		)
+
+	def test_switched_on_with_no_roster_it_refuses_and_names_the_fix(self):
+		"""The refusal names `add_authorized_signer` rather than a role, because
+		no role is the answer: who may attest for the employer is a designation on
+		a PERSON under §1324a, and 'find somebody from HR' is not available on a
+		farm with no HR."""
+		self.as_user(ANA)
+		self._section_1()
+		self._fail_closed()
+		message = self.tool_error(
+			"submit_i9_section_2",
+			{
+				"employee": "HR-EMP-00001",
+				"document_path": "List A",
+				"list_a_doc_title": "U.S. Passport",
+				"verifier_name": "Ana Ramos",
+				"verification_date": str(_today()),
+			},
+		)
+		self.assertIn("add_authorized_signer", message)
+		self.assertIn("Nothing was signed", message)
+
+	def test_and_once_the_roster_has_rows_the_switch_changes_nothing(self):
+		"""THE POINT OF THE SEQUENCING, asserted. With signers configured this
+		flag is inert — the roster was already doing the work. It only governs the
+		unconfigured branch, which is the only branch that was open."""
+		self.add()
+		self._fail_closed()
+		self.as_user(ANA)
+		self._section_1()
+		self.assertTrue(self._section_2(verifier_name="Ana Ramos"))
+
+	def test_it_does_not_touch_the_workers_own_boxes(self):
+		"""§274a KEEPS THESE APART AND SO DOES THIS. Section 1 is the worker's own
+		attestation and is on nobody's roster — a switch about EMPLOYER signatures
+		that closed the employee's would be the exact conflation
+		`signatures._require_signer` refuses at length."""
+		self._fail_closed()
+		self.as_user(ANA)
+		self.assertTrue(self._section_1())

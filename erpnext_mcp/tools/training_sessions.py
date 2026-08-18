@@ -56,15 +56,31 @@ personnel record, it names workers, it is read in a wage claim, and creating one
 for an entity you cannot see would put a crew's qualification history on a
 register you cannot read.
 
-THE TWO READS TAKE `require_shift_role` INSTEAD, SINCE v0.92.2, AND THE SPLIT IS
-THE POINT. Writing is a personnel change — a completion puts a training card on
-each attendee's own file — so `create_training_session`, `add_session_attendee`,
-`sign_session_attendance` and `complete_training_session` keep the personnel
-gate. Reading a sheet back is the supervisor's own work: `SHIFT_ROLES` adds
-Foreman and Crew Leader for a crew shift on the argument that the obligation sits
-on the named supervisor, and a tailgate session is that same afternoon. A gate
-that let somebody hold the briefing and not look at the sheet afterwards was
-strict about the wrong half.
+THE WHOLE SESSION IS `require_shift_role` SINCE v0.94.0, AND THE SPLIT IS GONE
+BECAUSE IT WAS NEVER A REAL ONE. v0.92.2 widened the two READS on the argument
+that a Foreman holds the tailgate and could not open the sheet from it — and
+then left him unable to OPEN the session, add the crew to it, take their
+signatures or complete it. So the fix reached the last beat of the act and none
+of the ones before it: the supervisor could read the sheet from a session only
+somebody at a desk could have run.
+
+OAR 437-004-1131 PUTS THE OBLIGATION ON THE NAMED SUPERVISOR, which is the same
+sentence `employee.SHIFT_ROLES` is built on and the same one that gives the
+Foreman the crew shift. A heat-illness briefing at the row end is that person's
+statutory duty, and a gate that made them fetch an HR account — on a farm that
+has no HR account — was a gate that produced the briefing without the record.
+
+AND THE RECORD IS BETTER FOR IT, WHICH IS THE PART WORTH SAYING PLAINLY. The
+session captures `actor` on every call, every attendee signs individually, and
+`render_training_sign_in_sheet` builds the auditor's page out of those
+signatures. A session run at the tailgate is EVIDENCED WHERE THE WORK HAPPENED
+rather than reconstructed from memory on Sunday, so widening this gate does not
+trade compliance for convenience — it buys better evidence with both.
+
+`record_training` IN THE SIBLING MODULE KEEPS `require_hr_role`, and that is the
+boundary this release does not cross: it writes a training card outside any
+session, with no attendee signature behind it, straight onto somebody's personnel
+file. Nothing in it happened in front of the person who called it.
 """
 
 from __future__ import annotations
@@ -477,7 +493,7 @@ def create_training_session(args: dict) -> ToolResult:
 	compliance matrix. `complete_training_session` is the only call that does.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	curriculum = _resolve_type(as_str(args, "training_type", required=True))
 	company = resolve_company(as_str(args, "company"), required=True)
 	employee_tool.require_company_scope(actor, company)
@@ -633,7 +649,7 @@ def add_session_attendee(args: dict) -> ToolResult:
 	coordinates is a training that happened and was not recorded.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _open_session(args, actor, "adding an attendee")
 	company = str(row.get("company") or "")
 
@@ -786,7 +802,7 @@ def sign_session_attendance(args: dict) -> ToolResult:
 	minute.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _open_session(args, actor, "signing")
 
 	inner = dict(args)
@@ -937,7 +953,7 @@ def render_training_sign_in_sheet(args: dict) -> ToolResult:
 	"""
 	_require()
 	training_sheet_pdf.require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_session(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
@@ -1051,7 +1067,7 @@ def complete_training_session(args: dict) -> ToolResult:
 	is skipped.
 	"""
 	_require()
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_shift_role()
 	row = _resolve_session(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 	status = training_sessions.canon_status(row.get("status")) or training_sessions.STATUS_SCHEDULED
@@ -1246,12 +1262,12 @@ def get_training_session(args: dict) -> ToolResult:
 	exists for exactly this shape of act — `employee.py` argues it at length for a
 	crew shift, and a heat-illness briefing at the row end is the same afternoon.
 
-	IT IS A READ, AND THE WRITES ARE UNCHANGED. `create_training_session`,
-	`add_session_attendee`, `sign_session_attendance` and
-	`complete_training_session` all keep `require_hr_role`: completing a session
-	WRITES A TRAINING RECORD onto each attendee's personnel file, which is a
-	personnel change and belongs behind the personnel gate. So this widens who may
-	READ a sheet, not who may put a card on somebody's record.
+	AND SINCE v0.94.0 THE WRITES ARE ON THE SAME GATE. This docstring used to say
+	the reverse — that `create_training_session`, `add_session_attendee`,
+	`sign_session_attendance` and `complete_training_session` "all keep
+	`require_hr_role`" — and that split left the supervisor able to read the sheet
+	from a session only a desk could have run. The obligation OAR 437-004-1131
+	names is the whole act, not its last beat.
 
 	NOTHING ON THE SHEET IS BEHIND THE PERSONNEL GATE FOR ITS OWN SAKE. Attendee
 	names, who signed, the curriculum and what is outstanding — no wage, no

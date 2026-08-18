@@ -3,6 +3,169 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.94.0 — 2026-08-18 — the back office in the field
+
+The access-control remediation. This release **moves** a boundary rather than
+tightening or loosening one: wide where a supervisor does the work and the
+record proves itself, per-person where somebody attests under penalty of
+perjury, hard where the data is another person's PII.
+
+### The farm has no HR department, and the gates were sending people to one
+
+`HR_ROLES` is `("System Manager", "HR Manager", "HR User", "Farm Manager")`, and
+**Farm Manager is already in it.** On a farm with no HR staff, "HR-gated" never
+meant "call a department" — it meant "the farmer does it." That is what makes
+this release coherent: the widenings cost nothing in protection, and the one
+tightening costs nothing in convenience.
+
+Traced end to end, a Foreman could not complete a hire. He was refused at
+**six** separate steps — create the worker, collect the signature, attach the
+documents, assign a bunk, issue a badge, run the training — and *permitted* at
+the four steps carrying federal attestations. The gating was inverted against
+both the audit's concern and the goal, in the same flow.
+
+### Register 1 — field work with a compliance record — widened
+
+| Call | Was | Is |
+|---|---|---|
+| `create_employee`, `reactivate_employee`, `onboard_employee`, `attach_onboarding_document` | HR (or nothing) | `HIRING_ROLES` |
+| `collect_signature`, `submit_form_signature`, `get_document_preview`, `seal_signed_document` | HR | `HIRING_ROLES` |
+| `create_housing_assignment` / `assign_housing`, `list_available_housing(employee=…)` | HR | `HIRING_ROLES` |
+| `generate_employee_badge_qr`, `generate_employee_badge_sheet`, `link_badge_to_employee` | HR | `HIRING_ROLES` |
+| the six training-session calls, `sign_training_supervisor_review` | HR | `SHIFT_ROLES` |
+| `create_i9_form`, `submit_i9_section_1`, `submit_w4` | **nothing** | `HIRING_ROLES` |
+| `create_discipline_record` | HR | `SHIFT_ROLES` |
+| Crew Leader reaching the field API at all | **no door** | `FARM_OPS_ROLES` |
+
+`HIRING_ROLES` is a new name in `tools/employee.py`, equal to `SHIFT_ROLES` by
+policy rather than by definition, so a later decision to let a Crew Leader run a
+shift but not hire has exactly one line to change.
+
+**Three of those rows are restrictions, not widenings.** `create_i9_form`,
+`submit_i9_section_1` and `submit_w4` had no role gate at all — any enrolled
+picker could raise a federal hiring form naming any coworker. `onboard_employee`,
+the one-call version of the whole flow, had none either.
+
+**Crew Leader had no door.** `desk_access=0` closed the Desk, and the name was
+absent from `guard.FARM_OPS_ROLES`, the enrolment gate every field method runs
+first — so `SHIFT_ROLES` listing it since v0.19.3, `roles.py` granting it the
+Farm Shift, and `create_mobile_user` enrolling it were all unreachable.
+`EveryPhoneOnlyRoleHasADoor` now holds that invariant, with Compliance Officer
+as its negative control.
+
+### Register 2 — attestation under penalty of perjury — unchanged in scope, closed at the edge
+
+Who may complete I-9 Section 2 stays the **authorized-signer roster**: a
+designation on a *person*, which USCIS permits an employer to make and which no
+role substitutes for. Two changes:
+
+- `reverify_i9` now runs `signers.resolve_signature(required=True)`. Section 3 is
+  an employer attestation and carried **no signer check at all** — any string
+  could be stored as the person who made it.
+- A new `fail_closed_without_roster` switch on I-9 Settings closes the
+  empty-roster branch, which authorises everybody.
+
+**The switch ships OFF and must stay off until the roster has rows.** The live
+bench reports `configured: false, count: 0`. Turning this on before populating
+the roster would refuse every Section 2 on the farm. The order is: add the
+signers with `add_authorized_signer`, confirm `list_authorized_signers` reports
+`configured: true`, then switch it on.
+
+### Register 3 — another person's PII — locked, and three false sentences corrected
+
+`list_payroll_deductions`, `get_payroll_deduction` and `list_employee_deductions`
+were **scope-only reads** while the two writes carried the HR gate. Three places
+in this codebase asserted the opposite — `farmops_api/routes.py`,
+`test_api_mobile.py` and the module's own prose all said "all five are HR-only in
+their own bodies." They are now, and the three sentences are corrected in the
+same commit.
+
+The role check runs **before** `require_scoped_doc` and before
+`_employee_argument`, so a refused caller learns nothing about the docname.
+
+### Discipline Record is now Farm Incident Record, and the protocol runs both ways
+
+Documenting what happened is *reporting*, not administration — an argument this
+codebase already contained, forty lines away in the same file, about
+`create_accident_report`: *"the person who finds somebody on the ground is
+whoever finds them."* Discipline was gated the opposite way in the same sprint.
+
+- `create_discipline_record` → `SHIFT_ROLES`.
+- `acknowledge_discipline_record`, `get_discipline_record`,
+  `list_discipline_history` → **self-or-HR**, following `get_i9_form` exactly,
+  with the subject resolved server-side so the exception cannot be claimed by
+  naming somebody. This was the one personnel record with no `get_my_*` peer.
+- `get_discipline_report` and `expire_discipline_record` stay HR. The register
+  across everybody is not somebody reading their own file.
+
+**Four new fields** — `reported_by`, `report_direction`, `resolution_state`,
+`resolution_summary` — make one incident-reporting and resolution protocol out of
+what was half a grievance feature already: `employee_statement` has always sat
+beside `manager_signature` on one page. `discipline_type` becomes optional,
+because discipline is an *outcome* of the protocol rather than its container.
+
+**`resolution_state` is a new field rather than an extension of `status`.**
+`status` is Active/Expired/Rescinded and `chain_for` filters `status == Active`
+by default; widening that Select would have silently changed every existing chain
+read.
+
+**Five reads filter on the direction, and this is the load-bearing part.**
+`chain_for`, `_gaps`, `get_discipline_report`, `list_discipline_history` and the
+`prior_record`/`step_number` assignment. Without them, three grievances a worker
+filed become steps 1–3 of an escalation *against them*, and
+`get_discipline_report` — what an HR manager hands a lawyer — reports the
+worker's own complaints as their disciplinary history.
+
+The direction is filtered **in Python, not in SQL**: every row written before
+this release has a NULL column, and `NULL != 'Worker Report'` is NULL, so a
+server-side filter would have silently hidden the entire existing discipline
+history of every worker on the farm. Empty means Supervisor Report.
+
+**The six tool names are deliberately unchanged.** `settings.tool_enabled`
+derives each switch as `allow_<tool_name>`, and three of the six default to `0` —
+renaming them would have carried the operator's stored values onto dead
+fieldnames and shipped `create_discipline_record` *disabled* at the exact moment
+this release widens it to foremen.
+
+### Housing deduction is the entity's answer, not the foreman's
+
+A housing deduction is a wage deduction. It was a three-way Select a foreman
+answered on every bunk, and this farm charges no rent for labor camp housing at
+all — so it was "No" every time and "Unknown" wherever somebody skipped it, which
+is a disclosure ORS 653 / OAR 839-015 require and nobody made.
+
+A new Company custom field `default_housing_deduction_from_wages` (default `No`)
+supplies it. **The value is written onto each Housing Assignment row at
+creation, never resolved at read time** — `audit_packets` and the camp register
+read the per-assignment column, and a lazily-resolved default would report
+"Unknown" to an auditor for every row created after this shipped. An explicit
+argument still wins.
+
+### The test that carries the release
+
+`tests_standalone/test_foreman_hires.py`: a Foreman principal — holding no HR
+role of any kind — creates the worker, raises the I-9, files Section 1, files
+the W-4, assigns a bunk, issues a badge and opens a tailgate session, **and is
+refused at exactly one step: I-9 Section 2, unless the farm has named them on the
+roster.** It found a gate the plan had missed: `generate_employee_badge_qr` mints
+its identifier through `link_badge_to_employee`, which had its own HR check, so
+F11 stopped one layer down.
+
+Beside it: a foreman-filed I-9 with an unsigned Section 1 still cannot reach
+`Complete`; a picker holding the same phone is refused at step 1; and the foreman
+still cannot read the personnel register or a garnishment.
+
+### Upgrade notes
+
+- **Run `bench migrate`.** `rename_discipline_record` renames the DocType,
+  backfills `report_direction`, and verifies the `prior_record` chain. Every
+  branch reports rather than raising.
+- **Populate the authorized-signer roster** — Farm Manager and each foreman who
+  runs a hiring day — *before* enabling `fail_closed_without_roster`.
+- **Set `default_housing_deduction_from_wages` on each Company.** It defaults to
+  `No` on the field; an existing Company row is not backfilled.
+- A plain Field Worker can no longer raise an I-9 or a W-4. That is intended.
+
 ## 0.93.0 — 2026-08-18 — the registers the packets could not see
 
 ### The spray records an EPA packet said this farm did not keep

@@ -206,6 +206,37 @@ HR_ROLES = ("System Manager", "HR Manager", "HR User", "Farm Manager")
 #: where the app's own iOS client offers a button its server refuses.
 SHIFT_ROLES = HR_ROLES + ("Foreman", "Crew Leader")
 
+#: Who may bring a person onto the farm and complete their first day.
+#:
+#: THERE IS NO PERSONNEL OFFICE ON A FARM THIS SIZE. The foreman IS the back
+#: office — the farmer, the crew, and traditionally somebody doing the hiring
+#: paperwork at a kitchen table on Sunday. A gate that sent the foreman looking
+#: for an HR department would be a gate that stops the hire, and the record that
+#: eventually got typed in on Sunday is worse evidence than the one collected
+#: standing next to the person it is about.
+#:
+#: NOT THE SAME QUESTION AS WHO MAY READ THE PERSONNEL REGISTER, which stays
+#: `HR_ROLES`: `search_employees`, `get_employee` and `update_employee` are
+#: unchanged, because reading or editing an existing personnel record is somebody
+#: else's PII and the reason the role gates exist at all.
+#:
+#: NOT THE SAME QUESTION AS WHO MAY MAKE THE EMPLOYER'S I-9 ATTESTATION either.
+#: That is a per-PERSON designation on the authorized-signer roster (`tools/
+#: signers.py`) and not a role at all — USCIS lets an employer designate an
+#: authorized representative, so the foreman the farm names can lawfully complete
+#: Section 2 and a foreman it has not named cannot, whatever role they hold.
+#:
+#: EQUAL TO `SHIFT_ROLES` BY POLICY, NOT BY DEFINITION, and spelled with its own
+#: name for that reason: the day somebody decides a Crew Leader may run a shift
+#: but not hire, this is the one line that changes and nothing else moves.
+#:
+#: WHAT REPLACES THE GATE IS NOT NOTHING. `create_employee` still refuses a
+#: one-word name; `require_company_scope` still runs immediately afterwards, so a
+#: foreman hires into their own entity and not the holding company's; the I-9
+#: status machine makes an incomplete hire visibly incomplete; and every write
+#: below records the actor. Attribution is what this widening leans on.
+HIRING_ROLES = SHIFT_ROLES
+
 
 def _farm_ops_roles() -> frozenset:
 	"""The roles that make a login worth linking to an Employee.
@@ -459,6 +490,19 @@ def require_shift_role() -> str:
 	a list the personnel register's gate does not have.
 	"""
 	return _require_one_of(SHIFT_ROLES, "a shift record", "form or close a crew shift")
+
+
+def require_hiring_role() -> str:
+	"""The principal this call is attributed to, once it has proved it may hire.
+
+	`require_hr_role` WITH THE TWO SUPERVISOR ROLES AND NOTHING ELSE DIFFERENT —
+	same identity resolution, same refusal shape, same company scope applied by
+	the caller afterwards. See `HIRING_ROLES` for why bringing somebody onto the
+	farm is a different question from reading the register they land in.
+	"""
+	return _require_one_of(
+		HIRING_ROLES, "a hire", "bring a person onto the farm or complete their first day"
+	)
 
 
 def _require_one_of(allowed: tuple, attribution: str, refusal: str) -> str:
@@ -762,7 +806,10 @@ def create_employee(args: dict) -> ToolResult:
 	"""One Employee record, with the site's own schema as the arbiter of every field."""
 	compat.require_doctype(EMPLOYEE, "It comes with the Frappe HR (hrms) app.")
 	_reject_unknown(args, WRITABLE, reserved=("allow_unenrolled_user", "allow_duplicate_name"))
-	actor = require_hr_role()
+	# v0.94.0: `require_hiring_role`, not `require_hr_role`. See `HIRING_ROLES` —
+	# the foreman standing with the new hire is the back office on this farm, and
+	# `require_company_scope` two lines down still holds them to their own entity.
+	actor = require_hiring_role()
 
 	employee_name = as_str(args, "employee_name", required=True)
 	if " " not in employee_name:
@@ -1082,15 +1129,72 @@ def _is_mandatory_error(exc: Exception) -> bool:
 
 # ── 2. update_employee ──────────────────────────────────────────────────────
 def update_employee(args: dict) -> ToolResult:
-	"""Change the identity and assignment fields on an Employee that already exists."""
+	"""Change the identity and assignment fields on an Employee that already exists.
+
+	STILL `require_hr_role`, DELIBERATELY, WHILE `create_employee` MOVED. Bringing
+	somebody onto the farm and editing the record of somebody already on it are
+	two different questions: the first is field work with a compliance record
+	behind it, the second is a personnel register that names an existing person's
+	department, supervisor, birth date and login. v0.94.0 widened the first and
+	left this exactly where it was. `reactivate_employee` below is the one narrow
+	exception, and it is narrow precisely so this gate can stay.
+	"""
 	compat.require_doctype(EMPLOYEE, "It comes with the Frappe HR (hrms) app.")
 	_reject_unknown(
 		args,
 		WRITABLE,
 		reserved=("name", "employee", "allow_unenrolled_user", "replace_user", "allow_duplicate_name"),
 	)
-	actor = require_hr_role()
+	return _apply_employee_update(args, require_hr_role())
 
+
+def reactivate_employee(args: dict) -> ToolResult:
+	"""Put a returning worker back on the payroll: Active, joined today.
+
+	STEP 1b OF A HIRE, NOT AN EDIT OF THE REGISTER, and that is the whole reason
+	it is a separate tool with a separate gate. A worker who left in November and
+	is standing in the yard in June is one Employee record with a status — not two
+	records with one history between them — so the foreman who would have been
+	allowed to `create_employee` a stranger must not be refused for the person
+	they hired last season. Refusing here would push the field toward the worse
+	record: a duplicate Employee, two I-9s, and a tenure history that starts over.
+
+	IT WRITES EXACTLY TWO FIELDS AND NEITHER IS A CALLER'S CHOICE. `status` is
+	Active and `date_of_joining` is today, both fixed in code below rather than
+	read from `args`, so widening this gate does not widen `update_employee` by
+	the back door — a caller holding only `HIRING_ROLES` cannot reach the
+	department, the supervisor, the birth date or the login through this door,
+	because there is no argument here that carries them.
+
+	TODAY IS NOT AN ARGUMENT, for the same reason it is not one on the handset:
+	8 U.S.C. §1324a's three-business-day clock counts from the day this person
+	started THIS time, and the phone in the yard knows exactly one true answer to
+	that. A backdated rehire is a correction, and a correction is `update_employee`
+	in the Desk by somebody who can see what they are correcting.
+
+	THE ORIGINAL HIRE DATE IS OVERWRITTEN AND IS NOT LOST — the `changed` list
+	this returns carries the before-value, and that lands in the MCP Action Log
+	row the caller writes.
+	"""
+	compat.require_doctype(EMPLOYEE, "It comes with the Frappe HR (hrms) app.")
+	_reject_unknown(args, (), reserved=("name", "employee"))
+	actor = require_hiring_role()
+	name = resolve_employee(as_str(args, "name") or as_str(args, "employee", required=True))
+	return _apply_employee_update(
+		{"employee": name, "status": "Active", "date_of_joining": frappe.utils.today()},
+		actor,
+	)
+
+
+def _apply_employee_update(args: dict, actor: str) -> ToolResult:
+	"""The shared body of `update_employee` and `reactivate_employee`.
+
+	ONE WRITE PATH, TWO GATES. The gate is the caller's argument rather than
+	something read in here, so the two tools cannot drift into two different
+	notions of what a change to an Employee costs — the before/after `changed`
+	report, the company scope, the enrolment check on `user_id` and the supervisor
+	cycle refusal are all written once and run for both.
+	"""
 	name = resolve_employee(as_str(args, "name") or as_str(args, "employee", required=True))
 	current = (
 		frappe.db.get_value(

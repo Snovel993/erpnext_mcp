@@ -5921,7 +5921,7 @@
   },
   {
    "default": "0",
-   "description": "WRITE. Append a narrative entry to a Farm Task, Accident Report or Discipline Record. Entries are appended and never edited.",
+   "description": "WRITE. Append a narrative entry to a Farm Task, Accident Report or Farm Incident Record. Entries are appended and never edited.",
    "fieldname": "allow_add_task_note",
    "fieldtype": "Check",
    "label": "Add Task Note"
@@ -5945,21 +5945,21 @@
    "description": "WRITE. LEGALLY CRITICAL. File one step of progressive discipline, auto-linked to the prior step for that employee. Refuses an unexplained jump up the chain and a step after a termination.",
    "fieldname": "allow_create_discipline_record",
    "fieldtype": "Check",
-   "label": "Create Discipline Record"
+   "label": "Create Farm Incident Record"
   },
   {
    "default": "0",
    "description": "WRITE. Record that the employee acknowledged a step — or that they declined to sign, with a witness. There is no third outcome.",
    "fieldname": "allow_acknowledge_discipline_record",
    "fieldtype": "Check",
-   "label": "Acknowledge Discipline Record"
+   "label": "Acknowledge Farm Incident Record"
   },
   {
    "default": "1",
    "description": "READ. One discipline step in full, with its narrative and the step before it.",
    "fieldname": "allow_get_discipline_record",
    "fieldtype": "Check",
-   "label": "Get Discipline Record"
+   "label": "Get Farm Incident Record"
   },
   {
    "default": "1",
@@ -5980,7 +5980,7 @@
    "description": "WRITE. Age a step out of the chain, or withdraw one on review. Nothing expires on a schedule in this app — the look-back window is a policy decision.",
    "fieldname": "allow_expire_discipline_record",
    "fieldtype": "Check",
-   "label": "Expire Discipline Record"
+   "label": "Expire Farm Incident Record"
   },
   {
    "default": "0",

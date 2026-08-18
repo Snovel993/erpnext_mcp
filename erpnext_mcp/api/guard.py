@@ -85,14 +85,32 @@ GRANT = "Mobile Access Grant"
 #: The roles that may reach the field API at all.
 #:
 #: "Field Worker" is this app's actual role name — see `roles.py`, which defines
-#: six and calls the phone-only one that. The v0.17.1 brief named "Farm Worker",
-#: which no site has; both are accepted so a site that created one by hand is
-#: not silently locked out, and so the brief's spelling is not a trap. What is
-#: NOT here is the whole point of the list: Family Member and Advisor are real
-#: roles with real logins on this site and neither belongs on a dispatch board,
-#: and Compliance Officer is deliberately absent because the twelve methods are
-#: field work — a compliance reviewer reads the register in the Desk.
-FARM_OPS_ROLES = frozenset({"Field Worker", "Farm Worker", "Foreman", "Farm Manager"})
+#: SEVEN (roles.py:495–795) and calls the phone-only ones that. The v0.17.1 brief
+#: named "Farm Worker", which no site has; both are accepted so a site that
+#: created one by hand is not silently locked out, and so the brief's spelling is
+#: not a trap. What is NOT here is the whole point of the list: Family Member and
+#: Advisor are real roles with real logins on this site and neither belongs on a
+#: dispatch board, and Compliance Officer is deliberately absent because the
+#: methods are field work — a compliance reviewer reads the register in the Desk.
+#:
+#: "CREW LEADER" IS HERE SINCE v0.94.0, AND ITS ABSENCE WAS NOT A NARROW
+#: PERMISSION — IT WAS NO DOOR AT ALL. The spec carries `desk_access=0`
+#: (roles.py:618), so the Desk is closed to it by its own definition, and this
+#: frozenset is the enrolment gate every field method runs before anything else.
+#: A name missing from both is an account that cannot reach the server by any
+#: route: `employee.SHIFT_ROLES` had listed it since v0.19.3, `roles.py` granted
+#: it FULL permission on Farm Shift, `create_mobile_user` would enrol one — and
+#: every bit of that was unreachable, with the handset getting a refusal that
+#: named enrolment rather than the grant it actually lacked.
+#:
+#: `test_mobile_role_map.EveryPhoneOnlyRoleHasADoor` is the durable form of that
+#: argument: any role with `desk_access=0` must appear here. Revert this line and
+#: it goes red naming Crew Leader. Compliance Officer is its negative control —
+#: a role with desk access is deliberately NOT required to be in this set, so the
+#: invariant cannot be satisfied by simply listing all seven.
+FARM_OPS_ROLES = frozenset(
+	{"Field Worker", "Farm Worker", "Foreman", "Crew Leader", "Farm Manager"}
+)
 
 #: The roles that may DISPATCH: raise work, send somebody to it, or read a board
 #: that is not their own. A SUBSET of the list above rather than a second list

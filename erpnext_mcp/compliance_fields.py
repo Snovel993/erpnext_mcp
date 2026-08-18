@@ -1032,6 +1032,74 @@ TARGETS = (
 			"where they were before v0.69.0 and still legally sufficient."
 		),
 	),
+	# ── Company — v0.94.0 ───────────────────────────────────────────────────
+	#
+	# ONE FIELD, AND IT EXISTS TO STOP A QUESTION BEING ASKED FORTY TIMES.
+	# `housing_deduction_from_wages` is a per-assignment Select on Housing
+	# Assignment and stays there — the Housing Unit doctype's own help text
+	# defends the placement ("the question is asked of the arrangement rather
+	# than of the building") and that reasoning is right for the rare farm that
+	# does charge rent. What was wrong was WHO ANSWERS IT: a wage deduction is
+	# not a foreman's call, and this farm does not charge rent for labor camps at
+	# all, so the honest default is "No" set once per entity rather than a
+	# three-way choice a supervisor guesses at on every bunk assignment.
+	#
+	# ON COMPANY RATHER THAN A SINGLE-DOCTYPE SETTING, DELIBERATELY. This app is
+	# multi-company — the orchard plus the holding company — and a `"issingle": 1`
+	# doctype like `i_9_settings` holds ONE ROW FOR THE WHOLE SITE, which would
+	# need a per-company child table to be correct. A field on Company is
+	# per-company by construction. It is also NOT `set_company_defaults`
+	# (`tools/dimensions.py`), which is explicitly the accounting-defaults tool
+	# keyed to `SUPPORTED_COMPANY_DEFAULTS`; a camp housing policy is not an
+	# accounting dimension.
+	Target(
+		doctype="Company",
+		owner_app="erpnext",
+		purpose=(
+			"Whether this entity charges its labor camp occupants rent, answered once for "
+			"the entity instead of guessed at on every bunk assignment. ORS 653 and OAR "
+			"839-015 require a housing deduction to be disclosed; the Housing Assignment "
+			"row is that disclosure and still carries the answer. What this changes is who "
+			"supplies it."
+		),
+		fields=(
+			ComplianceField(
+				fieldname="default_housing_deduction_from_wages",
+				label="Default Housing Deduction From Wages",
+				fieldtype="Select",
+				options="\nYes\nNo\nUnknown",
+				default="No",
+				framework=(
+					"ORS 653.035 and OAR 839-015-0100 (deductions from agricultural wages "
+					"must be disclosed and authorised); 29 CFR 531 on lodging credited "
+					"against the minimum wage"
+				),
+				why=(
+					"A housing deduction is a wage deduction, and a record that says "
+					"'Unknown' for every assignment is a disclosure nobody made. This is "
+					"the entity's standing answer, so each Housing Assignment is written "
+					"with a real one."
+				),
+				operational=(
+					"The foreman assigning a bunk stops being asked a wage question. The "
+					"value is WRITTEN ONTO each Housing Assignment at creation, not "
+					"resolved when a report reads it — `audit_packets` and the camp "
+					"register read the per-assignment column, and a lazily-resolved "
+					"default would leave them reporting 'Unknown' for every row created "
+					"after this shipped."
+				),
+				description=(
+					"Defaults to No — most farms charge no rent for labor camp housing. An "
+					"explicit housing_deduction_from_wages on a single assignment still "
+					"wins, because one arrangement can differ from the entity's norm."
+				),
+			),
+		),
+		absent_note=(
+			"This site has no Company doctype, which means ERPNext itself is not installed. "
+			"Housing assignments still record their own deduction answer where one is sent."
+		),
+	),
 	Target(
 		doctype="Housing Unit",
 		owner_app="erpnext_mcp",

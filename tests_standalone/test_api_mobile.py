@@ -606,6 +606,15 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# ALL FIVE ARE HR-ONLY IN THEIR OWN BODIES, which is the thing to check
 		# if any appears in an app build. What a person's wages are garnished
 		# for is among the most sensitive facts this app holds.
+		#
+		# THAT SENTENCE WAS FALSE UNTIL v0.94.0 AND IS LEFT STANDING ABOVE ON
+		# PURPOSE, because what it describes is now true and how it became true is
+		# worth keeping. Only the two WRITES carried the gate; the three reads were
+		# scope-only — so this comment, `farmops_api/routes.py:751` and the module's
+		# own prose all asserted a protection none of them had. The lesson is the
+		# one the F1 invariant test encodes: a sentence claiming a gate is not a
+		# gate, and the three that said this were written by people reading each
+		# other rather than reading the code.
 		"list_payroll_deductions",
 		"get_payroll_deduction",
 		"list_employee_deductions",
@@ -801,6 +810,10 @@ class ThePersonnelRegisterIsNotAPickersToRead(MobileAPITestCase):
 		self.assertIn("employees", mobile_api.search_employees(query="Ramos"))
 
 	def test_a_field_worker_cannot_create_or_reactivate_one_either(self):
+		"""v0.94.0 moved both of these from `HR_ROLES` to `HIRING_ROLES`, so the
+		refusal now names the hire rather than the register — but a PICKER is on
+		neither list and is refused by both. That is the whole shape of this
+		release: the gate moved, it did not dissolve."""
 		self.be()
 		for call in (
 			lambda: mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN),
@@ -808,7 +821,29 @@ class ThePersonnelRegisterIsNotAPickersToRead(MobileAPITestCase):
 		):
 			with self.assertRaises(Exception) as caught:
 				call()
-			self.assertIn("personnel register", str(caught.exception))
+			self.assertIn("may not bring a person onto the farm", str(caught.exception))
+
+	def test_but_a_foreman_can_do_both(self):
+		"""THE POSITIVE HALF, and the one a release of widenings actually turns
+		on. `create_employee` and the rehire are steps 1 and 1b of a hire, and a
+		foreman refused at step 1 never reaches the other ten."""
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		self.assertTrue(
+			mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN)
+		)
+		self.assertTrue(mobile_api.reactivate_employee(employee=WORKER_EMPLOYEE))
+
+	def test_and_the_register_read_did_not_widen_with_them(self):
+		"""The boundary, asserted at the one place it is easiest to lose. A
+		Foreman may now hire and may STILL not browse the entity's personnel
+		register — names, hire dates and the people who have left are somebody
+		else's PII whoever is holding the phone."""
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.search_employees(query="Ramos")
+		self.assertIn("personnel register", str(caught.exception))
 
 	def test_a_field_worker_cannot_read_somebody_elses_record(self):
 		"""v0.46.2. `get_employee` is the one read here whose gate has a hole in
@@ -2119,14 +2154,30 @@ class TheCampHasAWrite(MobileAPITestCase):
 	def test_a_field_worker_may_not_write_one(self):
 		"""A Housing Assignment names a person, a building and the dates between
 		them. It is the audit trail defending a Section 119 exclusion and the
-		answer to an ORS 653 wage claim, which is a personnel record."""
+		answer to an ORS 653 wage claim.
+
+		v0.94.0 moved the gate from `HR_ROLES` to `HIRING_ROLES`; a picker is on
+		neither, so this refusal is unchanged in substance and only in wording."""
 		set_roles(WORKER, ["Field Worker"])
 		self.be()
 		with self.assertRaises(Exception) as caught:
 			mobile_api.assign_housing(
 				employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
 			)
-		self.assertIn("personnel register", str(caught.exception))
+		self.assertIn("may not bring a person onto the farm", str(caught.exception))
+
+	def test_but_a_foreman_may_assign_a_bunk(self):
+		"""THE WIDENING. Assigning housing is step 8 of a hire, and the rules that
+		actually protect a camp are not this gate: the overlap refusal, lawful
+		occupancy, the capacity ceiling and the condemned-unit rule all run
+		whoever is calling, so a foreman still cannot overfill a cabin."""
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		self.assertTrue(
+			mobile_api.assign_housing(
+				employee=WORKER_EMPLOYEE, housing_unit=self.unit, check_in_date="2026-08-01"
+			)
+		)
 
 	def test_a_check_in_date_is_required(self):
 		self.be()
@@ -2417,7 +2468,18 @@ class TheReturningWorkersCabin(MobileAPITestCase):
 		self.assertTrue(mobile_api.list_available_housing()["units"])
 		with self.assertRaises(Exception) as caught:
 			mobile_api.list_available_housing(employee=WORKER_EMPLOYEE)
-		self.assertIn("personnel register", str(caught.exception))
+		self.assertIn("may not bring a person onto the farm", str(caught.exception))
+
+	def test_and_a_foreman_may_name_one_because_that_is_the_returning_pickers_tap(self):
+		"""v0.94.0. The whole value of the `employee` argument is offering "Last
+		year: MC-Cabin-07" at the top of the list — on the phone of the person
+		actually walking the returning picker to a cabin. The split the class is
+		named for survives: the vacancy read stays open because it names nobody,
+		and naming somebody still takes a gate."""
+		self._stay(self.second, "2025-06-01", "2025-10-15")
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		self.assertIn("units", mobile_api.list_available_housing(employee=WORKER_EMPLOYEE))
 
 	def test_an_employee_of_another_entity_is_not_found(self):
 		self.be()
@@ -4310,3 +4372,134 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.assertIn("/mobile/render_pay_stub", by_path)
 		self.assertFalse(by_path["/mobile/get_payroll_register"].mutating)
 		self.assertTrue(by_path["/mobile/render_pay_stub"].mutating)
+
+
+class ReportingAnIncidentIsNotAdministration(MobileAPITestCase):
+	"""v0.94.0, F8. The three-way split that used to be one HR gate.
+
+	All five methods carried `personnel.require_hr_role`, on the reasoning that a
+	discipline record is a personnel document. Half of that is right and the other
+	half was gating the wrong act — and the codebase already contained the correct
+	argument, forty lines away in the same file, about `create_accident_report`:
+	the person who finds somebody on the ground is whoever finds them.
+	"""
+
+	def _record(self, subject=WORKER_EMPLOYEE):
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+		return mobile_api.create_discipline_record(
+			employee=subject,
+			discipline_type="Verbal Warning",
+			incident_date=str(frappe.utils.add_days(frappe.utils.today(), -3)),
+			incident_description="Arrived 40 minutes late without notice.",
+			expected_improvement="Clock in by 06:00 for 60 days.",
+			followup_date=str(frappe.utils.add_days(frappe.utils.today(), 60)),
+			company=MAIN,
+		)
+
+	# ── reporting ───────────────────────────────────────────────────────────
+	def test_a_foreman_may_file_the_incident_he_watched(self):
+		"""A supervisor who cannot file either does not file, or dictates it to
+		somebody who did not see it. Both are worse records than the one the old
+		gate was protecting."""
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		self.assertTrue(
+			mobile_api.create_discipline_record(
+				employee=WORKER_EMPLOYEE,
+				discipline_type="Verbal Warning",
+				incident_date=str(frappe.utils.add_days(frappe.utils.today(), -3)),
+				incident_description="Arrived 40 minutes late without notice.",
+				expected_improvement="Clock in by 06:00 for 60 days.",
+				followup_date=str(frappe.utils.add_days(frappe.utils.today(), 60)),
+				company=MAIN,
+			)
+		)
+
+	def test_a_picker_still_may_not(self):
+		"""RELAXED IS NOT OPEN. `SHIFT_ROLES` gained the report; a plain field
+		worker is not on that list, and filing a warning about a coworker is not
+		the same act as reporting that somebody is on the ground."""
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.create_discipline_record(
+				employee=WORKER_EMPLOYEE,
+				discipline_type="Verbal Warning",
+				incident_date=str(frappe.utils.add_days(frappe.utils.today(), -3)),
+				incident_description="x",
+				expected_improvement="y",
+				followup_date=str(frappe.utils.add_days(frappe.utils.today(), 60)),
+				company=MAIN,
+			)
+		self.assertIn("form or close a crew shift", str(caught.exception))
+
+	# ── the subject's own record ────────────────────────────────────────────
+	def test_the_subject_may_read_their_own_warning(self):
+		"""This was the one personnel record with no `get_my_*` equivalent beside
+		`get_my_w4`, `get_my_i9`, `list_my_pay_stubs` and `list_my_trainings`."""
+		record = self._record()["name"]
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		self.assertEqual(mobile_api.get_discipline_record(record=record)["name"], record)
+
+	def test_and_acknowledge_it_on_their_own_phone(self):
+		"""Under the old gate an HR account had to be holding the pad for a worker
+		to sign an acknowledgment about themselves."""
+		record = self._record()["name"]
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		self.assertTrue(
+			mobile_api.acknowledge_discipline_record(
+				record=record, employee_signature="data:image/png;base64,iVBORw0KGgo="
+			)
+		)
+
+	def test_and_read_their_own_history(self):
+		self._record()
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		self.assertTrue(mobile_api.list_discipline_history(employee=WORKER_EMPLOYEE))
+
+	# ── and nobody else's ───────────────────────────────────────────────────
+	def test_a_picker_may_not_read_a_colleagues_record(self):
+		"""THE HALF THAT DID NOT MOVE. Reading somebody else's file is register 3
+		and stays `HR_ROLES` — the self-service branch is for the subject only."""
+		STORE.seed(
+			"Employee",
+			[{"name": "EMP-ROSA", "employee_name": "Rosa Aguilar", "company": MAIN, "status": "Active"}],
+		)
+		record = self._record(subject="EMP-ROSA")["name"]
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_discipline_record(record=record)
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_the_self_exception_cannot_be_claimed_by_naming_somebody(self):
+		"""The subject is read OFF THE RECORD and the caller off their login, so
+		there is nothing in a request that can assert the exception — the same
+		construction `get_i9_form` uses."""
+		STORE.seed(
+			"Employee",
+			[{"name": "EMP-ROSA2", "employee_name": "Rosa Aguilar", "company": MAIN, "status": "Active"}],
+		)
+		record = self._record(subject="EMP-ROSA2")["name"]
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.acknowledge_discipline_record(
+				record=record, employee_signature="data:image/png;base64,iVBORw0KGgo="
+			)
+		self.assertIn("personnel register", str(caught.exception))
+
+	def test_the_register_across_everybody_is_still_HRs(self):
+		"""`get_discipline_report` gained no self-service branch, deliberately: it
+		is not somebody reading their own record, it is the document the module
+		docstring calls "what an HR manager hands a lawyer"."""
+		self._record()
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+		with self.assertRaises(Exception) as caught:
+			mobile_api.get_discipline_report(employee=WORKER_EMPLOYEE)
+		self.assertIn("personnel register", str(caught.exception))

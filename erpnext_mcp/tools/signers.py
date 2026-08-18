@@ -280,6 +280,57 @@ def authorized_signer_for_company(user: str, form_type: str, company: str = "") 
 	return signer
 
 
+
+def _refuse_unconfigured(form: str) -> None:
+	"""Refuse an employer signature on a site with no roster, IF the operator asked.
+
+	THE HOLE THIS CLOSES. An empty roster authorises everybody — deliberately, so
+	that the feature was installable and no site's I-9 flow broke on migrate — but
+	that means the branch above accepts any string as the person who attested,
+	under penalty of perjury, that they examined a worker's documents. On a site
+	that has finished configuring its roster, that is no longer a compatibility
+	requirement; it is just an opening.
+
+	IT IS A SWITCH AND IT SHIPS OFF, WHICH IS THE ENTIRE SEQUENCING OF THIS
+	CHANGE. Turning it on before the roster has rows would refuse EVERY Section 2
+	on the farm — so the default is 0, the field `depends_on` the roster being
+	non-empty so the Desk will not offer it on a site that cannot survive it, and
+	the order an operator follows is: add the signers, confirm
+	`list_authorized_signers` reports `configured: true`, then switch this on.
+
+	THE REFUSAL NAMES THE TOOL THAT FIXES IT rather than the role that did not
+	help — because on this farm there is no role that helps. Who may make the
+	employer's attestation is a designation on a PERSON under 8 U.S.C. §1324a,
+	and the answer to "I was refused" is "the farm has not named you", not "find
+	somebody from HR".
+	"""
+	if not _fail_closed():
+		return
+	raise ToolError(
+		f"this site refuses {form} employer signatures while no authorized signer "
+		"roster is configured, and none is. USCIS lets an employer designate who "
+		"completes Section 2 — including a foreman standing in the orchard — but it "
+		"has to be a designation somebody made: add each authorised person with "
+		"add_authorized_signer, then this call will take their name from the roster. "
+		"Nothing was signed."
+	)
+
+
+def _fail_closed() -> bool:
+	"""The operator's switch, read defensively.
+
+	ANY FAILURE READS AS OFF. A site whose Single has not migrated, a site
+	upgrading right now, a field that is not there yet — none of those is a
+	reason to start refusing federal signatures, and the missing-migration case is
+	the one `get_authorized_signer` already argues about at length: the middle of
+	somebody's signature is the wrong place to discover a migration is outstanding.
+	"""
+	try:
+		return bool(frappe.db.get_single_value("I-9 Settings", "fail_closed_without_roster"))
+	except Exception:
+		return False
+
+
 def resolve_signature(args: dict, form_type: str, name_key: str, title_key: str,
                       required: bool = True) -> dict:
 	"""The name and title that go on the form, and where each of them came from.
@@ -319,6 +370,7 @@ def resolve_signature(args: dict, form_type: str, name_key: str, title_key: str,
 	asked_title = as_str(args, title_key)
 
 	if not signer["configured"]:
+		_refuse_unconfigured(form)
 		name = asked_name or ("" if required else (_default_full_name(account) or account))
 		if not name:
 			raise ToolError(f"{name_key} is required")

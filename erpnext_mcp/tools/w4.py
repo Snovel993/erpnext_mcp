@@ -48,6 +48,7 @@ from ..withholding import (
     calculate_federal_withholding,
 )
 from . import artifacts, files, signers
+from . import employee as employee_tool
 
 W4_FORM = "W-4 Form"
 FEDERAL_TAX_TABLE = "Federal Tax Table"
@@ -285,7 +286,16 @@ def submit_w4(args: dict) -> ToolResult:
     NOTHING ABOUT THE WITHHOLDING CHANGED. The signer is recorded beside the
     elections, not consulted about them — the engine reads the same columns it
     always did.
+
+    v0.94.0: `require_hiring_role`, WHERE THERE WAS NO ROLE GATE. A W-4 is the
+    worker's own withholding election, collected by whoever is sitting with them
+    — which on this farm is the foreman — and processing one was previously open
+    to any enrolled account. TWO GATES NOW STAND HERE AND THEY ANSWER DIFFERENT
+    QUESTIONS: this one decides who may PROCESS a W-4, and `resolve_signature`
+    below decides whose name may go in the Employers Only block. The second is a
+    per-person roster and is unchanged by this release.
     """
+    employee_tool.require_hiring_role()
     employee = _resolve_employee(args)
     company = resolve_company(as_str(args, "company"), required=True)
     tax_year = as_int(args, "tax_year")

@@ -785,6 +785,41 @@ def list_housing_assignments(args: dict) -> ToolResult:
 
 
 # ── 116. create_housing_assignment ──────────────────────────────────────────
+
+def _company_housing_deduction(unit: dict) -> str:
+	"""This entity's standing answer to "is rent taken out of wages", or "".
+
+	v0.94.0, AND THE POINT IS THAT THE ANSWER IS WRITTEN ONTO THE ROW. A housing
+	deduction is a wage deduction, so it is not a question a foreman should be
+	answering per bunk — and on this farm the answer is "No" every time, because
+	no rent is charged for labor camps at all. Asking it forty times a season
+	produced a column that said "Unknown" wherever somebody skipped it, which is
+	a disclosure ORS 653 / OAR 839-015 require and nobody made.
+
+	RESOLVED AT CREATION, NEVER AT READ TIME, AND THAT IS THE WHOLE TRAP. The
+	audit packet and the camp register both read the per-assignment column
+	directly; a default resolved when a report runs would leave every row created
+	after this release reporting "Unknown" to an auditor while looking correct in
+	the app. So it is read here, once, and stored — the row remains the disclosure.
+
+	AN EXPLICIT ARGUMENT STILL WINS, because one arrangement genuinely can differ
+	from the entity's norm and the Housing Unit doctype's own help text is right
+	that the question belongs to the arrangement. This supplies an answer where
+	the caller did not; it never overrides one.
+
+	A SITE WITHOUT THE FIELD GETS "" AND THE OLD BEHAVIOUR. The column is a Custom
+	Field installed by `compliance_fields`, so a site mid-upgrade, a site without
+	ERPNext's Company doctype, or a Housing Unit whose owning entity is blank all
+	fall through to exactly what happened before this existed.
+	"""
+	company = str(unit.get("owning_entity") or "")
+	if not company or not compat.has_field("Company", "default_housing_deduction_from_wages"):
+		return ""
+	return str(
+		frappe.db.get_value("Company", company, "default_housing_deduction_from_wages") or ""
+	)
+
+
 def create_housing_assignment(args: dict) -> ToolResult:
 	"""Put one person in one unit, from a date."""
 	_require(HOUSING_ASSIGNMENT)
@@ -856,7 +891,7 @@ def create_housing_assignment(args: dict) -> ToolResult:
 	doc.deposit_paid = deposit_paid
 	doc.deposit_returned = as_float(args.get("deposit_returned"), "deposit_returned")
 	doc.notes = as_str(args, "notes")
-	deduction = as_str(args, "housing_deduction_from_wages")
+	deduction = as_str(args, "housing_deduction_from_wages") or _company_housing_deduction(unit)
 	if deduction:
 		doc.housing_deduction_from_wages = as_choice(
 			HOUSING_ASSIGNMENT,

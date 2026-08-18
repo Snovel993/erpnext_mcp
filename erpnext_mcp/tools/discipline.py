@@ -49,20 +49,24 @@ import frappe
 
 from .. import compat, timezones
 from ..args import as_bool, as_date, as_limit, as_str, resolve_company
-from ..erpnext_mcp.doctype.discipline_record.discipline_record import (
+from ..erpnext_mcp.doctype.farm_incident_record.farm_incident_record import (
 	ACTIVE,
+	DIRECTIONS,
 	DISCIPLINE_TYPES,
 	EXPIRED,
+	REPORTED,
 	RESCINDED,
 	STATUSES,
+	SUPERVISOR_REPORT,
 	TERMINATION,
+	WORKER_REPORT,
 	severity,
 )
 from ..errors import ToolError
 from ..result import ToolResult
 from . import narrative
 
-DISCIPLINE = "Discipline Record"
+DISCIPLINE = "Farm Incident Record"
 EMPLOYEE = "Employee"
 
 #: Most steps one chain carries. An employee with more than this is not a
@@ -76,6 +80,10 @@ _FIELDS = (
 	"name",
 	"employee",
 	"employee_name",
+	"reported_by",
+	"report_direction",
+	"resolution_state",
+	"resolution_summary",
 	"discipline_type",
 	"status",
 	"company",
@@ -135,7 +143,12 @@ def _employee_argument(args: dict, verb: str) -> tuple[str, str]:
 	return employee, name or employee
 
 
-def chain_for(employee: str, include_inactive: bool = False, limit: int = CHAIN_CAP) -> list[dict]:
+def chain_for(
+	employee: str,
+	include_inactive: bool = False,
+	limit: int = CHAIN_CAP,
+	direction: str | None = SUPERVISOR_REPORT,
+) -> list[dict]:
 	"""Every step for one person, oldest first. The chain itself.
 
 	OLDEST FIRST, because a chain is read as an escalation and reversing it turns
@@ -143,12 +156,37 @@ def chain_for(employee: str, include_inactive: bool = False, limit: int = CHAIN_
 	steps — off by default because those are the ones a policy says no longer
 	count, and on for the report, where "there was a warning in 2024 and it aged
 	out" is itself something a reader needs.
+
+	SUPERVISOR DIRECTION ONLY, AND THIS FILTER IS THE MOST LOAD-BEARING LINE IN
+	THE MODULE. v0.94.0 lets a WORKER open a record — a grievance, a dispute —
+	into this same table, which is right, because the record already carried both
+	voices and a second table would have been sprawl. But this function is what
+	`get_discipline_report` builds the document an HR manager hands a lawyer out
+	of, and without the filter three grievances a worker filed become steps 1-3 of
+	an escalation AGAINST THEM: `severity()` returns 0 for a report with no
+	discipline type, `_gaps` flags each as an unacknowledged hole, and the
+	timeline reads as a disciplinary history. That is worse than the table sprawl
+	this design avoided, and it is five lines to prevent.
+
+	`direction` IS AN ARGUMENT RATHER THAN A CONSTANT because one caller wants
+	the other answer: a worker reading their OWN file wants both directions —
+	what was filed about them and what they filed. Passing `None` means both, and
+	every chain-and-report path passes the default.
 	"""
 	if not compat.doctype_exists(DISCIPLINE):
 		return []
 	filters: dict = {"employee": employee}
 	if not include_inactive:
 		filters["status"] = ACTIVE
+	# NOT A DB FILTER, AND THE REASON IS EVERY ROW WRITTEN BEFORE v0.94.0.
+	# Their `report_direction` column is NULL, and SQL will not match NULL with
+	# either `= 'Supervisor Report'` or `!= 'Worker Report'` — the second is the
+	# trap, because `NULL != 'x'` is NULL and the row silently drops out. Filtering
+	# on the server would therefore have hidden the entire existing discipline
+	# history of every worker on the farm behind a column nobody had filled in
+	# yet, which is a far worse failure than the one the filter exists to prevent.
+	# So the direction is applied below, in Python, against the same
+	# empty-means-supervisor default `_describe` uses.
 	try:
 		rows = (
 			frappe.db.get_all(
@@ -162,7 +200,21 @@ def chain_for(employee: str, include_inactive: bool = False, limit: int = CHAIN_
 		)
 	except Exception:  # pragma: no cover - a site shaping these columns differently
 		return []
-	return [dict(row) for row in rows]
+	out = [dict(row) for row in rows]
+	if direction:
+		out = [row for row in out if _direction_of(row) == direction]
+	return out
+
+
+def _direction_of(row: dict) -> str:
+	"""This row's direction, with EMPTY MEANING SUPERVISOR.
+
+	One place, because the default is a migration fact rather than a preference
+	and two copies of it would drift. Every record written before v0.94.0 is the
+	farm documenting a worker — that is all the table could hold — so a blank
+	column is not an unknown direction, it is the old one.
+	"""
+	return str(row.get("report_direction") or "").strip() or SUPERVISOR_REPORT
 
 
 def _describe(row: dict, today: str = "") -> dict:
@@ -182,7 +234,17 @@ def _describe(row: dict, today: str = "") -> dict:
 		"name": row.get("name"),
 		"employee": row.get("employee"),
 		"employee_name": row.get("employee_name") or row.get("employee"),
-		"discipline_type": row.get("discipline_type"),
+		# v0.94.0. The protocol columns, and `report_direction` DEFAULTS TO
+		# SUPERVISOR rather than to empty: every row written before this release
+		# is a supervisor report, and a blank here would drop the whole existing
+		# history out of a chain read that filters on the direction.
+		"reported_by": row.get("reported_by") or None,
+		"report_direction": row.get("report_direction") or SUPERVISOR_REPORT,
+		"resolution_state": row.get("resolution_state") or None,
+		"resolution_summary": row.get("resolution_summary") or None,
+		# `or None` because a Worker Report carries no rung and an empty string
+		# reads as "there is a type and it is blank" to every consumer of this.
+		"discipline_type": row.get("discipline_type") or None,
 		"severity": severity(str(row.get("discipline_type") or "")),
 		"status": row.get("status") or ACTIVE,
 		"company": row.get("company") or None,
@@ -221,10 +283,19 @@ def _gaps(steps: list[dict], today: str) -> list[dict]:
 	and the holes are what decides the case. Every entry names the record, what
 	is missing, and why it matters — because "unacknowledged" means nothing to
 	somebody who has not run a hearing.
+
+	SUPERVISOR DIRECTION ONLY. Callers pass a chain that is already filtered, and
+	this skips the other direction anyway — belt and braces on the one function
+	whose output reads as an accusation. A worker's grievance has no "expected
+	improvement" to have gone unmet and no acknowledgement THEY owe; flagging one
+	as a gap would put "the employee never acknowledged this" against a record the
+	employee wrote.
 	"""
 	out = []
 	for step in steps:
 		if step["status"] != ACTIVE:
+			continue
+		if _direction_of(step) == WORKER_REPORT:
 			continue
 		if not (step["employee_acknowledged"] or step["employee_declined_to_sign"]):
 			out.append(
@@ -289,6 +360,29 @@ def _gaps(steps: list[dict], today: str) -> list[dict]:
 
 
 # ── create_discipline_record ────────────────────────────────────────────────
+
+def _reporting_employee() -> str | None:
+	"""The Employee behind the calling account, or None. WHO OPENED THIS.
+
+	RESOLVED SERVER-SIDE AND NEVER FROM THE BODY, which is the same rule
+	`get_i9_form` follows for its self-service branch and for the same reason: an
+	attribution a request can assert is not an attribution. `employee` on this
+	record is the person it is ABOUT; this is the person who raised it, and on a
+	Worker Report the two may legitimately be the same.
+
+	NONE IS AN HONEST ANSWER. An MCP call arrives as the system user, which is not
+	a person and has no Employee — `issued_by` already records the account, so
+	nothing is lost by leaving this empty rather than inventing a name for it.
+	"""
+	user = str(getattr(getattr(frappe, "session", None), "user", "") or "")
+	if not user or user in ("Guest", "Administrator"):
+		return None
+	try:
+		return frappe.db.get_value(EMPLOYEE, {"user_id": user}, "name") or None
+	except Exception:  # pragma: no cover
+		return None
+
+
 def create_discipline_record(args: dict) -> ToolResult:
 	"""File one step of progressive discipline, linked to the one before it.
 
@@ -311,14 +405,33 @@ def create_discipline_record(args: dict) -> ToolResult:
 	company = resolve_company(as_str(args, "company"))
 	employee, employee_name = _employee_argument(args, "created")
 
-	discipline_type = as_str(args, "discipline_type", required=True)
-	if discipline_type not in DISCIPLINE_TYPES:
+	direction = as_str(args, "report_direction") or SUPERVISOR_REPORT
+	if direction not in DIRECTIONS:
+		raise ToolError(
+			f"report_direction must be one of {', '.join(DIRECTIONS)}, not {direction!r}. "
+			"Nothing was created."
+		)
+	supervisor = direction == SUPERVISOR_REPORT
+
+	discipline_type = as_str(args, "discipline_type", required=supervisor)
+	if supervisor and discipline_type not in DISCIPLINE_TYPES:
 		raise ToolError(
 			f"discipline_type must be one of {', '.join(DISCIPLINE_TYPES)}, not "
 			f"{discipline_type!r}. The order is the escalation. Nothing was created."
 		)
+	if not supervisor and discipline_type:
+		raise ToolError(
+			"a Worker Report carries no discipline_type. This record is somebody raising "
+			"something, and a warning level on it would file their own report as a step "
+			"against them. Nothing was created."
+		)
 
-	history = chain_for(employee)
+	# THE CHAIN IS THE SUPERVISOR DIRECTION'S, AND SO IS EVERY RULE BELOW IT.
+	# A worker's report has no prior step, cannot skip a rung, and is not refused
+	# for following a termination — that last one matters: a worker disputing the
+	# termination itself is precisely the report that must not be refused on the
+	# grounds that they were terminated.
+	history = chain_for(employee) if supervisor else []
 	prior = history[-1] if history else None
 	if prior and str(prior.get("discipline_type")) == TERMINATION:
 		raise ToolError(
@@ -356,8 +469,14 @@ def create_discipline_record(args: dict) -> ToolResult:
 	doc.issued_on = as_date(args, "issued_on") or str(frappe.utils.today())
 	doc.issued_by = as_str(args, "issued_by") or (frappe.session.user if hasattr(frappe, "session") else None)
 	doc.issued_by_name = as_str(args, "issued_by_name") or doc.issued_by
-	doc.prior_record = prior.get("name") if prior else None
-	doc.step_number = step_number
+	doc.report_direction = direction
+	doc.resolution_state = REPORTED
+	doc.reported_by = _reporting_employee()
+	# SUPERVISOR DIRECTION ONLY. A worker's report has no rung on the escalation,
+	# and writing one would make their own grievance the thing the next warning
+	# escalates from.
+	doc.prior_record = (prior.get("name") if prior else None) if supervisor else None
+	doc.step_number = step_number if supervisor else None
 	doc.supersedes_note = escalation_note or None
 	doc.incident_description = as_str(args, "incident_description") or as_str(args, "description")
 	doc.policy_violated = as_str(args, "policy_violated")
@@ -530,19 +649,50 @@ def get_discipline_record(args: dict) -> ToolResult:
 
 # ── list_discipline_history ─────────────────────────────────────────────────
 def list_discipline_history(args: dict) -> ToolResult:
-	"""One employee's whole chain, in order."""
+	"""One employee's whole file, in order — BOTH directions by default.
+
+	THE ONE READ THAT DEFAULTS TO BOTH, deliberately, and it is the read a worker
+	makes about themselves. Somebody opening their own file wants what was filed
+	ABOUT them and what they filed — a grievance they raised in June is part of
+	the story of a warning they got in July, and showing one without the other is
+	the version of events that suits whoever is holding the report.
+
+	`direction` NARROWS IT where a caller wants one side: pass "Supervisor Report"
+	for the progressive-discipline chain alone, which is what `get_discipline_report`
+	does because that document is the chain and must not contain the other
+	direction. The derived fields below — `current_level`, `next_step_would_be`,
+	`terminated` — are computed from SUPERVISOR steps only whatever this argument
+	says, because "what is this person's current discipline level" has exactly one
+	correct answer and a grievance is not part of it.
+	"""
 	_require()
 	employee, employee_name = _employee_argument(args, "read")
 	include_inactive = bool(as_bool(args, "include_inactive", True))
 	today = str(frappe.utils.today())
 
-	steps = [_describe(row, today) for row in chain_for(employee, include_inactive, as_limit(args))]
+	direction = as_str(args, "direction") or None
+	if direction and direction not in DIRECTIONS:
+		raise ToolError(
+			f"direction must be one of {', '.join(DIRECTIONS)}, not {direction!r}. "
+			"Omit it to read both, which is what somebody reading their own file wants."
+		)
+
+	steps = [
+		_describe(row, today)
+		for row in chain_for(employee, include_inactive, as_limit(args), direction=direction)
+	]
 	clock = timezones.Renderer(args)
 	for step in steps:
 		clock.add(step, "acknowledged_on")
 
 	active = [step for step in steps if step["status"] == ACTIVE]
-	current = active[-1] if active else None
+	# THE ESCALATION IS READ OFF SUPERVISOR STEPS ONLY, whatever `direction` was.
+	# "What level is this person at" has one correct answer and a grievance they
+	# filed is not a rung on it — this is the same hazard `chain_for` filters for,
+	# and it has to be defended here too because `direction=None` legitimately
+	# brings the other side into `steps`.
+	chain = [step for step in active if _direction_of(step) != WORKER_REPORT]
+	current = chain[-1] if chain else None
 
 	return ToolResult(
 		data={
@@ -550,6 +700,10 @@ def list_discipline_history(args: dict) -> ToolResult:
 			"employee_name": employee_name,
 			"step_count": len(steps),
 			"active_step_count": len(active),
+			"chain_step_count": len(chain),
+			"worker_report_count": len(
+				[step for step in steps if _direction_of(step) == WORKER_REPORT]
+			),
 			"steps": steps,
 			"current_level": current["discipline_type"] if current else None,
 			"current_severity": current["severity"] if current else 0,
@@ -559,7 +713,7 @@ def list_discipline_history(args: dict) -> ToolResult:
 				else (DISCIPLINE_TYPES[0] if not current else None)
 			),
 			"terminated": bool(current and current["discipline_type"] == TERMINATION),
-			"overdue_followups": [step["name"] for step in active if step["followup_overdue"]],
+			"overdue_followups": [step["name"] for step in chain if step["followup_overdue"]],
 			**clock.block(),
 		},
 		summary=(

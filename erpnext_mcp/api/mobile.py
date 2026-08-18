@@ -155,7 +155,7 @@ COMPLIANCE_POLICY = "Compliance Policy"
 EXPENSE_RECEIPT = "Expense Receipt"
 PAYROLL_DEDUCTION = "Farm Payroll Deduction"
 DOCUMENT_VALIDATION = "Document Validation"
-DISCIPLINE_RECORD = "Discipline Record"
+DISCIPLINE_RECORD = "Farm Incident Record"
 ACCIDENT_REPORT = "Accident Report"
 FARM_TASK_TEMPLATE = template_tools.TEMPLATE
 SHADOW_LOG_ENTRY = shadow_log_tools.DOCTYPE
@@ -703,7 +703,7 @@ def _previous_assignment(employee: str, allowed: list) -> dict | None:
 NARRATIVE_TARGETS = {
 	FARM_TASK: None,
 	"Accident Report": None,
-	"Discipline Record": "hr",
+	"Farm Incident Record": "hr",
 }
 
 
@@ -1677,11 +1677,15 @@ def reactivate_employee(user: str, employee=None, docname=None) -> dict:
 	allowed = guard.require_scope(user)
 	person = _employee_argument(employee or docname, allowed)
 
-	result = personnel.update_employee({
-		"employee": person,
-		"status": "Active",
-		"date_of_joining": frappe.utils.today(),
-	})
+	# v0.94.0. `personnel.reactivate_employee`, NOT `personnel.update_employee`.
+	# The two fields written here have not changed and neither has anything this
+	# call does — what changed is which gate it passes. Rehiring is step 1b of a
+	# hire, so it takes `require_hiring_role` with the rest of the hiring flow,
+	# while the general register edit stays on `require_hr_role`. Routing through
+	# the narrow tool is what keeps those two facts from being the same fact: it
+	# takes no field arguments at all, so a foreman reaching this endpoint cannot
+	# reach a department, a supervisor or a login through it.
+	result = personnel.reactivate_employee({"employee": person})
 	return {**_employee_identity(person), "changed": result.data.get("changed") or []}
 
 
@@ -2916,14 +2920,25 @@ def attach_onboarding_document(user: str, employee=None, docname=None, file_toke
 	doctype, in code, and proves the docname is an Employee inside the caller's
 	own entities before it goes near the File.
 
-	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, not even for the caller's own
-	record. These are the photographs an employer is inspected on, and an account
-	that could file its own would be an account that could file anything as its
-	own identity documents.
+	A HIRING ROLE IS REQUIRED, AND STILL NEVER THE CALLER'S OWN RECORD. These are
+	the photographs an employer is inspected on, and an account that could file
+	its own would be an account that could file anything as its own identity
+	documents — so the self-service exception other reads get is deliberately
+	absent here.
+
+	v0.94.0 MOVED THIS FROM `require_hr_role`, and the reason is the flow rather
+	than the file: this is step 7 of a hire, between the W-4 and the bunk. The
+	person holding the phone that photographed the licence is the person sitting
+	with the new hire, and a gate that made them hand the phone to an HR account
+	that does not exist on this farm is a gate that loses the evidence — which is
+	the exact failure v0.48.3 built this endpoint to end. What protects the
+	photographs is not the role: `_employee_argument` proves the record is inside
+	this caller's entities, ONE parent doctype is named in code, and the token
+	came from an authenticated upload that was hashed at capture.
 	"""
 	allowed = guard.require_scope(user)
 	person = _employee_argument(employee or docname, allowed)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 
 	if not str(file_token or "").strip():
 		frappe.throw(
@@ -3274,15 +3289,19 @@ def list_available_housing(
 	cabins nobody remembers the numbers of.
 
 	That is exactly the fact the paragraph above keeps off this endpoint: a named
-	person, a named cabin, and the dates between them. So `personnel.require_hr_role()`
-	runs WHEN AND ONLY WHEN `employee` is passed. Without it, this method would be
-	an unauthenticated-by-role way to walk the housing register one employee
-	docname at a time — the same register `search_employees` guards and
-	`assign_housing` guards, reachable by anybody holding a picker's phone. The
-	vacancy read stays open to a Field Worker because it still names nobody; the
-	onboarding phone that uses this is enrolled as a Farm Manager already, which is
-	stated in this module's header and is what makes the gate free rather than
-	restrictive.
+	person, a named cabin, and the dates between them. So a role gate runs WHEN AND
+	ONLY WHEN `employee` is passed. Without it, this method would be a way to walk
+	the housing register one employee docname at a time — the same register
+	`search_employees` guards — reachable by anybody holding a picker's phone. The
+	vacancy read stays open to a Field Worker because it still names nobody.
+
+	v0.94.0: THAT GATE IS `require_hiring_role`, NOT `require_hr_role`. Tim names
+	"assign a bunk" as a foreman step, and the whole value of this argument is the
+	one tap it saves on a returning picker — "Last year: MC-Cabin-07" at the top of
+	the list, on the phone of the person actually walking them to a cabin. The
+	previous docstring justified the HR gate by observing that the onboarding phone
+	"is enrolled as a Farm Manager already", which was true of one configured
+	handset and is not a reason the check has to demand it.
 
 	IT READS ONLY *ENDED* ASSIGNMENTS, most recent first. A returning worker is by
 	definition somebody whose last stay finished; an open assignment means they are
@@ -3377,7 +3396,7 @@ def _available_housing(user: str, company, parcel, branch, include_full, employe
 	# person's housing history.
 	previous = None
 	if str(employee or "").strip():
-		personnel.require_hr_role()
+		personnel.require_hiring_role()
 		previous = _previous_assignment(
 			guard.require_scoped_doc(EMPLOYEE, employee, "employee", allowed), allowed
 		)
@@ -3634,9 +3653,21 @@ def _house_one_person(
 	wrapper is calling. The flag says "this unit really is shared"; the count says
 	how many beds are in it, and no flag on a phone adds one. See `assign_housing`
 	on why the tool warns where this refuses.
+
+	v0.94.0: `require_hiring_role`, NOT `require_hr_role` — ONE HELPER BEHIND BOTH
+	`assign_housing` AND `create_housing_assignment`, so one line moves both routes
+	and they cannot drift into two answers.
+
+	WHAT REPLACES THE ROLE CHECK IS EVERY RULE BELOW IT, AND IT IS STRONGER THAN
+	THE ROLE CHECK WAS. The overlap refusal, Oregon lawful occupancy, the capacity
+	ceiling, the shower-block rule, the condemned-unit refusal and end-before-start
+	all run whoever is calling — a foreman cannot overfill a cabin, and could not
+	before. v0.93.0 deliberately routed the onboarding `housing_unit` argument
+	through this helper so those refusals would be one implementation; that work
+	was done and the role gate was the only thing left standing in front of it.
 	"""
 	allowed = guard.require_scope(user)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 	compat.require_doctype(
 		"Housing Assignment",
 		"It ships with erpnext_mcp — run `bench --site <site> migrate` after upgrading the app.",
@@ -3765,11 +3796,30 @@ def collect_signature(
 	512 KB ceiling that keeps the two apart, and something over it is told which
 	door to use. `file_token` is still accepted for a caller that has one.
 
-	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, exactly as `upload_signed_i9`
-	requires it and for the same reason: this writes the document the employer is
-	inspected on. A worker may READ their own I-9 through `get_i9_form` because
-	reading it harms nobody; an account that could put a signature on its own
-	Section 2 could attest that somebody examined documents when nobody did.
+	A HIRING ROLE HOLDS THE PAD; THE ROSTER DECIDES WHOSE NAME GOES IN THE BOX.
+	v0.94.0, and the change is which question this gate is asking. `require_hr_role`
+	here was answering "who may attest FOR the employer" with a check on who may
+	hold the phone, and `tools/signatures.py` — the module this delegates to —
+	spends three paragraphs explaining that those are not the same question:
+	requiring the account at the pad to be an authorized signer "would mean the
+	only people who could collect a worker's signature are the people authorised
+	to sign FOR the employer, which is precisely the conflation §274a keeps
+	apart" (signatures.py `_require_signer`).
+
+	SO THE GATE WAS BOTH REDUNDANT AND HARMFUL. Redundant on the employer boxes,
+	because `SIGNATURE_BOXES` carries `signer_role="employer"` on I-9 Section 2
+	and Supplement B and `_require_signer` runs the roster check on exactly those
+	— Section 2 was already protected by the right mechanism, per person rather
+	than per title. Harmful on the employee boxes, because Section 1 and the W-4
+	employee signature are the WORKER'S OWN attestation, on nobody's roster and
+	required to be on nobody's roster — so demanding an HR account to hold the pad
+	meant a foreman could not collect a new hire's mark at all, and the hiring
+	flow died here at step 4 with the two federal forms already raised.
+
+	WHAT DID NOT MOVE: the per-box roster, the closed list of signable boxes,
+	`_evidence_role`'s refusal of a mislabelled capacity, and the destroyed-I-9
+	refusal. A foreman NOT on the roster still cannot sign Section 2 — the
+	refusal simply names the roster now instead of naming a role.
 
 	EVERY OTHER REFUSAL IS THE TOOL'S and is not copied here — the closed list of
 	signable boxes, the authorized-signer roster on the two EMPLOYER boxes, the
@@ -3783,7 +3833,7 @@ def collect_signature(
 	task in their name.
 	"""
 	guard.require_scope(user)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 
 	if not str(doctype or "").strip():
 		frappe.throw(
@@ -3959,13 +4009,38 @@ def submit_form_signature(
 	attestation it depicts, and a call that threw away the second to avoid
 	reporting the loss of the first would have the trade backwards.
 
-	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on `collect_signature`: this
-	writes the document the employer is inspected on. Every other refusal is the
-	tool's — the closed list of signable boxes, the authorized-signer roster on
-	the two employer boxes, the destroyed I-9 — and is not copied here.
+	A HIRING ROLE HOLDS THE PAD; THE ROSTER DECIDES WHOSE NAME GOES IN THE BOX.
+	v0.94.0, and the change is which question this gate is asking. `require_hr_role`
+	here was answering "who may attest FOR the employer" with a check on who may
+	hold the phone, and `tools/signatures.py` — the module this delegates to —
+	spends three paragraphs explaining that those are not the same question:
+	requiring the account at the pad to be an authorized signer "would mean the
+	only people who could collect a worker's signature are the people authorised
+	to sign FOR the employer, which is precisely the conflation §274a keeps
+	apart" (signatures.py `_require_signer`).
+
+	SO THE GATE WAS BOTH REDUNDANT AND HARMFUL. Redundant on the employer boxes,
+	because `SIGNATURE_BOXES` carries `signer_role="employer"` on I-9 Section 2
+	and Supplement B and `_require_signer` runs the roster check on exactly those
+	— Section 2 was already protected by the right mechanism, per person rather
+	than per title. Harmful on the employee boxes, because Section 1 and the W-4
+	employee signature are the WORKER'S OWN attestation, on nobody's roster and
+	required to be on nobody's roster — so demanding an HR account to hold the pad
+	meant a foreman could not collect a new hire's mark at all, and the hiring
+	flow died here at step 4 with the two federal forms already raised.
+
+	WHAT DID NOT MOVE: the per-box roster, the closed list of signable boxes,
+	`_evidence_role`'s refusal of a mislabelled capacity, and the destroyed-I-9
+	refusal. A foreman NOT on the roster still cannot sign Section 2 — the
+	refusal simply names the roster now instead of naming a role.
+
+	EVERY OTHER REFUSAL IS STILL THE TOOL'S and is still not copied here — the
+	closed list of signable boxes, the roster on the two employer boxes, the
+	destroyed I-9. That was already the design; this release stops the wrapper
+	contradicting it.
 	"""
 	guard.require_scope(user)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 
 	if not str(doctype or "").strip():
 		frappe.throw(
@@ -5226,18 +5301,24 @@ def get_document_preview(user: str, document_type=None, document_name=None, docn
 	screen open would repoint `generated_pdf` a dozen times a hire day and that
 	field is the copy somebody printed.
 
-	THE HR ROLE IS REQUIRED WITH NO EXCEPTION, as on every other method that
-	touches these three forms. `get_i9_form` lets a worker read their OWN I-9
-	because reading it harms nobody; this is addressed at a form by docname rather
-	than at a person, so there is no "their own" to make an exception for — and the
-	account holding the pad is the foreman's, not the signer's.
+	A HIRING ROLE, BECAUSE THIS IS THE READ A PAD MAKES BEFORE ANYBODY SIGNS.
+	v0.94.0. The previous docstring here argued its own replacement: it required
+	the HR role while observing, in its last clause, that "the account holding the
+	pad is the foreman's, not the signer's". Both of those cannot be true, and the
+	second one is — so a preview gated on HR meant the foreman could not put the
+	document in front of the worker to be signed, which is step 4 of a hire.
+
+	THERE IS STILL NO "THEIR OWN" TO MAKE AN EXCEPTION FOR. This is addressed at
+	a form by docname rather than at a person, so unlike `get_i9_form` it carries
+	no self-service branch; `require_hiring_role` plus the company scope is the
+	whole gate, and a picker is refused by it exactly as before.
 
 	Every refusal is the tool's: a form with no signature line, a doctype this app
 	does not render, a destroyed I-9, and Frappe's own `read` permission on the
 	record. None of it is restated here.
 	"""
 	allowed = guard.require_scope(user)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 
 	wanted = str(document_type or "").strip()
 	if not wanted:
@@ -5337,13 +5418,18 @@ def seal_signed_document(user: str, document_type=None, document_name=None, docn
 	private URL, and a route that produced an artefact the caller cannot open
 	would have produced it for nobody.
 
-	THE HR ROLE IS REQUIRED WITH NO EXCEPTION and Frappe's own `write` permission
-	on the form is checked by the tool. Sealing attaches a document to somebody's
-	personnel record and stamps the evidence register that describes it; an
-	account that may not write the form may not do either.
+	A HIRING ROLE, AND THE TOOL STILL CHECKS Frappe's own `write` permission on
+	the form. v0.94.0: sealing is the last beat of the signing chain that
+	`collect_signature` and `submit_form_signature` begin, and a gate that let the
+	foreman collect and submit but not seal would leave the tamper-evident copy
+	unmade — the evidence weaker for the sake of a role check two calls late.
+
+	WHAT PROTECTS THE SEAL IS NOT THE ROLE. The signature it seals already passed
+	the per-box roster; the form's own `write` permission is checked one layer
+	down; and the Signing Evidence row this stamps names the account that made it.
 	"""
 	allowed = guard.require_scope(user)
-	personnel.require_hr_role()
+	personnel.require_hiring_role()
 
 	wanted = str(document_type or "").strip()
 	if not wanted:
@@ -7144,12 +7230,24 @@ def attach_file_to_document(
 # a job you are holding is your own work, so `guard.FARM_OPS_ROLES` is the whole
 # gate — the same as `start_task` and `complete_task_via_mobile` above.
 #
-# THE DISCIPLINE METHODS ARE THE OPPOSITE. Every one of them carries
-# `personnel.require_hr_role` in its own body, because a discipline record is a
-# personnel document and a picker holding a perfectly good field credential has
-# no business writing or reading one. The tools underneath have no role check —
-# on the MCP transport the operator's enablement switch stands in front of them,
-# and a phone does not go through it.
+# THE INCIDENT METHODS SPLIT THREE WAYS SINCE v0.94.0, AND THEY USED TO BE ONE.
+# All five carried `personnel.require_hr_role` on the reasoning that a discipline
+# record is a personnel document and a picker has no business writing or reading
+# one. Half of that is right and the other half was gating the wrong act:
+#
+#   * REPORTING what happened — `create_discipline_record` — is `require_shift_role`.
+#     Documenting an incident is the same shape as reporting an accident, and the
+#     accident block eight paragraphs down already argues that at length.
+#   * THE SUBJECT'S OWN RECORD — `acknowledge_discipline_record`,
+#     `get_discipline_record`, `list_discipline_history` — is SELF-OR-HR, the
+#     line `get_i9_form` draws, with the caller resolved through `Employee.user_id`
+#     so the exception cannot be claimed by naming somebody.
+#   * THE REGISTER ACROSS EVERYBODY — `get_discipline_report` — stays `HR_ROLES`.
+#     It is not somebody reading their own file.
+#
+# The tools underneath still have no role check — on the MCP transport the
+# operator's enablement switch stands in front of them, and a phone does not go
+# through it.
 #
 # THE ACCIDENT METHODS SIT BETWEEN THE TWO, and the split is deliberate.
 # `create_accident_report` is open to ANY enrolled worker: the person who finds
@@ -7359,6 +7457,28 @@ def list_task_notes(user: str, doctype=None, name=None, task=None, limit=None) -
 	return narrative_tools.list_task_notes(inner).data
 
 
+
+def _require_self_or_hr(user: str, record: str) -> None:
+	"""The subject of this incident record may act on it; anybody else needs HR.
+
+	THE SAME LINE `get_i9_form` DRAWS, and drawn the same way — the subject is
+	read OFF THE RECORD and the caller off their own login, so there is nothing in
+	a request that can assert the exception. A caller who is not the subject falls
+	through to `require_hr_role` and gets its sentence.
+
+	IT REFUSES BY FALLING THROUGH RATHER THAN BY DECIDING. A record whose
+	`employee` cannot be read — a shape this site does not have, a row mid-write —
+	leaves `subject` empty, which matches no caller and therefore requires HR.
+	The failure direction is the safe one.
+	"""
+	try:
+		subject = frappe.db.get_value(DISCIPLINE_RECORD, record, "employee")
+	except Exception:  # pragma: no cover - a site shaping the column differently
+		subject = None
+	if not subject or str(subject) != str(fieldwork._employee_for(user) or ""):
+		personnel.require_hr_role()
+
+
 # ── 81. create_discipline_record ─────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("create_discipline_record", mutating=True, limit=guard.WRITE_LIMIT)
@@ -7379,21 +7499,37 @@ def create_discipline_record(
 	suspension_start=None,
 	suspension_end=None,
 	company=None,
+	report_direction=None,
 ) -> dict:
-	"""File one step of a progressive discipline chain, from a handset.
+	"""Report one incident, from a handset — the farm's direction or the worker's.
 
-	HR ROLE, NOT THE FIELD ROLE. A discipline record is a personnel document and
-	`employee.require_hr_role` is what stands in front of it — the tool
-	underneath has no check of its own, because on the MCP transport the
-	operator's enablement switch does that job and a phone does not go through
-	it.
+	SHIFT ROLE SINCE v0.94.0, AND THE RECLASSIFICATION IS THE POINT. This used to
+	read "HR ROLE, NOT THE FIELD ROLE. A discipline record is a personnel
+	document." Documenting what happened is REPORTING, not administration — and
+	this codebase already contains that exact argument, forty lines further down
+	this same file, about `create_accident_report`:
+
+	    "the person who finds somebody on the ground is whoever finds them, and a
+	    server that refused their report because they are not a foreman would be a
+	    server people work around at the exact moment that matters."
+
+	That shipped in v0.79.0. Discipline was gated the opposite way in the same
+	sprint, in the same file. A foreman who watched the incident and cannot file
+	it either does not file it or dictates it to somebody who did not see it, and
+	both of those are worse records than the one this gate was protecting.
+
+	READING somebody else's file is a different question and stays `HR_ROLES` —
+	see `get_discipline_record` below, which draws the self-or-HR line
+	`get_i9_form` draws. Initiating a report does not.
 
 	`issued_by` IS NOT ON THIS SIGNATURE. It is the caller, resolved from the
 	authenticated session — an account that could name somebody else as the
 	issuing manager could put a supervisor's name on a warning they never gave,
-	which is the one forgery this record is most exposed to.
+	which is the one forgery this record is most exposed to. `reported_by` is
+	resolved server-side by the tool for the same reason, and the two are distinct
+	facts: widening this gate does not blur who reported what.
 	"""
-	personnel.require_hr_role()
+	personnel.require_shift_role()
 	allowed = guard.require_scope(user)
 	entity = guard.require_company(user, company, allowed)
 	issuer = _employee(user)
@@ -7419,6 +7555,7 @@ def create_discipline_record(
 		("narrative", narrative),
 		("suspension_start", suspension_start),
 		("suspension_end", suspension_end),
+		("report_direction", report_direction),
 	):
 		if value not in (None, ""):
 			inner[key] = str(value).strip()
@@ -7439,11 +7576,24 @@ def acknowledge_discipline_record(
 	employee_statement=None,
 	manager_signature=None,
 ) -> dict:
-	"""Record that the employee was told — or that they declined to sign."""
-	personnel.require_hr_role()
-	allowed = guard.require_scope(user)
+	"""Record that the employee was told — or that they declined to sign.
 
-	inner = {"record": guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)}
+	SELF-OR-HR SINCE v0.94.0. The subject signs their own acknowledgment, on their
+	own phone: under the old gate an HR account had to be holding the pad for a
+	worker to acknowledge a warning about themselves, which is the same conflation
+	`collect_signature` was carrying and the same fix. The either/or rule the
+	controller enforces — a signature or an explicit refusal, never silence
+	dressed as agreement — is untouched and is what actually protects this record.
+
+	THE SUBJECT IS RESOLVED FROM THE RECORD AND THE CALLER FROM THEIR LOGIN, so
+	the exception cannot be claimed by naming somebody. Anybody who is not the
+	subject still needs `HR_ROLES`.
+	"""
+	allowed = guard.require_scope(user)
+	docname = guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)
+	_require_self_or_hr(user, docname)
+
+	inner = {"record": docname}
 	if declined_to_sign is not None:
 		inner["declined_to_sign"] = declined_to_sign
 	for key, value in (
@@ -7462,24 +7612,41 @@ def acknowledge_discipline_record(
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_discipline_record", limit=guard.READ_LIMIT)
 def get_discipline_record(user: str, record=None) -> dict:
-	"""One step in full, with its narrative and the step before it."""
-	personnel.require_hr_role()
+	"""One step in full, with its narrative and the step before it.
+
+	SELF-OR-HR SINCE v0.94.0, following `get_i9_form` exactly. A worker may read a
+	warning in their own file — this was the one personnel record with no
+	`get_my_*` equivalent beside `get_my_w4`, `get_my_i9`, `list_my_pay_stubs` and
+	`list_my_trainings`, and several states give an employee a statutory right to
+	their own personnel file. Anybody else's record still takes `HR_ROLES`.
+	"""
 	allowed = guard.require_scope(user)
-	return discipline_tools.get_discipline_record({
-		"record": guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)
-	}).data
+	docname = guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)
+	_require_self_or_hr(user, docname)
+	return discipline_tools.get_discipline_record({"record": docname}).data
 
 
 # ── 84. list_discipline_history ──────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_discipline_history", limit=guard.READ_LIMIT)
-def list_discipline_history(user: str, employee=None, include_inactive=None) -> dict:
-	"""One employee's whole chain, in order."""
-	personnel.require_hr_role()
+def list_discipline_history(user: str, employee=None, include_inactive=None, direction=None) -> dict:
+	"""One employee's whole file, in order — both directions by default.
+
+	SELF-OR-HR SINCE v0.94.0. A worker reading their own file gets BOTH
+	directions, which is why the tool defaults that way: a grievance they raised
+	in June is part of the story of a warning they got in July, and a view that
+	showed one without the other is the version that suits whoever is holding the
+	report. `direction` narrows it for a caller that wants one side.
+	"""
 	allowed = guard.require_scope(user)
-	inner = {"employee": _employee_argument(employee, allowed, "employee")}
+	person = _employee_argument(employee, allowed, "employee")
+	if person != fieldwork._employee_for(user):
+		personnel.require_hr_role()
+	inner: dict = {"employee": person}
 	if include_inactive is not None:
 		inner["include_inactive"] = include_inactive
+	if direction not in (None, ""):
+		inner["direction"] = str(direction).strip()
 	return discipline_tools.list_discipline_history(inner).data
 
 
@@ -7487,7 +7654,15 @@ def list_discipline_history(user: str, employee=None, include_inactive=None) -> 
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_discipline_report", limit=guard.READ_LIMIT)
 def get_discipline_report(user: str, employee=None) -> dict:
-	"""The chain as a document for legal or HR review, including its gaps."""
+	"""The chain as a document for legal or HR review, including its gaps.
+
+	`HR_ROLES`, UNCHANGED BY v0.94.0 AND DELIBERATELY SO. The three reads beside
+	it gained a self-service branch; this one did not, because it is not somebody
+	reading their own record — it is the register across everybody, the document
+	the module docstring calls "what an HR manager hands a lawyer". It is also
+	SUPERVISOR DIRECTION ONLY: `chain_for` filters it, so a worker's own
+	grievances can never appear in it as their disciplinary history.
+	"""
 	personnel.require_hr_role()
 	allowed = guard.require_scope(user)
 	return discipline_tools.get_discipline_report({
@@ -8155,7 +8330,7 @@ def submit_wizard_via_mobile(user: str, wizard=None, wizard_key=None, answers=No
 
 	IT IS NOT THE DISPATCHER `routes.py` REFUSES, AND THE DIFFERENCE IS THE POINT.
 	The objection to a `submit_wizard` was that it puts the permission decision in
-	the wrong place — a Housing Inspection and a Discipline Record have different
+	the wrong place — a Housing Inspection and a Farm Incident Record have different
 	guards, and one route in front of both would decide for both. Nothing here
 	decides anything:
 
@@ -9619,8 +9794,23 @@ def list_payroll_deductions(
 	IT IS A READ OVER PII AND IS RATE LIMITED AS ONE. What a person's wages are
 	garnished for is among the more sensitive facts this app holds; `READ_LIMIT`
 	is a foreman answering a question and is not a register being enumerated.
+
+	IT IS `require_hr_role`, SINCE v0.94.0, AND IT WAS NOT BEFORE. Three of the
+	five deduction methods on this surface were scope-only reads while the two
+	WRITES carried the gate, so the register a garnishment lives in could be read
+	by any enrolled account in the entity and only changed by HR. Three separate
+	places in this codebase asserted the opposite — that all five were HR-only in
+	their own bodies — and were wrong; the gate is here now and those sentences
+	are corrected in the same commit.
+
+	IT COSTS THIS FARM NOTHING, WHICH IS WHY IT IS THE ONE TIGHTENING IN A RELEASE
+	OF WIDENINGS. `HR_ROLES` already names Farm Manager, so on a farm with no HR
+	staff "HR-gated" does not mean calling a department that does not exist — it
+	means the farmer, who was always the person doing this. The only account this
+	newly excludes is a picker reading a coworker's child-support order.
 	"""
 	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
 	inner: dict = {"company": _company(user, company, allowed)}
 	if employee:
 		inner["employee"] = _employee_argument(employee, allowed)
@@ -9647,8 +9837,28 @@ def get_payroll_deduction(user: str, deduction=None) -> dict:
 	The docname is proved to belong to an entity this caller may reach before it
 	is read, so a row belonging to another company reads as not found rather than
 	as refused — the register cannot be mapped by watching which error comes back.
+
+	IT IS `require_hr_role`, SINCE v0.94.0, AND IT WAS NOT BEFORE. Three of the
+	five deduction methods on this surface were scope-only reads while the two
+	WRITES carried the gate, so the register a garnishment lives in could be read
+	by any enrolled account in the entity and only changed by HR. Three separate
+	places in this codebase asserted the opposite — that all five were HR-only in
+	their own bodies — and were wrong; the gate is here now and those sentences
+	are corrected in the same commit.
+
+	IT COSTS THIS FARM NOTHING, WHICH IS WHY IT IS THE ONE TIGHTENING IN A RELEASE
+	OF WIDENINGS. `HR_ROLES` already names Farm Manager, so on a farm with no HR
+	staff "HR-gated" does not mean calling a department that does not exist — it
+	means the farmer, who was always the person doing this. The only account this
+	newly excludes is a picker reading a coworker's child-support order.
+
+	THE ROLE CHECK RUNS BEFORE `require_scoped_doc`, DELIBERATELY. A refused
+	caller must learn nothing about the docname they asked for — not even whether
+	it exists — so the order here is the difference between "you may not read
+	this register" and an oracle that confirms row names one guess at a time.
 	"""
 	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
 	docname = guard.require_scoped_doc(
 		PAYROLL_DEDUCTION, deduction, "deduction", allowed,
 	)
@@ -9679,8 +9889,26 @@ def list_employee_deductions(
 	withholding the law requires, and without it the preview treats gross as
 	disposable and OVERSTATES what a garnishment may take. The answer says so
 	rather than quietly assuming zero tax.
+
+	IT IS `require_hr_role`, SINCE v0.94.0, AND IT WAS NOT BEFORE. Three of the
+	five deduction methods on this surface were scope-only reads while the two
+	WRITES carried the gate, so the register a garnishment lives in could be read
+	by any enrolled account in the entity and only changed by HR. Three separate
+	places in this codebase asserted the opposite — that all five were HR-only in
+	their own bodies — and were wrong; the gate is here now and those sentences
+	are corrected in the same commit.
+
+	IT COSTS THIS FARM NOTHING, WHICH IS WHY IT IS THE ONE TIGHTENING IN A RELEASE
+	OF WIDENINGS. `HR_ROLES` already names Farm Manager, so on a farm with no HR
+	staff "HR-gated" does not mean calling a department that does not exist — it
+	means the farmer, who was always the person doing this. The only account this
+	newly excludes is a picker reading a coworker's child-support order.
+
+	THE ROLE CHECK RUNS BEFORE `_employee_argument`, for the reason above: the
+	refusal should not depend on, or reveal, whether the named worker resolves.
 	"""
 	allowed = guard.require_scope(user)
+	personnel.require_hr_role()
 	inner: dict = {"employee": _employee_argument(employee, allowed)}
 	for key, value in (
 		("in_force_on", in_force_on),
@@ -9846,11 +10074,13 @@ def update_payroll_deduction(
 # should be able to open the film, and a gate that made them ask a foreman for
 # it would be a gate that turns a two-minute fix into somebody's Monday.
 #
-# THE OTHER SEVEN CARRY THE HR GATE the training matrix carries. A session names
-# by name who was taught what, which is a personnel document — and the two reads
-# call `require_hr_role` in the wrapper as well as one layer down, for the reason
-# the five discipline routes do: the refusal should happen before the register is
-# read, not after.
+# THE OTHER SEVEN ARE GATED ONE LAYER DOWN, AND SINCE v0.94.0 THE SESSION CALLS
+# TAKE `require_shift_role` RATHER THAN `require_hr_role`. A session names by name
+# who was taught what, which is a personnel document — but running the tailgate is
+# the named supervisor's statutory duty under OAR 437-004-1131, so the gate that
+# decides who may hold one is the gate that names supervisors. `update_training_type`
+# below is the exception and keeps the HR gate: a curriculum is a decision with a
+# citation behind it rather than an afternoon on a block.
 #
 # THE NUMBERING CONTINUES FROM 123 and may have gaps: several sessions were
 # appending to this file at once. A gap costs a reader nothing; two blocks

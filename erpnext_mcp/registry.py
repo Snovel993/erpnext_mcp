@@ -19340,14 +19340,14 @@ TOOLS = {
 	"add_task_note": _tool(
 		narrative.add_task_note,
 		"MUTATING (default OFF). Append a narrative entry to a Farm Task, an "
-		"Accident Report or a Discipline Record — a foreman's account of what "
+		"Accident Report or a Farm Incident Record — a foreman's account of what "
 		"was done and why, at whatever length it takes.\n\n"
 		"ENTRIES ARE APPENDED AND NEVER EDITED, and that is the whole "
 		"evidentiary value. An investigation spanning four days is four entries "
 		"with four timestamps, and the reason a hearing believes any of it is "
 		"that Monday's account was written on Monday.",
 		{
-			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Farm Incident Record."),
 			"name": _field(_STRING, "Which record."),
 			"task": _field(_STRING, "Shorthand for a Farm Task — the common case."),
 			"narrative": _field(_STRING, "The account itself."),
@@ -19384,7 +19384,7 @@ TOOLS = {
 		"A FAILED ATTACH DOES NOT LOSE THE WORDS — the narrative is written "
 		"first, and a broken file link comes back as `audio_error`.",
 		{
-			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Farm Incident Record."),
 			"name": _field(_STRING, "Which record."),
 			"task": _field(_STRING, "Shorthand for a Farm Task."),
 			"transcription": _field(_STRING, "What the handset transcribed. Required."),
@@ -19415,7 +19415,7 @@ TOOLS = {
 		"`full_narrative` is the whole thing assembled in order with each "
 		"entry's author, timestamp and whether it was spoken. Read-only.",
 		{
-			"doctype": _field(_STRING, "Farm Task, Accident Report or Discipline Record."),
+			"doctype": _field(_STRING, "Farm Task, Accident Report or Farm Incident Record."),
 			"name": _field(_STRING, "Which record."),
 			"task": _field(_STRING, "Shorthand for a Farm Task."),
 			"limit": _field(_INTEGER, "Maximum entries."),
@@ -19477,8 +19477,8 @@ TOOLS = {
 		required=("employee", "discipline_type", "incident_description", "expected_improvement", "followup_date"),
 		mutating=True,
 		title="Create a discipline record",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"acknowledge_discipline_record": _tool(
 		discipline.acknowledge_discipline_record,
@@ -19490,7 +19490,7 @@ TOOLS = {
 		"refused, and a refusal with no witness named is refused — a declining "
 		"nobody saw is the employer's word for it.",
 		{
-			"record": _field(_STRING, "The Discipline Record docname."),
+			"record": _field(_STRING, "The Farm Incident Record docname."),
 			"employee_signature": _field(_STRING, "The signature File."),
 			"declined_to_sign": _field(_BOOLEAN, "They refused. Needs a witness."),
 			"witnesses": _field(_STRING, "Who saw the refusal."),
@@ -19501,17 +19501,17 @@ TOOLS = {
 		required=("record",),
 		mutating=True,
 		title="Acknowledge a discipline record",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"get_discipline_record": _tool(
 		discipline.get_discipline_record,
 		"One step in full, with its narrative and the step before it. Read-only.",
-		{"record": _field(_STRING, "The Discipline Record docname.")},
+		{"record": _field(_STRING, "The Farm Incident Record docname.")},
 		required=("record",),
 		title="Get a discipline record",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"list_discipline_history": _tool(
 		discipline.list_discipline_history,
@@ -19524,8 +19524,8 @@ TOOLS = {
 		},
 		required=("employee",),
 		title="List discipline history",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"get_discipline_report": _tool(
 		discipline.get_discipline_report,
@@ -19545,8 +19545,8 @@ TOOLS = {
 		},
 		required=("employee",),
 		title="Get a discipline report",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	"expire_discipline_record": _tool(
 		discipline.expire_discipline_record,
@@ -19559,15 +19559,15 @@ TOOLS = {
 		"employee may point to, and a chain that had one deleted cannot explain "
 		"the gap where it was.",
 		{
-			"record": _field(_STRING, "The Discipline Record docname."),
+			"record": _field(_STRING, "The Farm Incident Record docname."),
 			"status": _field(_STRING, "Expired or Rescinded."),
 			"reason": _field(_STRING, "Why. Required."),
 		},
 		required=("record", "reason"),
 		mutating=True,
 		title="Expire or rescind a discipline record",
-		available=_needs_doctype("Discipline Record"),
-		requires="the Discipline Record DocType, which ships with erpnext_mcp — run `bench migrate`",
+		available=_needs_doctype("Farm Incident Record"),
+		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.79.0: accident investigation ────────────────────────────────────
 	"create_accident_report": _tool(

@@ -257,8 +257,16 @@ def _notes(row: dict) -> list[str]:
 
 
 def get_payroll_deduction(args: dict) -> ToolResult:
-	"""One deduction in full, with what the payroll engine will make of it."""
+	"""One deduction in full, with what the payroll engine will make of it.
+
+	v0.94.0: `require_hr_role`. THE WRITES IN THIS MODULE ALWAYS CARRIED IT AND
+	THE THREE READS DID NOT, which made the register readable by any principal
+	the transport let through while only HR could change it. Closing it here
+	rather than only in the mobile wrapper is what closes the MCP path too: a
+	wrapper gate protects one transport, and this module is reachable from both.
+	"""
 	_require()
+	require_hr_role()
 	name = as_str(args, "deduction", required=True)
 	if not frappe.db.exists(PAYROLL_DEDUCTION, name):
 		raise ToolError(f"no Farm Payroll Deduction called {name!r}.")
@@ -287,8 +295,15 @@ def list_payroll_deductions(args: dict) -> ToolResult:
 	beside the rows are per period and are what the deductions ASK for, not what
 	a run will take: the ceilings are a property of each employee's pay and this
 	list does not have anybody's pay in front of it.
+
+	v0.94.0: `require_hr_role`. THE WRITES IN THIS MODULE ALWAYS CARRIED IT AND
+	THE THREE READS DID NOT, which made the register readable by any principal
+	the transport let through while only HR could change it. Closing it here
+	rather than only in the mobile wrapper is what closes the MCP path too: a
+	wrapper gate protects one transport, and this module is reachable from both.
 	"""
 	_require()
+	require_hr_role()
 	company = resolve_company(as_str(args, "company"))
 	filters = {}
 	if company:
@@ -347,7 +362,14 @@ def list_employee_deductions(args: dict) -> ToolResult:
 	period's pay it prices each line against the CCPA ceilings and shows what
 	would be withheld and what would fall short. Without them the amounts are
 	what each order asks for, which for a percentage is not yet a number.
+
+	v0.94.0: `require_hr_role`. THE WRITES IN THIS MODULE ALWAYS CARRIED IT AND
+	THE THREE READS DID NOT, which made the register readable by any principal
+	the transport let through while only HR could change it. Closing it here
+	rather than only in the mobile wrapper is what closes the MCP path too: a
+	wrapper gate protects one transport, and this module is reachable from both.
 	"""
+	require_hr_role()
 	_require()
 	employee = _resolve_employee(as_str(args, "employee", required=True))
 	on_date = as_date(args, "in_force_on") or frappe.utils.today()

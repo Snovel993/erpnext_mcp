@@ -825,9 +825,22 @@ def link_badge_to_employee(args: dict) -> ToolResult:
 	(a lost card reissued to somebody else). Backfills `employee` onto any
 	already-synced Bucket Log Entry and Bucket Log Session that carries this
 	badge and had no employee resolved yet — a badge mapped after the fact
-	still pays for what was already picked."""
+	still pays for what was already picked.
+
+	v0.94.0: `require_hiring_role`, NOT `require_hr_role`, AND THE INTEGRATION
+	TEST IS WHY. `generate_employee_badge_qr` moved to the hiring role as part of
+	F11 — a badge is an identifier rather than PII, and issuing one is step 9 of a
+	hire — but it MINTS the identifier by calling this function, so the widening
+	stopped dead one layer down and a foreman got "may not change the personnel
+	register" from a call he never made. The gate has to move with the act, not
+	with the file the act happens to be in.
+
+	IT IS STILL A GATE, AND A REAL ONE. A badge map decides whose piece-rate a
+	scanned bucket pays, so repointing one is repointing somebody's wages — which
+	is why this is `HIRING_ROLES` and not the enrolment-only check the badge READS
+	carry. A picker is refused here exactly as before."""
 	_require(BADGE_DOCTYPE)
-	actor = employee_tool.require_hr_role()
+	actor = employee_tool.require_hiring_role()
 
 	badge_id = as_str(args, "badge_id", required=True)
 	company = resolve_company(as_str(args, "company"), required=True)

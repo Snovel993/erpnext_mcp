@@ -1468,7 +1468,7 @@ APP_DOCTYPES = {
 	# and TASK paths — a discipline chain is read from a mobile wrapper and an
 	# accident report spawns sub-tasks — so they are registered here rather than
 	# seeded per-test, for the reason Spray REI is.
-	"Discipline Record": "discipline_record",
+	"Farm Incident Record": "farm_incident_record",
 	"Accident Report": "accident_report",
 	"Accident Witness": "accident_witness",
 	# v0.79.0. The wizard registry. Definitions are DATA, so the double has to
@@ -2239,7 +2239,7 @@ CHILD_TABLES = {
 	# tables would drift the first time one of them grew a column.
 	("Farm Task", "task_notes"): "Task Note",
 	("Accident Report", "investigation_notes"): "Task Note",
-	("Discipline Record", "discipline_notes"): "Task Note",
+	("Farm Incident Record", "discipline_notes"): "Task Note",
 	("Farm Task Assignment", "time_segments"): "Task Time Segment",
 	("Farm Task", "linked_tasks"): "Farm Task Link",
 	("Accident Report", "witnesses"): "Accident Witness",

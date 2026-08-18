@@ -13897,7 +13897,7 @@ is not a shift.
 ### Narrative notes, typed and spoken
 
 `Task Note` is **one child table with three parents** — Farm Task, Accident
-Report, Discipline Record — because appending an account of what happened is one
+Report, Farm Incident Record — because appending an account of what happened is one
 act, and three near-identical tables would drift the first time one grew a column.
 
 **Entries are appended and never edited.** An investigation spanning four days is
@@ -14100,7 +14100,7 @@ open investigation on the asset.
 | `pause` / `resume` | enrolment | A worker's own work. `worker_id` is not on the signature, so the argument filter stops an account stopping a stranger's clock |
 | `link_tasks` | enrolment | An observation. Noticing two jobs are one valve is what a worker in a block sees and a foreman at a desk does not |
 | `merge_task` | Foreman+ | A decision. It takes somebody's work off the board under another name |
-| narrative trio | enrolment | A worker's account of their own job. The Discipline Record parent takes HR |
+| narrative trio | enrolment | A worker's account of their own job. The Farm Incident Record parent takes HR |
 | five discipline routes | **HR role** | A personnel document. A field credential has no business in one |
 | `create_accident_report`, `get_accident_report` | enrolment | **The person who finds somebody on the ground is whoever finds them.** A server that refused their report because they are not a foreman is one people work around at the exact moment that matters |
 | update / close / list accidents | Foreman+ | The investigation is somebody's job |

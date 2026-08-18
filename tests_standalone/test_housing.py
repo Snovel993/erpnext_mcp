@@ -30,6 +30,10 @@ removes one and shows the SAME removal breaks an operational answer and a
 regulatory one.
 """
 
+import frappe
+
+from erpnext_mcp import compat, compliance_fields
+
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
 from .harness import STORE
 
@@ -494,6 +498,100 @@ class CreateHousingAssignment(HousingTestCase):
 				{"unit": "MC-Cabin-01", "employee": "A", "assigned_date": "2026-06-01"},
 			),
 		)
+
+
+class TheHousingDeductionIsTheEntitysAnswerAndNotTheForemans(HousingTestCase):
+	"""v0.94.0, decision 2. A housing deduction is a WAGE deduction.
+
+	It was a three-way per-assignment Select (`Yes` / `No` / `Unknown`) that a
+	foreman answered on every bunk — and this farm charges no rent for labor camp
+	housing at all, so it was `No` every time and `Unknown` wherever somebody
+	skipped it. `Unknown` is not a neutral value here: ORS 653 / OAR 839-015
+	require the deduction to be DISCLOSED, and the Housing Assignment row is that
+	disclosure, so a column full of `Unknown` is a disclosure nobody made.
+
+	WHAT THE STANDALONE DOUBLE CAN AND CANNOT PROVE. It stores documents whole and
+	hands back what it was given, so these tests prove the resolution order and
+	that the value is PERSISTED on the row — which is the property that matters.
+	They do not prove Frappe's own Select validation would accept the value on the
+	bench; `as_choice` against the doctype's options is what does that, and it runs
+	on both.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.a_camp()
+
+	def _company_default(self, value):
+		"""Install the Custom Field the way a migrate would, then answer it.
+
+		BOTH HALVES MATTER. `compat.has_field` reads this site's meta, so setting
+		a value on a column the site does not have would leave the resolver
+		correctly returning "" and the test passing for the wrong reason — the
+		negative-control test below is the one that proves this setUp is doing
+		something rather than nothing.
+		"""
+		self.configure(**{**ALL_ON, "enabled": 1, "allow_install_compliance_fields": 1})
+		compliance_fields.install_compliance_fields()
+		self.assertTrue(
+			compat.has_field("Company", "default_housing_deduction_from_wages"),
+			"the Company custom field did not install, so this test would prove nothing",
+		)
+		frappe.db.set_value("Company", MAIN, "default_housing_deduction_from_wages", value)
+
+	def test_the_entitys_default_is_written_onto_the_row(self):
+		"""PF-3, AND IT IS THE WHOLE POINT OF THE CHANGE. `audit_packets` and the
+		camp register read the per-assignment COLUMN. Resolving the default when a
+		report runs would leave every assignment made after this release reporting
+		'Unknown' to an auditor while looking right in the app — so the assertion
+		is against the stored row, not against what the tool returned."""
+		self._company_default("No")
+		created = self.an_assignment()
+		self.assertEqual(
+			frappe.db.get_value(
+				"Housing Assignment", created["name"], "housing_deduction_from_wages"
+			),
+			"No",
+		)
+
+	def test_an_explicit_answer_still_wins(self):
+		"""The arrangement can differ from the entity's norm, which is what the
+		Housing Unit doctype's own help text is right about. This supplies an
+		answer where the caller sent none; it never overrides one."""
+		self._company_default("No")
+		created = self.an_assignment(housing_deduction_from_wages="Yes")
+		self.assertEqual(
+			frappe.db.get_value(
+				"Housing Assignment", created["name"], "housing_deduction_from_wages"
+			),
+			"Yes",
+		)
+
+	def test_a_company_with_no_default_set_behaves_exactly_as_before(self):
+		"""THE NEGATIVE CONTROL, and the one that proves this is a default rather
+		than a rewrite. A site mid-upgrade, or an entity nobody has answered for,
+		falls through to what happened before this existed — the column is left
+		unset and the register reports it as Unknown."""
+		created = self.an_assignment()
+		self.assertEqual(
+			frappe.db.get_value(
+				"Housing Assignment", created["name"], "housing_deduction_from_wages"
+			),
+			"Unknown",
+		)
+		listed = self.tool_data("list_housing_assignments", {"company": MAIN})
+		row = next(entry for entry in listed["assignments"] if entry["name"] == created["name"])
+		self.assertEqual(row["housing_deduction_from_wages"], "Unknown")
+
+	def test_the_register_reads_the_stored_answer_back(self):
+		"""The read path the compliance packet uses, end to end: a default set
+		once on the entity reaches the report as a real disclosure."""
+		self._company_default("Yes")
+		created = self.an_assignment()
+		listed = self.tool_data("list_housing_assignments", {"company": MAIN})
+		row = next(entry for entry in listed["assignments"] if entry["name"] == created["name"])
+		self.assertEqual(row["housing_deduction_from_wages"], "Yes")
+		self.assertEqual(listed["with_wage_deduction"], [created["name"]])
 
 
 class AssignmentRefusals(HousingTestCase):

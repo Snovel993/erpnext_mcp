@@ -356,11 +356,21 @@ HIRING_FORMS = ("I-9 Form",)
 #: pad has to make BEFORE anybody signs anything.
 #:
 #: THE GRANT IS NOT A WIDENING, WHICH IS THE PART WORTH CHECKING. `w4.submit_w4`
-#: inserts with `flags.ignore_permissions = True` behind `employee.require_hr_role()`,
-#: and `HR_ROLES` names Farm Manager — so this role has been creating and editing
-#: W-4 records through this app since the wizard shipped, on every site, with no
-#: DocPerm saying so. What the table said and what the role did were already out of
-#: step; this puts them back in step rather than granting something new.
+#: inserts with `flags.ignore_permissions = True`, and Farm Manager has therefore
+#: been creating and editing W-4 records through this app since the wizard
+#: shipped, on every site, with no DocPerm saying so. What the table said and what
+#: the role did were already out of step; this puts them back in step rather than
+#: granting something new.
+#:
+#: CORRECTION, v0.94.0: THIS PARAGRAPH USED TO SAY `submit_w4` RUNS "BEHIND
+#: `employee.require_hr_role()`" AND THAT WAS NEVER TRUE. It ran behind no role
+#: gate at all — enrolment was the whole check — so the sentence described a
+#: protection the code did not have, on the one surface where being wrong about
+#: that matters most. It now runs behind `employee.require_hiring_role()`
+#: (`HIRING_ROLES` = `HR_ROLES` + Foreman + Crew Leader), which is a RESTRICTION
+#: against what shipped and a widening against putting it behind `HR_ROLES`.
+#: Whose name goes in the Employers Only block is a separate question answered by
+#: the authorized-signer roster, not by any role on that list.
 #:
 #: READ AND WRITE. NOT `create`, AND NOT `delete`, for the reasons `HIRING_FORMS`
 #: gives: a withholding certificate begins with the worker's own elections, and a
@@ -633,9 +643,12 @@ ROLE_SPECS = (
 			"could dispatch could send their own crew to their own work",
 			"move the container fill threshold — read-only here, the same as it is for the "
 			"checker applying it",
-			"hire, edit an Employee, or touch an I-9 or a W-4 — running a shift is not the "
-			"personnel register, which is why `employee.HR_ROLES` and `employee.SHIFT_ROLES` "
-			"are two lists",
+			"read the personnel register, or edit an Employee who already exists — "
+			"`search_employees` and `update_employee` keep `employee.HR_ROLES`, which is why "
+			"that list and `employee.SHIFT_ROLES` are still two lists",
+			"make the employer's I-9 Section 2 attestation unless the farm has named them "
+			"on the authorized-signer roster — that is a designation on a PERSON under "
+			"8 U.S.C. §1324a and no role substitutes for it",
 			"read the compliance calendar, the SOP library or the certificate register",
 			"touch accounting",
 		),

@@ -1874,17 +1874,20 @@ class TheOnboardingEvidenceActuallyLands(FarmOpsAPITestCase):
 			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
 		)
 
-	def test_a_worker_without_the_hr_role_cannot_file_onboarding_evidence(self):
+	def test_a_worker_without_a_hiring_role_cannot_file_onboarding_evidence(self):
 		"""These are the photographs an employer is inspected on, and a picker is
 		not who files them.
 
+		v0.94.0 MOVED THIS GATE FROM `HR_ROLES` TO `HIRING_ROLES` and a Field
+		Worker is on neither, so the refusal survives the widening — it just names
+		the hire now instead of the register.
+
 		400 AND NOT 401, which is the part that matters to a handset:
-		`employee.require_hr_role` raises `ToolError`, `guard.endpoint` turns that
-		into a `frappe.ValidationError` so its sentence reaches the phone in
-		`_server_messages`, and `app._status_for` answers 400. The same shape as
-		every other HR-gated method on this surface. The credential is real, the
-		app stays signed in, and the day's queued work is not discarded — which
-		is what a 401 would do.
+		`employee.require_hiring_role` raises `ToolError`, `guard.endpoint` turns
+		that into a `frappe.ValidationError` so its sentence reaches the phone in
+		`_server_messages`, and `app._status_for` answers 400. The credential is
+		real, the app stays signed in, and the day's queued work is not discarded
+		— which is what a 401 would do.
 		"""
 		finalized = self.stage_and_finalize()
 		set_roles(WORKER, ["Field Worker"])
@@ -1893,9 +1896,29 @@ class TheOnboardingEvidenceActuallyLands(FarmOpsAPITestCase):
 			{"employee": self.EMPLOYEE, "file_token": finalized["file_token"]},
 		)
 		self.assertEqual(status, 400)
-		self.assertIn("personnel register", parsed["error"])
+		self.assertIn("may not bring a person onto the farm", parsed["error"])
 		self.assertFalse(
 			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
+		)
+
+	def test_but_a_foreman_files_them_over_the_wire(self):
+		"""THE WIDENING, ON THE TRANSPORT THE PHONE ACTUALLY USES.
+
+		An in-process tool test would not prove the sidecar route accepts this —
+		and step 7 of a hire is where v0.48.3's whole argument lands: the person
+		holding the phone that photographed the licence is the person sitting with
+		the new hire. This is the assertion that the evidence now lands from that
+		phone rather than from a desk that does not exist on this farm.
+		"""
+		finalized = self.stage_and_finalize()
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.post(
+			f"{PREFIX}/mobile/attach_onboarding_document",
+			{"employee": self.EMPLOYEE, "file_token": finalized["file_token"]},
+		)
+		self.assertEqual(
+			frappe.db.get_value("File", finalized["file_token"], "attached_to_name"),
+			self.EMPLOYEE,
 		)
 
 	def test_an_employee_outside_the_callers_entities_is_not_found(self):

@@ -258,6 +258,33 @@ feature a zero it could not tell from a real one.
 | `ppe_requirements` | Small Text | no | EPA WPS 40 CFR 170.507 — handler PPE; label PPE statement | The label's PPE statement is what the handler and any early-entry worker must wear, and the Worker Protection Standard requires the employer to provide it. It is a property of the product, so it is recorded once per product. | What has to be in the shed before the spray can happen. A respirator nobody stocked is a spray that does not go out, and this is the field that says so a week early instead of on the morning. |
 | `label_scan_validation` | Link | no | Internal provenance — v0.69.0 Document Intelligence | Where the eight fields above came from. A Document Validation holds the photograph, the OCR text, the extraction and every check run against it, so a number on this Item can be traced to the label it was read off rather than to whoever typed it. It also carries whether a person has confirmed the reading, which is the only thing on that record a machine did not produce. | Whether the numbers above can be trusted at the shed. An unvalidated REI and one read off a photograph a supervisor confirmed are the same integer on the screen and two very different things to bet a crew's re-entry on. |
 
+### `Company` — erpnext
+
+Whether this entity charges its labor camp occupants rent, answered once for the entity instead of guessed at on every bunk assignment. ORS 653 and OAR 839-015 require a housing deduction to be disclosed; the Housing Assignment row is that disclosure and still carries the answer. What this changes is who supplies it.
+
+**A default, not a replacement.** `housing_deduction_from_wages` remains a
+per-assignment Select on Housing Assignment, and an explicit answer on a single
+assignment still wins — one arrangement can genuinely differ from the entity's
+norm. What this field supplies is the answer where the caller sent none, so the
+column stops reading `Unknown` on rows where a foreman was asked a wage question
+he should never have been asked.
+
+**It is written onto the row at creation, never resolved at read time.** The
+audit packet and the camp register read the per-assignment column directly. A
+default resolved when a report runs would leave every assignment created after
+v0.94.0 reporting `Unknown` to an auditor while looking correct in the app —
+which is the trap this note exists to keep shut.
+
+**On Company rather than a single-doctype setting.** This app is multi-company,
+and a `"issingle": 1` settings doctype holds one row for the whole site; it would
+need a per-company child table to be correct. A field on Company is per-company
+by construction. It is deliberately *not* `set_company_defaults`, which is the
+accounting-defaults tool and keyed to its own supported list.
+
+| Field | Type | Required | Framework | Why the regulator wants it | What breaks in the WORK without it |
+| --- | --- | --- | --- | --- | --- |
+| `default_housing_deduction_from_wages` | Select | no | ORS 653.035 and OAR 839-015-0100 (deductions from agricultural wages must be disclosed and authorised); 29 CFR 531 on lodging credited against the minimum wage | A housing deduction is a wage deduction, and a record that says 'Unknown' for every assignment is a disclosure nobody made. This is the entity's standing answer, so each Housing Assignment is written with a real one. | The foreman assigning a bunk stops being asked a wage question. The value is WRITTEN ONTO each Housing Assignment at creation, not resolved when a report reads it — `audit_packets` and the camp register read the per-assignment column, and a lazily-resolved default would leave them reporting 'Unknown' for every row created after this shipped. |
+
 ### `Housing Unit` — erpnext_mcp
 
 FSMA Produce Safety Rule Subpart L worker facilities, and the habitability and detector-test dates Oregon's agricultural labor housing rules turn on. Shipped as declared fields in v0.12.0, verified here.

@@ -1063,16 +1063,53 @@ class TheGuards(ShiftTestCase):
 		shift = self.start()["name"]
 		self.assertTrue(self.close(shift)["name"])
 
-	def test_running_a_shift_is_still_not_permission_to_hire(self):
-		"""The two lists are separate for this reason. Widening the shift gate to
-		the crew's own supervisor is not widening the personnel register's."""
+	def test_running_a_shift_IS_permission_to_hire_since_v0_94_0(self):
+		"""THE POLICY THIS TEST USED TO ASSERT WAS REVERSED ON PURPOSE, and the
+		reversal is the subject of the release rather than a side effect.
+
+		The old claim was that widening the shift gate to the crew's own
+		supervisor is not widening the personnel register's. That is still true of
+		the REGISTER — see the test below — but it was being used to keep the
+		foreman out of the HIRE, and there is no personnel office on a farm this
+		size to send him to. `HIRING_ROLES` is `SHIFT_ROLES`: the same supervisor
+		who forms the crew brings people onto it.
+		"""
 		self.configure(enabled=1, **ON, allow_create_employee=1)
 		set_roles(frappe.session.user, ["Foreman"])
 		self.start()
-		message = self.tool_error(
+		created = self.tool_data(
 			"create_employee", {"employee_name": "New Hire", "company": MAIN, "date_of_joining": at(6)[:10]}
 		)
+		self.assertTrue(created["employee"])
+
+	def test_but_it_is_still_not_permission_to_read_the_register(self):
+		"""THE HALF THAT DID NOT MOVE, and the reason `HR_ROLES` and
+		`HIRING_ROLES` are still two lists rather than one. Bringing somebody onto
+		the farm is field work with a compliance record behind it; reading the
+		entity's personnel register — names, hire dates, who has left — is
+		somebody else's PII, and a foreman has no more claim on it than before."""
+		self.configure(enabled=1, **ON, allow_create_employee=1, allow_update_employee=1)
+		set_roles(frappe.session.user, ["Foreman"])
+		created = self.tool_data(
+			"create_employee", {"employee_name": "New Hire", "company": MAIN, "date_of_joining": at(6)[:10]}
+		)["employee"]
+		message = self.tool_error(
+			"update_employee", {"employee": created, "department": "Harvest"}
+		)
 		self.assertIn("may not change the personnel register", message)
+
+	def test_and_a_picker_may_do_neither(self):
+		"""The negative control for both. `SHIFT_ROLES` gained a hire; it did not
+		gain a member."""
+		self.configure(enabled=1, **ON, allow_create_employee=1)
+		set_roles(frappe.session.user, ["Field Worker"])
+		self.assertIn(
+			"may not bring a person onto the farm",
+			self.tool_error(
+				"create_employee",
+				{"employee_name": "New Hire", "company": MAIN, "date_of_joining": at(6)[:10]},
+			),
+		)
 
 	def test_every_switch_turns_its_tool_off_individually(self):
 		for name, arguments in self.TOOLS:

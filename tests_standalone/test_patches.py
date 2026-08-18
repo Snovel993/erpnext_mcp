@@ -33,6 +33,7 @@ from erpnext_mcp.patches import (
 	migrate_training_types,
 	recompute_2026_dependents_credit,
 	register_custom_party_types,
+	rename_discipline_record,
 	repoint_producer_task_template,
 	set_default_tool_switches,
 )
@@ -55,6 +56,7 @@ PATCHES = (
 		"erpnext_mcp.patches.fix_literal_newlines_in_instructions",
 		fix_literal_newlines_in_instructions,
 	),
+	("erpnext_mcp.patches.rename_discipline_record", rename_discipline_record),
 )
 
 
@@ -550,3 +552,79 @@ class AFamilyPostingActuallyWorks(MCPTestCase):
 
 		accepted = self.a_journal_entry("Family", "Marguerite Bramwell")
 		self.assertFalse(accepted.get("isError"), accepted["content"][0]["text"])
+
+
+class TheDisciplineRecordRename(FreshSite):
+	"""v0.94.0. `Discipline Record` → `Farm Incident Record`, and what it leaves alone.
+
+	THE RENAME IS THE SCHEMA ADMITTING WHAT THE TABLE ALREADY WAS: both voices
+	were on the record from the start — `employee_statement` beside
+	`manager_signature` — and the only thing it could not express was the WORKER
+	being the one who opens it. Once `report_direction` exists, "Discipline
+	Record" is the wrong name for half the rows.
+
+	WHAT THE STANDALONE DOUBLE CAN PROVE HERE IS LIMITED AND WORTH STATING. The
+	harness has no `rename_doc` and no real table, so these tests exercise the
+	patch's CONTROL FLOW — that every branch reports rather than raising, and that
+	a site already renamed is a no-op. They do not prove MariaDB renamed the
+	table. What they do prove is the property that a `bench migrate` depends on:
+	no branch of this patch throws, because an exception here aborts the migration
+	for every app on the bench.
+	"""
+
+	def test_a_site_with_neither_name_is_a_no_op(self):
+		"""The fresh-install case, and the one that runs on most sites."""
+		rename_discipline_record.execute()
+
+	def test_it_never_raises_whatever_the_site_looks_like(self):
+		"""The property `bench migrate` actually depends on. Run twice, because
+		idempotence is the other half of the same requirement."""
+		rename_discipline_record.execute()
+		rename_discipline_record.execute()
+
+	def test_the_old_and_new_names_are_what_the_code_says_they_are(self):
+		"""Cheap, and it catches the typo that would make the patch a silent
+		no-op on every site forever."""
+		self.assertEqual(rename_discipline_record.OLD, "Discipline Record")
+		self.assertEqual(rename_discipline_record.NEW, "Farm Incident Record")
+		self.assertEqual(rename_discipline_record.SUPERVISOR, "Supervisor Report")
+
+	def test_the_supervisor_constant_matches_the_doctypes_own(self):
+		"""THE BACKFILL WRITES THIS STRING INTO EVERY EXISTING ROW, so a drift
+		between the patch's spelling and the controller's would put a value in the
+		column that `chain_for` then filters OUT — silently hiding the entire
+		existing discipline history of every worker on the farm."""
+		from erpnext_mcp.erpnext_mcp.doctype.farm_incident_record.farm_incident_record import (
+			SUPERVISOR_REPORT,
+		)
+
+		self.assertEqual(rename_discipline_record.SUPERVISOR, SUPERVISOR_REPORT)
+
+	def test_it_does_not_rename_any_tool_and_that_is_deliberate(self):
+		"""THE PRODUCTION HAZARD THIS PATCH IS WRITTEN TO AVOID.
+
+		`settings.tool_enabled` derives a tool's switch as `allow_<tool_name>`.
+		Renaming the six tools would rename their switches, the operator's stored
+		values would stay on the old fieldnames, and the three that default to `0`
+		— create, acknowledge, expire — would arrive DISABLED on a site that had
+		them switched on, at the exact moment this release widens create to
+		foremen. The suite could not otherwise catch it: the harness does not
+		carry the deployed settings document.
+
+		So this asserts the tool names are untouched. If a later release renames
+		them, it must carry each `allow_<old>` value to `allow_<new>` in the same
+		patch — and this test should be replaced by one asserting that migration
+		in both directions.
+		"""
+		from erpnext_mcp import registry
+
+		for name in (
+			"create_discipline_record",
+			"acknowledge_discipline_record",
+			"get_discipline_record",
+			"list_discipline_history",
+			"get_discipline_report",
+			"expire_discipline_record",
+		):
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.TOOLS)

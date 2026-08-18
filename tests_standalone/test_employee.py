@@ -45,6 +45,7 @@ import json
 import frappe
 
 from erpnext_mcp import compat, roles
+from erpnext_mcp.errors import ToolError
 from erpnext_mcp.tools import employee as employee_tool
 
 from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
@@ -779,12 +780,79 @@ class WhatItRefusesToWrite(EmployeeTestCase):
 
 # ── 4 ───────────────────────────────────────────────────────────────────────
 class TheGuards(EmployeeTestCase):
-	def test_a_principal_with_no_hr_role_may_not_hire(self):
+	def test_a_principal_with_no_hiring_role_may_not_hire(self):
+		"""v0.94.0 moved this gate from `HR_ROLES` to `HIRING_ROLES` and this is
+		the assertion that the gate still EXISTS. Accounts User is on neither
+		list, so it is refused by both — which is what makes it the right control
+		for a widening: it fails the same way before and after."""
 		set_roles("Administrator", ["Accounts User"])
 		message = self.create_error()
-		self.assertIn("may not change the personnel register", message)
-		self.assertIn("HR Manager", message)
+		self.assertIn("may not bring a person onto the farm", message)
 		self.assertIn("Farm Manager", message)
+		self.assertIn("Foreman", message)
+
+	def test_a_foreman_may_now_hire_and_that_is_the_point_of_the_release(self):
+		"""THE WIDENING, ASSERTED POSITIVELY. Most of v0.94.0 opens paths rather
+		than closing them, so the failure mode this suite has to catch is "the
+		foreman is still refused" — a test that only checked refusals would pass
+		on a release that did nothing."""
+		set_roles("Administrator", ["Foreman"])
+		self.assertTrue(self.create()["employee"])
+
+	def test_a_crew_leader_may_hire_too(self):
+		"""`HIRING_ROLES` is `SHIFT_ROLES`, which carries both supervisor roles.
+		Asserted separately from the Foreman because the two coincide BY POLICY —
+		the day somebody splits them, exactly one of these two goes red."""
+		set_roles("Administrator", ["Crew Leader"])
+		self.assertTrue(self.create()["employee"])
+
+	def test_a_field_worker_still_may_not_hire(self):
+		"""The negative control for the two above. A picker is on neither list,
+		and 'the gate widened' must not be readable as 'the gate dissolved'."""
+		set_roles("Administrator", ["Field Worker"])
+		message = self.create_error()
+		self.assertIn("may not bring a person onto the farm", message)
+
+	def test_the_register_itself_did_not_widen_with_the_hire(self):
+		"""THE BOUNDARY MOVED RATHER THAN DISSOLVING, which is the single claim
+		this release most needs held down. A Foreman may create an Employee and
+		may NOT edit one that exists — `update_employee` keeps `require_hr_role`
+		because a department, a supervisor, a birth date and a login on somebody
+		already hired are that person's PII rather than a hire."""
+		set_roles("Administrator", ["Farm Manager"])
+		created = self.create()["employee"]
+		set_roles("Administrator", ["Foreman"])
+		with self.assertRaises(ToolError) as caught:
+			employee_tool.update_employee({"employee": created, "department": "Harvest"})
+		self.assertIn("may not change the personnel register", str(caught.exception))
+
+	def test_but_a_foreman_may_rehire_the_person_they_hired_last_season(self):
+		"""The one narrow exception, and why it is a separate tool rather than a
+		hole in `update_employee`: refusing here pushes the field toward a
+		DUPLICATE Employee, two I-9s and a tenure history that starts over."""
+		set_roles("Administrator", ["Farm Manager"])
+		created = self.create()["employee"]
+		set_roles("Administrator", ["Foreman"])
+		result = employee_tool.reactivate_employee({"employee": created})
+		self.assertEqual(
+			frappe.db.get_value("Employee", created, "status"), "Active"
+		)
+		self.assertTrue(result.data["changed"] or result.data["unchanged"])
+
+	def test_the_rehire_door_carries_no_other_field(self):
+		"""What stops the narrow exception being a wide one. `reactivate_employee`
+		takes no writable arguments at all, so a caller holding only a hiring role
+		cannot reach the department or the login THROUGH it — the refusal is by
+		absence of an argument, not by a second check that could be forgotten."""
+		set_roles("Administrator", ["Farm Manager"])
+		created = self.create()["employee"]
+		set_roles("Administrator", ["Foreman"])
+		with self.assertRaises(ToolError) as caught:
+			employee_tool.reactivate_employee({"employee": created, "department": "Harvest"})
+		self.assertIn("department", str(caught.exception))
+		self.assertEqual(
+			frappe.db.get_value("Employee", created, "department"), None
+		)
 
 	def test_the_refusal_names_the_account_so_the_fix_is_one_line(self):
 		"""Permission denied on a principal the operator chose themselves is a

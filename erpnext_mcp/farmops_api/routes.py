@@ -601,7 +601,7 @@ ROUTES = (
 	# sets; it is resolved against THIS TABLE, so the reachable set is exactly
 	# what a phone could already post to directly; the target runs its OWN
 	# `guard.endpoint` and its own `accepted_arguments` filter. A Housing
-	# Inspection and a Discipline Record are still guarded by their own routes,
+	# Inspection and a Farm Incident Record are still guarded by their own routes,
 	# because they are still reached through their own routes.
 	Route("/mobile", mobile_api.submit_wizard_via_mobile),
 	# v0.91.0. The two payroll outputs. THE ONLY ROUTES ON THIS TABLE THAT REACH
@@ -750,7 +750,10 @@ ROUTES = (
 	# The payroll deduction register. THE THIRD SET OF ROUTES ON THIS TABLE THAT
 	# REACHES WAGES, and like the register and the stub above they gate on
 	# `HR_ROLES` in their own bodies rather than on the field roles this surface
-	# is built for. What a person's pay is garnished for is among the most
+	# is built for — TRUE OF ALL FIVE SINCE v0.94.0, AND TRUE OF ONLY THE TWO
+	# WRITES BEFORE IT. The three reads were scope-only while this comment said
+	# otherwise, which is the failure mode this file is most prone to: a claim
+	# about a gate, sitting next to the route, read as if it were the gate. What a person's pay is garnished for is among the most
 	# sensitive facts this app holds, and a foreman has no business reading it.
 	#
 	# THE READS ARE SCOPED TWO DIFFERENT WAYS because they ask two different

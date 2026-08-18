@@ -260,3 +260,55 @@ class TheDesignationsExist(RoleMapTestCase):
 		self.assertEqual(
 			sorted(install.FARM_DESIGNATIONS), sorted(roles.ROLE_FOR_JOB_TITLE)
 		)
+
+
+class EveryPhoneOnlyRoleHasADoor(RoleMapTestCase):
+	"""The invariant behind F1, stated so it cannot rot back.
+
+	A role with `desk_access=0` has been told, by its own spec, that the phone is
+	the only way in. `api/guard.FARM_OPS_ROLES` is that way in — the enrolment
+	gate every field method runs before anything else. So a phone-only role
+	missing from that frozenset is not a narrow permission, it is an account with
+	no door at all: every DocPerm `roles.py` grants it is unreachable, and the
+	handset gets a refusal that names enrolment rather than the grant it lacks.
+
+	CREW LEADER WAS EXACTLY THAT for four releases. `employee.SHIFT_ROLES` listed
+	it, `roles.py` granted it the Farm Shift, `create_mobile_user` enrolled it —
+	and `FARM_OPS_ROLES` did not have the name, so none of it was reachable.
+	Reverting the guard line turns this red naming Crew Leader, which is the only
+	evidence that it tests anything.
+
+	WHAT THE STANDALONE DOUBLE CAN PROVE HERE: this reads two module-level
+	constants and compares them. No store, no session, no transport — so it is
+	one of the few assertions in this suite that means exactly as much here as it
+	does on the bench.
+	"""
+
+	def test_every_phone_only_role_can_reach_the_field_api(self):
+		from erpnext_mcp.api import guard
+
+		for spec in roles.ROLE_SPECS:
+			if spec.desk_access:
+				continue
+			with self.subTest(role=spec.name):
+				self.assertIn(
+					spec.name,
+					guard.FARM_OPS_ROLES,
+					f"{spec.name} has desk_access=0 and is not in FARM_OPS_ROLES, so it "
+					"has no door: the Desk is closed to it by its own spec and the field "
+					"API refuses it at enrolment. Add the name to FARM_OPS_ROLES or give "
+					"the spec desk_access=1 — the one thing it may not be is neither.",
+				)
+
+	def test_the_negative_control(self):
+		"""A role WITH desk access is deliberately not required to be in the set.
+
+		Without this, the assertion above would read as "every role must be in
+		FARM_OPS_ROLES", which is false and would have been satisfied by adding
+		all seven. Compliance Officer is the case: it holds a real login, reads
+		the register in the Desk, and is kept off the field API on purpose.
+		"""
+		self.assertTrue(roles.spec_for("Compliance Officer").desk_access)
+		from erpnext_mcp.api import guard
+
+		self.assertNotIn("Compliance Officer", guard.FARM_OPS_ROLES)

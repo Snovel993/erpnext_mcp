@@ -91,7 +91,7 @@ class DisciplineTestCase(V12TestCase):
 		return self.tool_data("create_discipline_record", payload)
 
 	def rows(self):
-		return list(STORE.tables.get("Discipline Record", {}).values())
+		return list(STORE.tables.get("Farm Incident Record", {}).values())
 
 
 # ── 1. the chain links itself ───────────────────────────────────────────────
@@ -246,13 +246,13 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 
 	def test_the_doctype_refuses_a_contradiction_too(self):
 		record = self.step()["name"]
-		doc = STORE.get_raw("Discipline Record", record)
+		doc = STORE.get_raw("Farm Incident Record", record)
 		doc["employee_acknowledged"] = 1
 		doc["employee_declined_to_sign"] = 1
 		import frappe
 
 		with self.assertRaises(Exception):
-			frappe.get_doc("Discipline Record", record).save()
+			frappe.get_doc("Farm Incident Record", record).save()
 
 	def test_the_employees_own_account_is_recorded(self):
 		"""A chain that shows the employee was heard is materially stronger."""
@@ -351,7 +351,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 			"expire_discipline_record",
 			{"record": record, "status": "Expired", "reason": "twelve-month look-back under our policy"},
 		)
-		self.assertEqual(STORE.get_raw("Discipline Record", record)["status"], "Expired")
+		self.assertEqual(STORE.get_raw("Farm Incident Record", record)["status"], "Expired")
 
 	def test_expiring_needs_a_reason(self):
 		record = self.step()["name"]
@@ -384,7 +384,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 			"expire_discipline_record",
 			{"record": record, "status": "Rescinded", "reason": "withdrawn on review"},
 		)
-		notes = self.tool_data("list_task_notes", {"doctype": "Discipline Record", "name": record})["notes"]
+		notes = self.tool_data("list_task_notes", {"doctype": "Farm Incident Record", "name": record})["notes"]
 		self.assertTrue(any("Rescinded" in note["narrative"] for note in notes))
 
 	def test_expiring_twice_is_refused(self):
@@ -467,3 +467,182 @@ class TheRecordRefusesToBeIndefensible(DisciplineTestCase):
 		)
 		self.assertIn("Verbal Warning", error)
 		self.assertIn("Termination", error)
+
+
+# ── 8. the protocol runs in two directions ──────────────────────────────────
+class TheProtocolRunsBothWays(DisciplineTestCase):
+	"""v0.94.0, decision 3b. One doctype, two directions, one resolution machine.
+
+	The record already held both voices — `employee_statement` beside
+	`manager_signature`, on one page. What it could not express was the WORKER
+	being the one who opens it, and punch-list #24 asked for a grievance doctype
+	to fix that. A direction field answers it without a second table, which is
+	also this project's standing database rule: maximal data science, avoid table
+	sprawl.
+	"""
+
+	def grievance(self, **overrides):
+		payload = {
+			"employee": WORKER,
+			"report_direction": "Worker Report",
+			"incident_date": _days_ago(5),
+			"incident_description": (
+				"Was told to re-pick two bins already counted, and the buckets were not "
+				"credited to my badge."
+			),
+			"company": MAIN,
+		}
+		payload.update(overrides)
+		return self.tool_data("create_discipline_record", payload)
+
+	def test_a_worker_report_needs_no_warning_level(self):
+		"""`discipline_type` is optional since v0.94.0 — discipline is an OUTCOME
+		of this protocol, not its container. A grievance has no rung."""
+		data = self.grievance()
+		self.assertEqual(data["report_direction"], "Worker Report")
+		self.assertIsNone(data["discipline_type"])
+
+	def test_a_worker_report_carrying_a_warning_level_is_refused(self):
+		"""The other direction of the same rule, and it is not pedantry: a
+		discipline type on a report the worker filed is their own complaint
+		recorded as a step against them."""
+		message = self.tool_error(
+			"create_discipline_record",
+			{
+				"employee": WORKER,
+				"report_direction": "Worker Report",
+				"discipline_type": "Verbal Warning",
+				"incident_date": _days_ago(5),
+				"incident_description": "x",
+				"company": MAIN,
+			},
+		)
+		self.assertIn("carries no discipline_type", message)
+
+	def test_a_worker_report_is_not_asked_for_an_expected_improvement(self):
+		"""The controller demands `expected_improvement` and `followup_date` of a
+		supervisor report and must not of a grievance — there is no improvement to
+		demand of somebody for raising something, and demanding one would make the
+		grievance unfileable, which is the failure this direction exists to
+		prevent."""
+		self.assertTrue(self.grievance()["name"])
+
+	# ── THE HAZARD ──────────────────────────────────────────────────────────
+	def test_a_grievance_does_not_join_the_progressive_discipline_chain(self):
+		"""THE SINGLE MOST IMPORTANT ASSERTION IN THIS FILE.
+
+		`chain_for` filtered on `{"employee": employee}` with no direction. Drop
+		worker-initiated reports into the same table unfiltered and they enter the
+		escalation: three grievances become steps 1-3 against the person who filed
+		them.
+		"""
+		self.grievance()
+		self.grievance(incident_date=_days_ago(4))
+		self.grievance(incident_date=_days_ago(3))
+		first = self.step("Verbal Warning")
+		self.assertIsNone(first["prior_record"])
+		self.assertEqual(
+			first["step_number"], 1, "a worker's own reports became rungs on their escalation"
+		)
+
+	def test_and_the_report_a_lawyer_reads_contains_only_the_farms_direction(self):
+		"""`get_discipline_report` is what the module docstring calls "what an HR
+		manager hands a lawyer". Handing over a chain in which the worker's own
+		complaints appear as their disciplinary history is worse than the table
+		sprawl this design avoided."""
+		self.grievance()
+		self.step("Verbal Warning")
+		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		self.assertEqual([entry["type"] for entry in report["timeline"]], ["Verbal Warning"])
+
+	def test_nor_do_grievances_show_up_as_gaps_in_the_chain(self):
+		"""`_gaps` flags an unacknowledged step as the first thing a claim looks
+		for. A grievance has no acknowledgement the WORKER owes — flagging one
+		would print "the employee never acknowledged this" against a record the
+		employee wrote."""
+		self.grievance()
+		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		self.assertEqual(report["gaps"], [])
+
+	def test_a_grievance_is_accepted_after_a_termination(self):
+		"""The refusal that must NOT apply across the direction boundary, and the
+		case that matters most: a worker disputing the termination itself is
+		exactly the report a server must not refuse on the grounds that they were
+		terminated."""
+		self.step("Verbal Warning")
+		self.step("Written Warning", incident_date=_days_ago(25))
+		self.step("Final Warning", incident_date=_days_ago(22))
+		self.step("Termination", incident_date=_days_ago(20), supersedes_note="repeated")
+		self.assertTrue(self.grievance()["name"])
+
+	# ── the worker's own file shows both ────────────────────────────────────
+	def test_the_worker_reading_their_own_file_sees_both_directions(self):
+		"""The one read that defaults to both. A grievance raised in June is part
+		of the story of a warning received in July, and showing one without the
+		other is the version of events that suits whoever holds the report."""
+		self.grievance()
+		self.step("Verbal Warning")
+		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		self.assertEqual(data["step_count"], 2)
+		self.assertEqual(data["worker_report_count"], 1)
+		self.assertEqual(data["chain_step_count"], 1)
+
+	def test_but_the_escalation_is_still_read_off_the_farms_direction_only(self):
+		"""`direction=None` legitimately brings the other side into `steps`, so
+		the derived fields have to defend themselves. "What level is this person
+		at" has one correct answer and a grievance is not a rung on it."""
+		self.grievance()
+		self.step("Verbal Warning")
+		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		self.assertEqual(data["current_level"], "Verbal Warning")
+		self.assertEqual(data["next_step_would_be"], "Written Warning")
+
+	def test_the_direction_argument_narrows_it(self):
+		self.grievance()
+		self.step("Verbal Warning")
+		only_chain = self.tool_data(
+			"list_discipline_history", {"employee": WORKER, "direction": "Supervisor Report"}
+		)
+		self.assertEqual(only_chain["step_count"], 1)
+		only_worker = self.tool_data(
+			"list_discipline_history", {"employee": WORKER, "direction": "Worker Report"}
+		)
+		self.assertEqual(only_worker["step_count"], 1)
+		self.assertEqual(only_worker["current_level"], None)
+
+	def test_an_unknown_direction_is_refused_by_name(self):
+		self.assertIn(
+			"direction must be one of",
+			self.tool_error(
+				"list_discipline_history", {"employee": WORKER, "direction": "Grievance"}
+			),
+		)
+
+	# ── the migration fact ──────────────────────────────────────────────────
+	def test_a_row_written_before_this_release_reads_as_the_farms_direction(self):
+		"""EMPTY MEANS SUPERVISOR, and it is a migration fact rather than a
+		preference: every record written before v0.94.0 is the farm documenting a
+		worker, because that is all the table could hold.
+
+		THE FAILURE THIS PREVENTS IS THE EXPENSIVE ONE. Filtering the direction in
+		SQL would have hidden every one of these rows — `NULL = 'Supervisor
+		Report'` is false and `NULL != 'Worker Report'` is NULL, so a legacy row
+		drops out of BOTH — which is the entire existing discipline history of
+		every worker on the farm, silently, behind a column nobody had filled in.
+		"""
+		created = self.step("Verbal Warning")["name"]
+		frappe.db.set_value("Farm Incident Record", created, "report_direction", None)
+		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		self.assertEqual(data["step_count"], 1)
+		self.assertEqual(data["steps"][0]["report_direction"], "Supervisor Report")
+		self.assertEqual(data["chain_step_count"], 1)
+		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		self.assertEqual(len(report["timeline"]), 1)
+
+	def test_the_resolution_state_starts_at_reported_for_either_direction(self):
+		"""A SECOND lifecycle beside `status`, not an extension of it — `status`
+		is Active/Expired/Rescinded and `chain_for` filters on status==Active, so
+		folding resolution values into that Select would silently change what
+		every existing chain read returns."""
+		self.assertEqual(self.grievance()["resolution_state"], "Reported")
+		self.assertEqual(self.step("Verbal Warning")["resolution_state"], "Reported")

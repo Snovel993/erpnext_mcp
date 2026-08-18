@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""Controller for Discipline Record — one step in a progressive chain.
+"""Controller for Farm Incident Record — one incident, from either direction.
+
+RENAMED FROM "Discipline Record" IN v0.94.0, and the rename is the schema
+admitting what the table already was. Both voices were on the record from the
+start — `employee_statement` beside `manager_signature`, on one page — and the
+only thing it could not express was the WORKER being the one who opens it. One
+doctype with a direction field is not a shortcut around building a grievance
+feature; it is the recognition that four fifths of it was already here under a
+name that described one half.
 
 WHAT THIS REFUSES, AND WHY IT IS SHORT. The controller checks the things that
 would make a record indefensible on its face: no employee, no incident, no
@@ -32,6 +40,31 @@ TERMINATION = "Termination"
 #: skip without a second table of rankings to keep in step.
 DISCIPLINE_TYPES = (VERBAL, WRITTEN, FINAL, SUSPENSION, TERMINATION)
 
+#: The two directions one incident-reporting protocol runs in.
+#:
+#: `SUPERVISOR_REPORT` is the farm documenting a worker — progressive discipline,
+#: the chain that is the defence. `WORKER_REPORT` is a worker raising a grievance
+#: or disputing something, which is the SAME protocol read the other way: either
+#: party opens it, both sign, the resolution handles both.
+#:
+#: THE CHAIN IS SUPERVISOR-DIRECTION ONLY AND THAT IS LOAD-BEARING. `chain_for`,
+#: `_gaps`, `get_discipline_report` and the `prior_record` / `step_number`
+#: assignment all filter on this, because a worker's own complaints appearing as
+#: their disciplinary history in the document an HR manager hands a lawyer is
+#: worse than the second table this design avoided.
+SUPERVISOR_REPORT = "Supervisor Report"
+WORKER_REPORT = "Worker Report"
+DIRECTIONS = (SUPERVISOR_REPORT, WORKER_REPORT)
+
+#: The shared resolution machine, in order. A SECOND lifecycle beside `status`
+#: rather than an extension of it — see the field's own description on why
+#: widening `status` would silently change every existing chain read.
+REPORTED = "Reported"
+ACKNOWLEDGED = "Acknowledged"
+UNDER_REVIEW = "Under Review"
+RESOLVED = "Resolved"
+RESOLUTION_STATES = (REPORTED, ACKNOWLEDGED, UNDER_REVIEW, RESOLVED)
+
 ACTIVE = "Active"
 EXPIRED = "Expired"
 RESCINDED = "Rescinded"
@@ -46,16 +79,47 @@ def severity(discipline_type: str) -> int:
 		return 0
 
 
-class DisciplineRecord(Document):
+class FarmIncidentRecord(Document):
 	def validate(self):
 		if not str(self.employee or "").strip():
-			frappe.throw(_("Employee is required — a discipline record names a person."))
+			frappe.throw(_("Employee is required — an incident record names a person."))
 		self.employee = str(self.employee).strip()
 		self.employee_name = str(self.employee_name or "").strip() or self.employee
 
-		if self.discipline_type not in DISCIPLINE_TYPES:
+		self.report_direction = str(self.report_direction or "").strip() or SUPERVISOR_REPORT
+		if self.report_direction not in DIRECTIONS:
+			frappe.throw(
+				_("Report Direction {0} is not one of: {1}.").format(
+					self.report_direction, ", ".join(DIRECTIONS)
+				)
+			)
+		self.resolution_state = str(self.resolution_state or "").strip() or REPORTED
+		if self.resolution_state not in RESOLUTION_STATES:
+			frappe.throw(
+				_("Resolution State {0} is not one of: {1}.").format(
+					self.resolution_state, ", ".join(RESOLUTION_STATES)
+				)
+			)
+
+		# THE DISCIPLINE FIELDS ARE THE SUPERVISOR DIRECTION'S. A worker's report
+		# has no warning level, no "expected improvement" to demand of them, and
+		# no follow-up review of their own conduct — discipline is an OUTCOME of
+		# this protocol, not its container. Demanding those three of a grievance
+		# would make the grievance unfileable, which is the failure this whole
+		# direction exists to prevent.
+		supervisor = self.report_direction == SUPERVISOR_REPORT
+
+		if supervisor and self.discipline_type not in DISCIPLINE_TYPES:
 			frappe.throw(
 				_("Type {0} is not one of: {1}.").format(self.discipline_type, ", ".join(DISCIPLINE_TYPES))
+			)
+		if not supervisor and str(self.discipline_type or "").strip():
+			frappe.throw(
+				_(
+					"A Worker Report carries no discipline type. This record is somebody "
+					"raising something, and a warning level on it would file their own report "
+					"as a step against them."
+				)
 			)
 		self.status = str(self.status or ACTIVE).strip() or ACTIVE
 		if self.status not in STATUSES:
@@ -70,7 +134,7 @@ class DisciplineRecord(Document):
 				title=_("The incident has to be described"),
 			)
 
-		if not str(self.expected_improvement or "").strip():
+		if supervisor and not str(self.expected_improvement or "").strip():
 			frappe.throw(
 				_(
 					"Expected Improvement is required. Progressive discipline is progressive "
@@ -81,7 +145,7 @@ class DisciplineRecord(Document):
 				title=_("Expected Improvement is required"),
 			)
 
-		if not self.followup_date:
+		if supervisor and not self.followup_date:
 			frappe.throw(
 				_(
 					"Follow-Up Date is required. A warning nobody reviewed is the one a claim "

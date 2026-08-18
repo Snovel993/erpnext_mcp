@@ -16,7 +16,7 @@ of it:
     list_task_notes      reading the accumulated account back
 
 ONE CHILD TABLE, THREE PARENTS. `Task Note` hangs off Farm Task, Accident Report
-and Discipline Record, because it is the same act against all three and three
+and Farm Incident Record, because it is the same act against all three and three
 near-identical tables would drift the first time one of them grew a column. The
 parent is named per call and checked against an allowlist — a narrative table
 bolted onto an arbitrary doctype would be a general-purpose comment system with
@@ -53,7 +53,7 @@ from ..result import ToolResult
 TASK_NOTE = "Task Note"
 FARM_TASK = "Farm Task"
 ACCIDENT_REPORT = "Accident Report"
-DISCIPLINE_RECORD = "Discipline Record"
+DISCIPLINE_RECORD = "Farm Incident Record"
 FILE = "File"
 
 #: Which registers carry a narrative, and the field the table hangs off each.

@@ -122,6 +122,7 @@ from ..args import as_bool, as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import artifacts, files, signers
+from . import employee as employee_tool
 
 I9_FORM = "I-9 Form"
 I9_AUDIT_LOG = "I-9 Audit Log"
@@ -614,7 +615,24 @@ def list_expiring_work_authorizations(args: dict) -> ToolResult:
 
 
 def create_i9_form(args: dict) -> ToolResult:
-    """Create a Draft I-9 Form for an employee."""
+    """Create a Draft I-9 Form for an employee.
+
+    v0.94.0: `require_hiring_role`, AND IT HAD NO ROLE GATE AT ALL BEFORE. That
+    direction is worth stating plainly because it runs against the rest of this
+    release: raising a federal hiring form on a named coworker was gated by
+    ENROLMENT alone, so any picker with a working handset could open an I-9 on
+    anybody in their company. This is a restriction against what shipped and a
+    widening against putting it behind `HR_ROLES` — both are true, and the
+    hiring role is the set that makes the foreman's hiring day work while a
+    field worker is refused.
+
+    THE ATTESTATIONS ARE NOT WHAT THIS GATES. Raising the form writes a Draft
+    with an employee, a company and a hire date on it and nothing anybody swears
+    to. Section 1 is the worker's own attestation and Section 2 is the
+    employer's, and the second one answers to the authorized-signer roster —
+    a per-person designation that no role on this list can substitute for.
+    """
+    employee_tool.require_hiring_role()
     employee = _resolve_employee(args)
     company = resolve_company(as_str(args, "company"), required=True)
     hire_date = as_date(args, "hire_date", required=True)
@@ -770,7 +788,18 @@ def submit_i9_section_1(args: dict) -> ToolResult:
     default. A full number sent to a site with the switch off is not an error and
     is not stored: the caller got what it asked for, which is an I-9 with the
     last four on it.
+
+    v0.94.0: `require_hiring_role`, WHERE THERE WAS NO ROLE GATE. Section 1 is
+    the employee's own attestation about themselves, and the foreman sitting
+    with a new hire filling it in is the case this release exists for — but
+    "anybody enrolled may file a Section 1 naming any coworker" was never the
+    intended reading of that, and it is what the code said. The worker's own
+    signature still arrives through the pad and lands in the column
+    `advance_if_signed` reads, so widening WHO MAY PROCESS a Section 1 has never
+    at any point let anybody forge one: a form whose Section 1 is unsigned does
+    not reach Complete, whoever called this.
     """
+    employee_tool.require_hiring_role()
     employee = _resolve_employee(args)
     i9_name = frappe.db.get_value(I9_FORM, {"employee": employee, "status": "Draft"}, "name")
     if not i9_name:
@@ -1460,6 +1489,21 @@ def reverify_i9(args: dict) -> ToolResult:
     when an authorization is renewed — examine it, record it, sign it — and the
     only difference is that this one also clears `receipt_pending`, which it does
     by clearing the receipt flags the controller computes that from.
+
+    v0.94.0: IT NOW RUNS `signers.resolve_signature`, AND IT HAD NO SIGNER CHECK
+    AT ALL. Section 3 / Supplement B is an EMPLOYER ATTESTATION — the employer
+    stating it examined evidence of continuing work authorization — which is the
+    same legal act as Section 2 and was the one place in this module where any
+    string could be typed into `verifier_name` and stored as the person who made
+    it. `submit_i9_section_2` has resolved its verifier against the authorized-
+    signer roster since v0.48.0; this is the same call, on the same roster, with
+    the same `required=True`.
+
+    IT IS THE ONE ITEM OF THIS RELEASE'S I-9 WORK THAT IS NEITHER A WIDENING NOR
+    A NO-OP. On a site with no roster nothing changes — an explicit
+    `verifier_name` is still required and still accepted, exactly as before. On a
+    site that HAS named its signers, the name written here now has to be one of
+    them.
     """
     employee = _resolve_employee(args)
     i9_name = frappe.db.get_value(
@@ -1487,6 +1531,16 @@ def reverify_i9(args: dict) -> ToolResult:
 
     title, category = _reverification_document(as_str(args, "document_title", required=True))
 
+    # Resolved BEFORE anything is appended, so a caller the roster does not
+    # authorise is refused having written nothing at all — the same posture
+    # `submit_w4` takes and the same reason. `required=True` matches
+    # `submit_i9_section_2`: Section 3 is the same employer attestation, so an
+    # unconfigured site goes on demanding an explicit `verifier_name` rather than
+    # silently substituting one into a federal form.
+    _section_3_signature = signers.resolve_signature(
+        args, "I-9", "verifier_name", "verifier_title", required=True
+    )
+
     reverification_date = as_date(args, "reverification_date") or str(date.today())
     document_expiry = as_date(args, "document_expiry")
     if document_expiry and getdate(document_expiry) < getdate(reverification_date):
@@ -1510,8 +1564,8 @@ def reverify_i9(args: dict) -> ToolResult:
         "issuing_authority": as_str(args, "issuing_authority"),
         "document_number": as_str(args, "document_number"),
         "document_expiry": document_expiry,
-        "verifier_name": as_str(args, "verifier_name", required=True),
-        "verifier_title": as_str(args, "verifier_title"),
+        "verifier_name": _section_3_signature["name"],
+        "verifier_title": _section_3_signature["title"] or as_str(args, "verifier_title"),
         "section_3_signature": as_str(args, "section_3_signature"),
         "notes": as_str(args, "notes"),
         "signed_at": frappe.utils.now(),
