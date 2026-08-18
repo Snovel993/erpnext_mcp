@@ -1129,6 +1129,94 @@ class OnboardingEndToEnd(EmployeeTestCase):
 		self.assertIn("Employee", message)
 
 
+# ── 8 ───────────────────────────────────────────────────────────────────────
+class TheEmploymentTypesTheInstallerSeeds(EmployeeTestCase):
+	"""A Link is only as good as its master, and this app never seeded this one.
+
+	`employment_type` is checked against the site's own `Employment Type` records
+	and a value naming none is refused — right, and staying. But a stock Frappe HR
+	ships Full-time, Part-time, Probation, Contract, Commission, Piecework, Intern
+	and Apprentice, an office's categories with no Hourly on them, so `Hourly` was
+	refused on every site and the majority of a farm's workforce could not be
+	onboarded through the tool at all. `install._employment_types` seeds the two a
+	farm needs; the refusal is unchanged for everything else.
+
+	`install_hrms` in this suite models the stock masters — Full-time, Part-time,
+	Seasonal Worker — which is exactly the site the bug was reported from, so the
+	first test here is the negative control and it must keep failing to hire.
+	"""
+
+	def hire(self, **overrides):
+		payload = {"full_name": "Ana Ramos", "company": MAIN, "email": WORKER}
+		payload.update(overrides)
+		return payload
+
+	def test_a_stock_hr_has_no_hourly_and_that_is_the_bug(self):
+		self.assertFalse(frappe.db.exists("Employment Type", "Hourly"))
+		message = self.create_error(employment_type="Hourly")
+		self.assertIn("Hourly", message)
+		self.assertIn("Employment Type", message)
+
+	def test_after_migrate_seeds_them(self):
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		for name in install.FARM_EMPLOYMENT_TYPES:
+			with self.subTest(employment_type=name):
+				self.assertTrue(frappe.db.exists("Employment Type", name))
+
+	def test_the_seeded_type_is_named_after_itself(self):
+		"""`frappe.db.exists("Employment Type", "Hourly")` is the check on both
+		sides — the seeder's idempotence and `create_employee`'s Link — so a row
+		that came back serial-named would satisfy neither."""
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		row = STORE.get_raw("Employment Type", "Hourly")
+		self.assertEqual(row["employee_type_name"], "Hourly")
+
+	def test_an_hourly_hire_goes_through_once_they_are_seeded(self):
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		data = self.create(employment_type="Hourly")
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "employment_type"), "Hourly")
+
+	def test_onboard_employee_takes_hourly_too(self):
+		"""The tool the bug was reported against. It writes the Employee through
+		`create_employee`, so it is the same allowlist and the same Link check —
+		asserted here anyway, because that is the call that was blocked."""
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		data = self.tool_data("onboard_employee", self.hire(employment_type="Hourly"))
+		self.assertEqual(frappe.db.get_value("Employee", data["employee"], "employment_type"), "Hourly")
+
+	def test_a_second_migrate_creates_nothing(self):
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		install.after_migrate()
+		rows = [row for row in STORE.rows("Employment Type") if row["name"] == "Hourly"]
+		self.assertEqual(len(rows), 1)
+
+	def test_a_type_the_site_already_has_is_left_exactly_as_it_was(self):
+		"""Seasonal Worker is on this site before the seeder runs. An operator who
+		edited one keeps their row — the seeder adds options and rewrites none."""
+		from erpnext_mcp import install
+
+		before = dict(STORE.get_raw("Employment Type", "Seasonal Worker"))
+		install.after_migrate()
+		self.assertEqual(STORE.get_raw("Employment Type", "Seasonal Worker"), before)
+
+	def test_an_employment_type_nobody_seeded_is_still_refused(self):
+		"""The seed adds two options. It does not turn the Link check off."""
+		from erpnext_mcp import install
+
+		install.after_migrate()
+		self.assertIn("Indentured", self.create_error(employment_type="Indentured"))
+
+
 # ── the module's own claims ─────────────────────────────────────────────────
 class TheAllowlistIsClosed(EmployeeTestCase):
 	def test_the_nineteen_are_the_nineteen(self):

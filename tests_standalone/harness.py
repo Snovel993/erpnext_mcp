@@ -1302,6 +1302,13 @@ ERPNEXT_AUTONAME = {
 	# A Party Type IS its name, which is what makes `frappe.db.exists("Party
 	# Type", "Family")` the check every caller writes.
 	"Party Type": "field:party_type",
+	# Frappe HR names an Employment Type after `employee_type_name`, and the same
+	# sentence applies: the type IS its name, which is what makes
+	# `frappe.db.exists("Employment Type", "Hourly")` both the idempotence check
+	# `install._employment_types` writes and the Link check `create_employee`
+	# refuses on. A double that serial-named it would have let the seeder insert
+	# "Hourly" and then refuse an Employee who named it.
+	"Employment Type": "field:employee_type_name",
 	# ERPNext's Company is `field:company_name`, and `create_company` depends on
 	# it: a Company that came back named "C-00001" would make every account
 	# docname built from its abbreviation point at a company nobody can find.

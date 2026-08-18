@@ -157,6 +157,7 @@ def after_install() -> None:
 	_translations()
 	_breakeven_account_fields()
 	_agricultural_masters()
+	_employment_types()
 	frappe.db.commit()
 
 
@@ -198,6 +199,7 @@ def after_migrate() -> None:
 	_translations()
 	_breakeven_account_fields()
 	_agricultural_masters()
+	_employment_types()
 
 
 def _agricultural_masters() -> None:
@@ -245,6 +247,68 @@ def _agricultural_masters() -> None:
 		print(f"erpnext_mcp: skipped {skipped.get('name')} — {skipped.get('reason')}")
 	for failure in report.get("failed") or ():
 		print(f"erpnext_mcp: could not seed {failure.get('name')} — {failure.get('reason')}")
+
+
+#: The employment types a tree-fruit operation hires under that a stock Frappe HR
+#: does not ship. Its own list is Full-time, Part-time, Probation, Contract,
+#: Commission, Piecework, Intern and Apprentice — an office's categories, and the
+#: two a farm needs most are not on it. Deliberately SHORT: `Employment Type` is a
+#: master an operator can add to in the Desk in ten seconds, and a seeder that
+#: guessed at a dozen would leave a picker full of categories nobody hires under.
+FARM_EMPLOYMENT_TYPES = (
+	# The one the bug was about, and the majority of a farm's payroll. Stock HR
+	# has no Hourly because ERPNext treats hourly as a SALARY MODE, and an
+	# Employee's `employment_type` is the only column a roster, a wage statement
+	# or an ACA hours count can read to say how somebody is engaged.
+	"Hourly",
+	# The fact an H-2A roster, an ACA hours count and a piece-rate wage statement
+	# all turn on, which is what `create_employee`'s own schema note says about
+	# this field. Frappe HR has no word for it.
+	"Seasonal Worker",
+)
+
+
+def _employment_types() -> None:
+	"""Seed the employment types a farm hires under, so `Employee.employment_type` can name one.
+
+	THE FIELD IS A LINK, AND A LINK IS ONLY AS GOOD AS ITS MASTER. `create_employee`
+	— and `onboard_employee` through it — checks `employment_type` against this
+	site's own `Employment Type` records and refuses a value that names none,
+	listing what there is. That refusal is right and stays; what was wrong is that
+	this app required a master it never seeded, so `employment_type: "Hourly"` was
+	refused on a stock Frappe HR and the majority of a farm's workforce could not
+	be onboarded through the tool at all.
+
+	IT ONLY EVER CREATES WHAT IS NOT THERE, by docname — the same contract as
+	`_i9_document_types` and `_agricultural_masters`, and the reason `test_hooks.py`
+	forbids the word `fixtures` by name. An operator who renamed Hourly, or deleted
+	a category they do not hire under, keeps their decision through every later
+	migrate. It adds options and reclassifies nothing: every Employee already
+	pointing at Full-time still points at Full-time.
+
+	SKIPPED WHOLE ON A BENCH WITH NO FRAPPE HR, where the doctype is absent — the
+	same site on which `create_employee` does not check this Link at all, because
+	there is no schema to check it against.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "Employment Type"):
+			return
+		created = []
+		for name in FARM_EMPLOYMENT_TYPES:
+			if frappe.db.exists("Employment Type", name):
+				continue
+			doc = frappe.get_doc({"doctype": "Employment Type", "employee_type_name": name})
+			doc.flags.ignore_permissions = True
+			doc.insert()
+			created.append(name)
+		if created:
+			print(
+				f"erpnext_mcp: seeded {len(created)} Employment Type record(s) — "
+				f"{', '.join(created)}. They are OPTIONS on the Employee form, not a "
+				"reclassification: nothing already hired changed category."
+			)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(f"erpnext_mcp: the employment types were not seeded — {type(exc).__name__}: {exc}")
 
 
 def _translations() -> None:
