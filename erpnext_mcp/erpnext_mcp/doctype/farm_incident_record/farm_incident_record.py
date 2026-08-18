@@ -48,7 +48,7 @@ DISCIPLINE_TYPES = (VERBAL, WRITTEN, FINAL, SUSPENSION, TERMINATION)
 #: party opens it, both sign, the resolution handles both.
 #:
 #: THE CHAIN IS SUPERVISOR-DIRECTION ONLY AND THAT IS LOAD-BEARING. `chain_for`,
-#: `_gaps`, `get_discipline_report` and the `prior_record` / `step_number`
+#: `_gaps`, `get_incident_report` and the `prior_record` / `step_number`
 #: assignment all filter on this, because a worker's own complaints appearing as
 #: their disciplinary history in the document an HR manager hands a lawyer is
 #: worse than the second table this design avoided.

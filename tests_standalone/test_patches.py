@@ -30,6 +30,7 @@ from erpnext_mcp.patches import (
 	backfill_completion_signatures,
 	fix_literal_newlines_in_instructions,
 	migrate_declarative_rules,
+	migrate_incident_tool_switches,
 	migrate_training_types,
 	recompute_2026_dependents_credit,
 	register_custom_party_types,
@@ -57,6 +58,7 @@ PATCHES = (
 		fix_literal_newlines_in_instructions,
 	),
 	("erpnext_mcp.patches.rename_discipline_record", rename_discipline_record),
+	("erpnext_mcp.patches.migrate_incident_tool_switches", migrate_incident_tool_switches),
 )
 
 
@@ -600,23 +602,27 @@ class TheDisciplineRecordRename(FreshSite):
 
 		self.assertEqual(rename_discipline_record.SUPERVISOR, SUPERVISOR_REPORT)
 
-	def test_it_does_not_rename_any_tool_and_that_is_deliberate(self):
-		"""THE PRODUCTION HAZARD THIS PATCH IS WRITTEN TO AVOID.
+	def test_the_tools_are_renamed_and_their_switches_migrate_separately(self):
+		"""v0.95.0 renamed the six tools this patch's own docstring warned about.
 
-		`settings.tool_enabled` derives a tool's switch as `allow_<tool_name>`.
-		Renaming the six tools would rename their switches, the operator's stored
-		values would stay on the old fieldnames, and the three that default to `0`
-		— create, acknowledge, expire — would arrive DISABLED on a site that had
-		them switched on, at the exact moment this release widens create to
-		foremen. The suite could not otherwise catch it: the harness does not
-		carry the deployed settings document.
-
-		So this asserts the tool names are untouched. If a later release renames
-		them, it must carry each `allow_<old>` value to `allow_<new>` in the same
-		patch — and this test should be replaced by one asserting that migration
-		in both directions.
+		`registry.TOOLS` carries the new names now — `create_incident_record` and
+		its five siblings — and the old names are gone from it. What carries the
+		OLD-switch-stays-ON promise across the rename is a separate patch,
+		`migrate_incident_tool_switches`, tested in `TheIncidentToolSwitchMigration`
+		below. This test only pins that the rename itself happened.
 		"""
 		from erpnext_mcp import registry
+
+		for name in (
+			"create_incident_record",
+			"acknowledge_incident_record",
+			"get_incident_record",
+			"list_incident_history",
+			"get_incident_report",
+			"expire_incident_record",
+		):
+			with self.subTest(tool=name):
+				self.assertIn(name, registry.TOOLS)
 
 		for name in (
 			"create_discipline_record",
@@ -626,5 +632,83 @@ class TheDisciplineRecordRename(FreshSite):
 			"get_discipline_report",
 			"expire_discipline_record",
 		):
-			with self.subTest(tool=name):
-				self.assertIn(name, registry.TOOLS)
+			with self.subTest(old_tool=name):
+				self.assertNotIn(name, registry.TOOLS)
+
+
+class TheIncidentToolSwitchMigration(FreshSite):
+	"""v0.95.0. `migrate_incident_tool_switches`: carrying `allow_<old>` to `allow_<new>`.
+
+	THE PROPERTY `rename_discipline_record` DEMANDED OF WHOEVER DID THIS: "a site
+	with the old switch ON ends with the new switch ON, and a site with it OFF
+	stays OFF." Both directions are tested below, plus the two failure shapes
+	that would silently break an operator's configuration: overwriting a value
+	they already set on the new field, and running after `set_default_tool_switches`
+	has already seeded one.
+	"""
+
+	def _stored(self):
+		return STORE.singles.get(settings.SETTINGS_DOCTYPE) or {}
+
+	def test_a_site_with_the_old_switch_on_ends_with_the_new_switch_on(self):
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {"allow_create_discipline_record": "1"}
+		migrate_incident_tool_switches.execute()
+		self.assertEqual(self._stored().get("allow_create_incident_record"), "1")
+
+	def test_a_site_with_the_old_switch_off_stays_off(self):
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {"allow_expire_discipline_record": "0"}
+		migrate_incident_tool_switches.execute()
+		self.assertEqual(self._stored().get("allow_expire_incident_record"), "0")
+
+	def test_a_site_that_never_stored_the_old_switch_gets_nothing_carried(self):
+		"""A fresh install. There is nothing on the old key, so nothing is
+		written to the new one — `set_default_tool_switches` is what seeds it."""
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {}
+		migrate_incident_tool_switches.execute()
+		self.assertNotIn("allow_create_incident_record", self._stored())
+
+	def test_an_explicit_new_value_is_never_overwritten(self):
+		"""A site re-running `bench migrate`, or one where an operator already
+		flipped the new switch by hand. Either way the old value does not win."""
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {
+			"allow_create_discipline_record": "1",
+			"allow_create_incident_record": "0",
+		}
+		migrate_incident_tool_switches.execute()
+		self.assertEqual(self._stored().get("allow_create_incident_record"), "0")
+
+	def test_it_is_a_no_op_the_second_time(self):
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {"allow_create_discipline_record": "1"}
+		migrate_incident_tool_switches.execute()
+		migrate_incident_tool_switches.execute()
+		self.assertEqual(self._stored().get("allow_create_incident_record"), "1")
+
+	def test_it_carries_all_six_pairs(self):
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {
+			"allow_create_discipline_record": "1",
+			"allow_acknowledge_discipline_record": "1",
+			"allow_get_discipline_record": "0",
+			"allow_list_discipline_history": "0",
+			"allow_get_discipline_report": "1",
+			"allow_expire_discipline_record": "0",
+		}
+		migrate_incident_tool_switches.execute()
+		stored = self._stored()
+		self.assertEqual(stored.get("allow_create_incident_record"), "1")
+		self.assertEqual(stored.get("allow_acknowledge_incident_record"), "1")
+		self.assertEqual(stored.get("allow_get_incident_record"), "0")
+		self.assertEqual(stored.get("allow_list_incident_history"), "0")
+		self.assertEqual(stored.get("allow_get_incident_report"), "1")
+		self.assertEqual(stored.get("allow_expire_incident_record"), "0")
+
+	def test_running_before_set_default_tool_switches_matters(self):
+		"""THE ORDERING `patches.txt` ENCODES. If the seed patch ran first on a
+		fresh `allow_create_incident_record`, it would stamp the field's default
+		(`0`) as a "stored" value — and this patch's no-clobber rule would then
+		refuse to carry the operator's `1` over it, reading the seed as if it
+		were the operator's own choice. Running this patch first is what keeps
+		that from happening."""
+		STORE.singles[settings.SETTINGS_DOCTYPE] = {"allow_create_discipline_record": "1"}
+		migrate_incident_tool_switches.execute()
+		set_default_tool_switches.execute()
+		self.assertEqual(self._stored().get("allow_create_incident_record"), "1")

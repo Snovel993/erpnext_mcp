@@ -7233,7 +7233,11 @@ def attach_file_to_document(
 # THE INCIDENT METHODS SPLIT THREE WAYS SINCE v0.94.0, AND THEY USED TO BE ONE.
 # All five carried `personnel.require_hr_role` on the reasoning that a discipline
 # record is a personnel document and a picker has no business writing or reading
-# one. Half of that is right and the other half was gating the wrong act:
+# one. Half of that is right and the other half was gating the wrong act. (The
+# wrapper names below stay `*_discipline_*` — that is this file's own name for
+# the endpoint, which is `farm_ops_method` and therefore the live URL the iOS
+# app calls; the tools they call into are `create_incident_record` and its
+# siblings in `tools/discipline.py`, renamed in v0.95.0.)
 #
 #   * REPORTING what happened — `create_discipline_record` — is `require_shift_role`.
 #     Documenting an incident is the same shape as reporting an accident, and the
@@ -7561,7 +7565,7 @@ def create_discipline_record(
 			inner[key] = str(value).strip()
 	inner["source_language"] = _caller_language(user, issuer)
 
-	return discipline_tools.create_discipline_record(inner).data
+	return discipline_tools.create_incident_record(inner).data
 
 
 # ── 82. acknowledge_discipline_record ────────────────────────────────────────
@@ -7605,7 +7609,7 @@ def acknowledge_discipline_record(
 		if value not in (None, ""):
 			inner[key] = str(value).strip()
 
-	return discipline_tools.acknowledge_discipline_record(inner).data
+	return discipline_tools.acknowledge_incident_record(inner).data
 
 
 # ── 83. get_discipline_record ────────────────────────────────────────────────
@@ -7623,7 +7627,7 @@ def get_discipline_record(user: str, record=None) -> dict:
 	allowed = guard.require_scope(user)
 	docname = guard.require_scoped_doc(DISCIPLINE_RECORD, record, "record", allowed)
 	_require_self_or_hr(user, docname)
-	return discipline_tools.get_discipline_record({"record": docname}).data
+	return discipline_tools.get_incident_record({"record": docname}).data
 
 
 # ── 84. list_discipline_history ──────────────────────────────────────────────
@@ -7647,7 +7651,7 @@ def list_discipline_history(user: str, employee=None, include_inactive=None, dir
 		inner["include_inactive"] = include_inactive
 	if direction not in (None, ""):
 		inner["direction"] = str(direction).strip()
-	return discipline_tools.list_discipline_history(inner).data
+	return discipline_tools.list_incident_history(inner).data
 
 
 # ── 85. get_discipline_report ────────────────────────────────────────────────
@@ -7665,7 +7669,7 @@ def get_discipline_report(user: str, employee=None) -> dict:
 	"""
 	personnel.require_hr_role()
 	allowed = guard.require_scope(user)
-	return discipline_tools.get_discipline_report({
+	return discipline_tools.get_incident_report({
 		"employee": _employee_argument(employee, allowed, "employee")
 	}).data
 

@@ -3,6 +3,10 @@
 
 [post_model_sync]
 # Patches that run after DocTypes are migrated.
+# migrate_incident_tool_switches MUST run before set_default_tool_switches:
+# it carries an operator's allow_<old> value to allow_<new> before the seed
+# patch can mistake an unset new field for one with nothing to carry.
+erpnext_mcp.patches.migrate_incident_tool_switches
 erpnext_mcp.patches.set_default_tool_switches
 erpnext_mcp.patches.register_custom_party_types
 erpnext_mcp.patches.migrate_training_types

@@ -3,6 +3,35 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.95.0 — 2026-08-18 — the tool finishes the rename the doctype started
+
+v0.94.0 renamed the `Discipline Record` DocType to `Farm Incident Record` and
+deliberately left the six MCP tools alone — `create_discipline_record` and its
+five siblings — because `settings.tool_enabled` derives a tool's switch as
+`allow_<tool_name>`, and renaming the tools without a migration would have
+carried none of an operator's stored `allow_*` values to the new fieldnames.
+Three of the six default OFF, so a site with `allow_create_discipline_record`
+switched on would have arrived at the new field disabled, silently, on upgrade.
+
+This release does the rename properly:
+
+| Old tool | New tool |
+|---|---|
+| `create_discipline_record` | `create_incident_record` |
+| `acknowledge_discipline_record` | `acknowledge_incident_record` |
+| `get_discipline_record` | `get_incident_record` |
+| `list_discipline_history` | `list_incident_history` |
+| `get_discipline_report` | `get_incident_report` |
+| `expire_discipline_record` | `expire_incident_record` |
+
+A new patch, `migrate_incident_tool_switches`, carries each `allow_<old>`
+switch value to `allow_<new>` — in both directions, ON stays ON and OFF stays
+OFF — and runs before `set_default_tool_switches` so a brand-new field is never
+mistaken for one that was already seeded. Nothing on the mobile HTTP surface
+changes: the `/farmops/api/mobile/create_discipline_record` route and its four
+siblings keep their existing URLs, since the already-published iOS app calls
+them by that name and a coordinated URL change is a separate piece of work.
+
 ## 0.94.0 — 2026-08-18 — the back office in the field
 
 The access-control remediation. This release **moves** a boundary rather than

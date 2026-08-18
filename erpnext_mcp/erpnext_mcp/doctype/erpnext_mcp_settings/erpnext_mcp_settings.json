@@ -762,12 +762,12 @@
   "allow_add_task_note",
   "allow_attach_audio_note",
   "allow_list_task_notes",
-  "allow_create_discipline_record",
-  "allow_acknowledge_discipline_record",
-  "allow_get_discipline_record",
-  "allow_list_discipline_history",
-  "allow_get_discipline_report",
-  "allow_expire_discipline_record",
+  "allow_create_incident_record",
+  "allow_acknowledge_incident_record",
+  "allow_get_incident_record",
+  "allow_list_incident_history",
+  "allow_get_incident_report",
+  "allow_expire_incident_record",
   "allow_create_accident_report",
   "allow_update_accident_investigation",
   "allow_close_accident_investigation",
@@ -5943,42 +5943,42 @@
   {
    "default": "0",
    "description": "WRITE. LEGALLY CRITICAL. File one step of progressive discipline, auto-linked to the prior step for that employee. Refuses an unexplained jump up the chain and a step after a termination.",
-   "fieldname": "allow_create_discipline_record",
+   "fieldname": "allow_create_incident_record",
    "fieldtype": "Check",
    "label": "Create Farm Incident Record"
   },
   {
    "default": "0",
    "description": "WRITE. Record that the employee acknowledged a step — or that they declined to sign, with a witness. There is no third outcome.",
-   "fieldname": "allow_acknowledge_discipline_record",
+   "fieldname": "allow_acknowledge_incident_record",
    "fieldtype": "Check",
    "label": "Acknowledge Farm Incident Record"
   },
   {
    "default": "1",
    "description": "READ. One discipline step in full, with its narrative and the step before it.",
-   "fieldname": "allow_get_discipline_record",
+   "fieldname": "allow_get_incident_record",
    "fieldtype": "Check",
    "label": "Get Farm Incident Record"
   },
   {
    "default": "1",
    "description": "READ. One employee's whole chain in order, with the current level and what the next step would be.",
-   "fieldname": "allow_list_discipline_history",
+   "fieldname": "allow_list_incident_history",
    "fieldtype": "Check",
-   "label": "List Discipline History"
+   "label": "List Incident History"
   },
   {
    "default": "1",
    "description": "READ. The chain as a document for legal or HR review — the timeline, the narratives, and every documentation gap itemised with why it matters.",
-   "fieldname": "allow_get_discipline_report",
+   "fieldname": "allow_get_incident_report",
    "fieldtype": "Check",
-   "label": "Get Discipline Report"
+   "label": "Get Incident Report"
   },
   {
    "default": "0",
    "description": "WRITE. Age a step out of the chain, or withdraw one on review. Nothing expires on a schedule in this app — the look-back window is a policy decision.",
-   "fieldname": "allow_expire_discipline_record",
+   "fieldname": "allow_expire_incident_record",
    "fieldtype": "Check",
    "label": "Expire Farm Incident Record"
   },

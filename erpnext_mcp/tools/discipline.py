@@ -26,17 +26,17 @@ So the shape of this module follows the shape of the defence:
     created.
   * A REFUSAL TO SIGN IS AN OUTCOME, NOT A GAP. An employee may decline. What
     the file may not contain is silence presented as agreement — so
-    `acknowledge_discipline_record` takes either a signature or an explicit
+    `acknowledge_incident_record` takes either a signature or an explicit
     refusal with a witness, and the doctype refuses the third possibility.
 
 WHAT THIS MODULE DOES NOT DO. It does not decide whether discipline is
 warranted, it does not compute the next step, and it does not expire anything on
 a schedule. The look-back window that discounts an old warning is a policy
-decision that differs by employer and by state; `expire_discipline_record` is
+decision that differs by employer and by state; `expire_incident_record` is
 the call somebody makes when their policy says so, and its absence is not this
 app quietly counting a three-year-old verbal warning toward a termination.
 
-THE HISTORY IS THE PRODUCT. `get_discipline_report` is what an HR manager hands
+THE HISTORY IS THE PRODUCT. `get_incident_report` is what an HR manager hands
 a lawyer: the chain in order, what each step asked for, whether it was
 acknowledged, whether anybody followed up, and — stated plainly — where the gaps
 are. A report that only listed the steps would leave the reader to find the
@@ -161,7 +161,7 @@ def chain_for(
 	THE MODULE. v0.94.0 lets a WORKER open a record — a grievance, a dispute —
 	into this same table, which is right, because the record already carried both
 	voices and a second table would have been sprawl. But this function is what
-	`get_discipline_report` builds the document an HR manager hands a lawyer out
+	`get_incident_report` builds the document an HR manager hands a lawyer out
 	of, and without the filter three grievances a worker filed become steps 1-3 of
 	an escalation AGAINST THEM: `severity()` returns 0 for a report with no
 	discipline type, `_gaps` flags each as an unacknowledged hole, and the
@@ -359,7 +359,7 @@ def _gaps(steps: list[dict], today: str) -> list[dict]:
 	return out
 
 
-# ── create_discipline_record ────────────────────────────────────────────────
+# ── create_incident_record ──────────────────────────────────────────────────
 
 def _reporting_employee() -> str | None:
 	"""The Employee behind the calling account, or None. WHO OPENED THIS.
@@ -383,7 +383,7 @@ def _reporting_employee() -> str | None:
 		return None
 
 
-def create_discipline_record(args: dict) -> ToolResult:
+def create_incident_record(args: dict) -> ToolResult:
 	"""File one step of progressive discipline, linked to the one before it.
 
 	THE PRIOR RECORD IS FOUND, NOT ASKED FOR. Whoever is typing this has an
@@ -542,8 +542,8 @@ def create_discipline_record(args: dict) -> ToolResult:
 	)
 
 
-# ── acknowledge_discipline_record ───────────────────────────────────────────
-def acknowledge_discipline_record(args: dict) -> ToolResult:
+# ── acknowledge_incident_record ─────────────────────────────────────────────
+def acknowledge_incident_record(args: dict) -> ToolResult:
 	"""Record that the employee was told — or that they declined to sign.
 
 	TWO OUTCOMES, BOTH RECORDED, AND NO THIRD. An employee may sign, or may
@@ -610,8 +610,8 @@ def acknowledge_discipline_record(args: dict) -> ToolResult:
 	)
 
 
-# ── get_discipline_record ───────────────────────────────────────────────────
-def get_discipline_record(args: dict) -> ToolResult:
+# ── get_incident_record ─────────────────────────────────────────────────────
+def get_incident_record(args: dict) -> ToolResult:
 	"""One step in full, with its narrative and the step before it."""
 	_require()
 	name = as_str(args, "record", required=True) or as_str(args, "name")
@@ -647,8 +647,8 @@ def get_discipline_record(args: dict) -> ToolResult:
 	)
 
 
-# ── list_discipline_history ─────────────────────────────────────────────────
-def list_discipline_history(args: dict) -> ToolResult:
+# ── list_incident_history ───────────────────────────────────────────────────
+def list_incident_history(args: dict) -> ToolResult:
 	"""One employee's whole file, in order — BOTH directions by default.
 
 	THE ONE READ THAT DEFAULTS TO BOTH, deliberately, and it is the read a worker
@@ -658,7 +658,7 @@ def list_discipline_history(args: dict) -> ToolResult:
 	the version of events that suits whoever is holding the report.
 
 	`direction` NARROWS IT where a caller wants one side: pass "Supervisor Report"
-	for the progressive-discipline chain alone, which is what `get_discipline_report`
+	for the progressive-discipline chain alone, which is what `get_incident_report`
 	does because that document is the chain and must not contain the other
 	direction. The derived fields below — `current_level`, `next_step_would_be`,
 	`terminated` — are computed from SUPERVISOR steps only whatever this argument
@@ -723,8 +723,8 @@ def list_discipline_history(args: dict) -> ToolResult:
 	)
 
 
-# ── get_discipline_report ───────────────────────────────────────────────────
-def get_discipline_report(args: dict) -> ToolResult:
+# ── get_incident_report ─────────────────────────────────────────────────────
+def get_incident_report(args: dict) -> ToolResult:
 	"""The chain as a document somebody hands a lawyer — including its gaps.
 
 	THE GAPS ARE THE POINT, and this is the same argument
@@ -813,8 +813,8 @@ def get_discipline_report(args: dict) -> ToolResult:
 	)
 
 
-# ── expire_discipline_record ────────────────────────────────────────────────
-def expire_discipline_record(args: dict) -> ToolResult:
+# ── expire_incident_record ──────────────────────────────────────────────────
+def expire_incident_record(args: dict) -> ToolResult:
 	"""Age a step out of the chain, or withdraw one on review.
 
 	NOTHING EXPIRES ON A SCHEDULE IN THIS APP. The look-back window that

@@ -48,12 +48,12 @@ def _days_ahead(days: int) -> str:
 ALL_ON = {
 	f"allow_{name}": 1
 	for name in (
-		"create_discipline_record",
-		"acknowledge_discipline_record",
-		"get_discipline_record",
-		"list_discipline_history",
-		"get_discipline_report",
-		"expire_discipline_record",
+		"create_incident_record",
+		"acknowledge_incident_record",
+		"get_incident_record",
+		"list_incident_history",
+		"get_incident_report",
+		"expire_incident_record",
 		"add_task_note",
 		"list_task_notes",
 		"attach_audio_note",
@@ -88,7 +88,7 @@ class DisciplineTestCase(V12TestCase):
 			"issued_by": MANAGER,
 		}
 		payload.update(overrides)
-		return self.tool_data("create_discipline_record", payload)
+		return self.tool_data("create_incident_record", payload)
 
 	def rows(self):
 		return list(STORE.tables.get("Farm Incident Record", {}).values())
@@ -112,7 +112,7 @@ class TheChainIsFoundNotTyped(DisciplineTestCase):
 		self.step("Written Warning", incident_date=_days_ago(20))
 		self.step("Final Warning", incident_date=_days_ago(10))
 
-		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		data = self.tool_data("list_incident_history", {"employee": WORKER})
 		self.assertEqual(
 			[entry["discipline_type"] for entry in data["steps"]],
 			["Verbal Warning", "Written Warning", "Final Warning"],
@@ -128,7 +128,7 @@ class TheChainIsFoundNotTyped(DisciplineTestCase):
 		self.step("Termination", incident_date=_days_ago(20), supersedes_note="repeated after final warning")
 
 		error = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"discipline_type": "Verbal Warning",
@@ -151,7 +151,7 @@ class TheChainIsFoundNotTyped(DisciplineTestCase):
 		self.assertIn(
 			"no Employee called",
 			self.tool_error(
-				"create_discipline_record",
+				"create_incident_record",
 				{
 					"employee": "NOBODY",
 					"discipline_type": "Verbal Warning",
@@ -168,7 +168,7 @@ class AnUnexplainedJumpIsRefused(DisciplineTestCase):
 	def test_two_rungs_at_once_needs_a_reason(self):
 		self.step("Verbal Warning")
 		error = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"discipline_type": "Suspension",
@@ -212,7 +212,7 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 	def test_a_signature_records_it(self):
 		record = self.step()["name"]
 		data = self.tool_data(
-			"acknowledge_discipline_record",
+			"acknowledge_incident_record",
 			{"record": record, "employee_signature": "/files/sig.png"},
 		)
 		self.assertTrue(data["employee_acknowledged"])
@@ -222,7 +222,7 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 		"""An employee is entitled to decline."""
 		record = self.step()["name"]
 		data = self.tool_data(
-			"acknowledge_discipline_record",
+			"acknowledge_incident_record",
 			{"record": record, "declined_to_sign": True, "witnesses": "Flor Diaz"},
 		)
 		self.assertTrue(data["employee_declined_to_sign"])
@@ -233,7 +233,7 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 		record = self.step()["name"]
 		self.assertIn(
 			"needs a witness",
-			self.tool_error("acknowledge_discipline_record", {"record": record, "declined_to_sign": True}),
+			self.tool_error("acknowledge_incident_record", {"record": record, "declined_to_sign": True}),
 		)
 
 	def test_an_acknowledgement_with_neither_is_refused(self):
@@ -241,7 +241,7 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 		record = self.step()["name"]
 		self.assertIn(
 			"silence presented as",
-			self.tool_error("acknowledge_discipline_record", {"record": record}),
+			self.tool_error("acknowledge_incident_record", {"record": record}),
 		)
 
 	def test_the_doctype_refuses_a_contradiction_too(self):
@@ -258,7 +258,7 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 		"""A chain that shows the employee was heard is materially stronger."""
 		record = self.step()["name"]
 		data = self.tool_data(
-			"acknowledge_discipline_record",
+			"acknowledge_incident_record",
 			{
 				"record": record,
 				"employee_signature": "/files/sig.png",
@@ -272,34 +272,34 @@ class TheAcknowledgementIsEitherOr(DisciplineTestCase):
 class TheGapsAreThePoint(DisciplineTestCase):
 	def test_an_unacknowledged_step_is_named(self):
 		self.step()
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		gaps = [gap["gap"] for gap in data["gaps"]]
 		self.assertIn("not_acknowledged", gaps)
 
 	def test_the_gap_explains_why_it_matters(self):
 		"""'Unacknowledged' means nothing to somebody who has not run a hearing."""
 		self.step()
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		gap = next(gap for gap in data["gaps"] if gap["gap"] == "not_acknowledged")
 		self.assertIn("note in a file rather than a step in a chain", gap["detail"])
 
 	def test_a_missing_manager_signature_is_named(self):
 		self.step()
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertIn("unsigned_by_manager", [gap["gap"] for gap in data["gaps"]])
 
 	def test_a_missed_follow_up_is_named(self):
 		# Issued in the past too: the controller refuses a follow-up dated before
 		# the step was issued, which is right and is not what this test is about.
 		self.step(issued_on=_days_ago(30), followup_date=_days_ago(5))
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		gap = next(gap for gap in data["gaps"] if gap["gap"] == "followup_missed")
 		self.assertIn("process was theatre", gap["detail"])
 
 	def test_a_witnessed_refusal_is_not_a_gap(self):
 		record = self.step()["name"]
 		self.tool_data(
-			"acknowledge_discipline_record",
+			"acknowledge_incident_record",
 			{
 				"record": record,
 				"declined_to_sign": True,
@@ -307,39 +307,39 @@ class TheGapsAreThePoint(DisciplineTestCase):
 				"manager_signature": "/files/mgr.png",
 			},
 		)
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertNotIn("not_acknowledged", [gap["gap"] for gap in data["gaps"]])
 		self.assertNotIn("refusal_unwitnessed", [gap["gap"] for gap in data["gaps"]])
 
 	def test_a_complete_chain_reports_no_gaps(self):
 		record = self.step(followup_date=_days_ahead(120))["name"]
 		self.tool_data(
-			"acknowledge_discipline_record",
+			"acknowledge_incident_record",
 			{
 				"record": record,
 				"employee_signature": "/files/sig.png",
 				"manager_signature": "/files/mgr.png",
 			},
 		)
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertEqual(data["gaps"], [])
 		self.assertIn("No gaps found", data["assessment"])
 
 	def test_the_report_says_it_is_not_legal_advice(self):
 		self.step()
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertIn("not legal advice", data["note"])
 		self.assertIn("does not say whether any step was warranted", data["note"])
 
 	def test_the_report_carries_the_timeline_and_the_narratives(self):
 		self.step(narrative="Met in the shop office at 07:10. He acknowledged being late.")
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertEqual(len(data["timeline"]), 1)
 		self.assertTrue(data["narratives"])
 
 	def test_the_gaps_are_fixable_now_and_the_report_says_so(self):
 		self.step()
-		data = self.tool_data("get_discipline_report", {"employee": WORKER})
+		data = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertIn("FIXABLE NOW AND NOT LATER", data["assessment"])
 
 
@@ -348,7 +348,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 	def test_expiring_keeps_the_row(self):
 		record = self.step()["name"]
 		self.tool_data(
-			"expire_discipline_record",
+			"expire_incident_record",
 			{"record": record, "status": "Expired", "reason": "twelve-month look-back under our policy"},
 		)
 		self.assertEqual(STORE.get_raw("Farm Incident Record", record)["status"], "Expired")
@@ -357,13 +357,13 @@ class NothingIsDestroyed(DisciplineTestCase):
 		record = self.step()["name"]
 		self.assertIn(
 			"reason",
-			self.tool_error("expire_discipline_record", {"record": record, "status": "Expired"}),
+			self.tool_error("expire_incident_record", {"record": record, "status": "Expired"}),
 		)
 
 	def test_an_expired_step_drops_out_of_the_active_chain(self):
 		first = self.step("Verbal Warning")["name"]
 		self.tool_data(
-			"expire_discipline_record", {"record": first, "status": "Expired", "reason": "aged out"}
+			"expire_incident_record", {"record": first, "status": "Expired", "reason": "aged out"}
 		)
 		second = self.step("Written Warning", incident_date=_days_ago(10))
 		self.assertIsNone(second["prior_record"])
@@ -372,16 +372,16 @@ class NothingIsDestroyed(DisciplineTestCase):
 		"""A chain that had one deleted cannot explain the gap where it was."""
 		record = self.step()["name"]
 		self.tool_data(
-			"expire_discipline_record", {"record": record, "status": "Expired", "reason": "aged out"}
+			"expire_incident_record", {"record": record, "status": "Expired", "reason": "aged out"}
 		)
-		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		data = self.tool_data("list_incident_history", {"employee": WORKER})
 		self.assertEqual(data["step_count"], 1)
 		self.assertEqual(data["active_step_count"], 0)
 
 	def test_the_status_change_is_written_into_the_narrative(self):
 		record = self.step()["name"]
 		self.tool_data(
-			"expire_discipline_record",
+			"expire_incident_record",
 			{"record": record, "status": "Rescinded", "reason": "withdrawn on review"},
 		)
 		notes = self.tool_data("list_task_notes", {"doctype": "Farm Incident Record", "name": record})["notes"]
@@ -390,12 +390,12 @@ class NothingIsDestroyed(DisciplineTestCase):
 	def test_expiring_twice_is_refused(self):
 		record = self.step()["name"]
 		self.tool_data(
-			"expire_discipline_record", {"record": record, "status": "Expired", "reason": "aged out"}
+			"expire_incident_record", {"record": record, "status": "Expired", "reason": "aged out"}
 		)
 		self.assertIn(
 			"already Expired",
 			self.tool_error(
-				"expire_discipline_record",
+				"expire_incident_record",
 				{"record": record, "status": "Rescinded", "reason": "again"},
 			),
 		)
@@ -405,7 +405,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 		self.assertIn(
 			"never returns to Active",
 			self.tool_error(
-				"expire_discipline_record",
+				"expire_incident_record",
 				{"record": record, "status": "Active", "reason": "changed my mind"},
 			),
 		)
@@ -415,7 +415,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 class TheRecordRefusesToBeIndefensible(DisciplineTestCase):
 	def test_no_expected_improvement_is_refused(self):
 		error = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"discipline_type": "Verbal Warning",
@@ -427,7 +427,7 @@ class TheRecordRefusesToBeIndefensible(DisciplineTestCase):
 
 	def test_no_follow_up_date_is_refused(self):
 		error = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"discipline_type": "Verbal Warning",
@@ -441,7 +441,7 @@ class TheRecordRefusesToBeIndefensible(DisciplineTestCase):
 		self.assertIn(
 			"before the incident",
 			self.tool_error(
-				"create_discipline_record",
+				"create_incident_record",
 				{
 					"employee": WORKER,
 					"discipline_type": "Verbal Warning",
@@ -456,7 +456,7 @@ class TheRecordRefusesToBeIndefensible(DisciplineTestCase):
 
 	def test_an_unknown_discipline_type_is_refused_with_the_list(self):
 		error = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"discipline_type": "Stern Look",
@@ -493,7 +493,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 			"company": MAIN,
 		}
 		payload.update(overrides)
-		return self.tool_data("create_discipline_record", payload)
+		return self.tool_data("create_incident_record", payload)
 
 	def test_a_worker_report_needs_no_warning_level(self):
 		"""`discipline_type` is optional since v0.94.0 — discipline is an OUTCOME
@@ -507,7 +507,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		discipline type on a report the worker filed is their own complaint
 		recorded as a step against them."""
 		message = self.tool_error(
-			"create_discipline_record",
+			"create_incident_record",
 			{
 				"employee": WORKER,
 				"report_direction": "Worker Report",
@@ -546,13 +546,13 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		)
 
 	def test_and_the_report_a_lawyer_reads_contains_only_the_farms_direction(self):
-		"""`get_discipline_report` is what the module docstring calls "what an HR
+		"""`get_incident_report` is what the module docstring calls "what an HR
 		manager hands a lawyer". Handing over a chain in which the worker's own
 		complaints appear as their disciplinary history is worse than the table
 		sprawl this design avoided."""
 		self.grievance()
 		self.step("Verbal Warning")
-		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		report = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertEqual([entry["type"] for entry in report["timeline"]], ["Verbal Warning"])
 
 	def test_nor_do_grievances_show_up_as_gaps_in_the_chain(self):
@@ -561,7 +561,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		would print "the employee never acknowledged this" against a record the
 		employee wrote."""
 		self.grievance()
-		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		report = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertEqual(report["gaps"], [])
 
 	def test_a_grievance_is_accepted_after_a_termination(self):
@@ -582,7 +582,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		other is the version of events that suits whoever holds the report."""
 		self.grievance()
 		self.step("Verbal Warning")
-		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		data = self.tool_data("list_incident_history", {"employee": WORKER})
 		self.assertEqual(data["step_count"], 2)
 		self.assertEqual(data["worker_report_count"], 1)
 		self.assertEqual(data["chain_step_count"], 1)
@@ -593,7 +593,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		at" has one correct answer and a grievance is not a rung on it."""
 		self.grievance()
 		self.step("Verbal Warning")
-		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		data = self.tool_data("list_incident_history", {"employee": WORKER})
 		self.assertEqual(data["current_level"], "Verbal Warning")
 		self.assertEqual(data["next_step_would_be"], "Written Warning")
 
@@ -601,11 +601,11 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		self.grievance()
 		self.step("Verbal Warning")
 		only_chain = self.tool_data(
-			"list_discipline_history", {"employee": WORKER, "direction": "Supervisor Report"}
+			"list_incident_history", {"employee": WORKER, "direction": "Supervisor Report"}
 		)
 		self.assertEqual(only_chain["step_count"], 1)
 		only_worker = self.tool_data(
-			"list_discipline_history", {"employee": WORKER, "direction": "Worker Report"}
+			"list_incident_history", {"employee": WORKER, "direction": "Worker Report"}
 		)
 		self.assertEqual(only_worker["step_count"], 1)
 		self.assertEqual(only_worker["current_level"], None)
@@ -614,7 +614,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		self.assertIn(
 			"direction must be one of",
 			self.tool_error(
-				"list_discipline_history", {"employee": WORKER, "direction": "Grievance"}
+				"list_incident_history", {"employee": WORKER, "direction": "Grievance"}
 			),
 		)
 
@@ -632,11 +632,11 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		"""
 		created = self.step("Verbal Warning")["name"]
 		frappe.db.set_value("Farm Incident Record", created, "report_direction", None)
-		data = self.tool_data("list_discipline_history", {"employee": WORKER})
+		data = self.tool_data("list_incident_history", {"employee": WORKER})
 		self.assertEqual(data["step_count"], 1)
 		self.assertEqual(data["steps"][0]["report_direction"], "Supervisor Report")
 		self.assertEqual(data["chain_step_count"], 1)
-		report = self.tool_data("get_discipline_report", {"employee": WORKER})
+		report = self.tool_data("get_incident_report", {"employee": WORKER})
 		self.assertEqual(len(report["timeline"]), 1)
 
 	def test_the_resolution_state_starts_at_reported_for_either_direction(self):

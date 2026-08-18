@@ -13927,12 +13927,12 @@ can produce a documented, escalating, acknowledged series.
 
 | Tool | What it does |
 | --- | --- |
-| `create_discipline_record` | One step, auto-linked to the prior one |
-| `acknowledge_discipline_record` | Signed, or declined with a witness |
-| `get_discipline_record` | One step with its narrative and predecessor |
-| `list_discipline_history` | The chain in order, current level, next step |
-| `get_discipline_report` | The document for legal review — **including its gaps** |
-| `expire_discipline_record` | Age one out, or withdraw it. Never deletes |
+| `create_incident_record` | One step, auto-linked to the prior one |
+| `acknowledge_incident_record` | Signed, or declined with a witness |
+| `get_incident_record` | One step with its narrative and predecessor |
+| `list_incident_history` | The chain in order, current level, next step |
+| `get_incident_report` | The document for legal review — **including its gaps** |
+| `expire_incident_record` | Age one out, or withdraw it. Never deletes |
 
 **The prior record is found, not asked for.** Asking whoever is typing which
 docname the last warning was is asking them to go and look, which is how a chain
@@ -13948,7 +13948,7 @@ step *down*, because somebody being generous never has to be defended.
 signature nor an explicit refusal is refused; a refusal with no witness named is
 refused. What the file may not contain is silence presented as agreement.
 
-**`get_discipline_report` names the holes**, the same argument
+**`get_incident_report` names the holes**, the same argument
 `export_insurance_schedule` makes about missing serial numbers:
 
 ```
@@ -14106,7 +14106,7 @@ open investigation on the asset.
 | update / close / list accidents | Foreman+ | The investigation is somebody's job |
 | wizard reads | enrolment | Answered in the caller's own language |
 
-`expire_discipline_record` has no route: ageing a step out of a chain is a policy
+`expire_incident_record` has no route: ageing a step out of a chain is a policy
 decision made at a desk with the handbook open.
 
 ## Trade documentation across three tiers (v0.80.0)

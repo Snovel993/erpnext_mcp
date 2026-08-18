@@ -492,7 +492,7 @@ ROUTES = (
 	# THE FIVE DISCIPLINE ROUTES CARRY AN HR GATE IN THEIR OWN BODIES, not the
 	# field-role gate every route above them uses. A discipline record is a
 	# personnel document; a picker holding a perfectly good field credential has
-	# no business reading one, let alone writing one. `expire_discipline_record`
+	# no business reading one, let alone writing one. `expire_incident_record`
 	# is deliberately absent — ageing a step out of a chain is a policy decision
 	# made at a desk with the handbook open, and a method with no route 404s.
 	Route("/mobile", mobile_api.create_discipline_record),

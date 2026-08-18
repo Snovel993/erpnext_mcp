@@ -19425,8 +19425,8 @@ TOOLS = {
 		requires="the Farm Task DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.79.0: progressive discipline ────────────────────────────────────
-	"create_discipline_record": _tool(
-		discipline.create_discipline_record,
+	"create_incident_record": _tool(
+		discipline.create_incident_record,
 		"MUTATING (default OFF). File one step of progressive discipline — "
 		"Verbal Warning → Written Warning → Final Warning → Suspension → "
 		"Termination.\n\n"
@@ -19476,12 +19476,12 @@ TOOLS = {
 		},
 		required=("employee", "discipline_type", "incident_description", "expected_improvement", "followup_date"),
 		mutating=True,
-		title="Create a discipline record",
+		title="Create an incident record",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	"acknowledge_discipline_record": _tool(
-		discipline.acknowledge_discipline_record,
+	"acknowledge_incident_record": _tool(
+		discipline.acknowledge_incident_record,
 		"MUTATING (default OFF). Record that the employee was told — or that "
 		"they declined to sign.\n\n"
 		"TWO OUTCOMES AND NO THIRD. An employee may sign or may refuse; what the "
@@ -19500,21 +19500,21 @@ TOOLS = {
 		},
 		required=("record",),
 		mutating=True,
-		title="Acknowledge a discipline record",
+		title="Acknowledge an incident record",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	"get_discipline_record": _tool(
-		discipline.get_discipline_record,
+	"get_incident_record": _tool(
+		discipline.get_incident_record,
 		"One step in full, with its narrative and the step before it. Read-only.",
 		{"record": _field(_STRING, "The Farm Incident Record docname.")},
 		required=("record",),
-		title="Get a discipline record",
+		title="Get an incident record",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	"list_discipline_history": _tool(
-		discipline.list_discipline_history,
+	"list_incident_history": _tool(
+		discipline.list_incident_history,
 		"One employee's whole chain, OLDEST FIRST, with the current level and "
 		"what the next step would be. Read-only.",
 		{
@@ -19523,12 +19523,12 @@ TOOLS = {
 			"limit": _field(_INTEGER, "Maximum steps."),
 		},
 		required=("employee",),
-		title="List discipline history",
+		title="List incident history",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	"get_discipline_report": _tool(
-		discipline.get_discipline_report,
+	"get_incident_report": _tool(
+		discipline.get_incident_report,
 		"The chain as a document somebody hands a lawyer — the timeline, every "
 		"step's narrative, and ITS GAPS. Read-only.\n\n"
 		"THE GAPS ARE THE POINT, the same argument export_insurance_schedule "
@@ -19544,12 +19544,12 @@ TOOLS = {
 			"employee": _field(_STRING, "The Employee."),
 		},
 		required=("employee",),
-		title="Get a discipline report",
+		title="Get an incident report",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
-	"expire_discipline_record": _tool(
-		discipline.expire_discipline_record,
+	"expire_incident_record": _tool(
+		discipline.expire_incident_record,
 		"MUTATING (default OFF). Age a step out of the chain, or withdraw one on "
 		"review.\n\n"
 		"NOTHING EXPIRES ON A SCHEDULE IN THIS APP. The look-back window that "
@@ -19565,7 +19565,7 @@ TOOLS = {
 		},
 		required=("record", "reason"),
 		mutating=True,
-		title="Expire or rescind a discipline record",
+		title="Expire or rescind an incident record",
 		available=_needs_doctype("Farm Incident Record"),
 		requires="the Farm Incident Record DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),

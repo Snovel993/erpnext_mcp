@@ -379,7 +379,7 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# their own bodies; and the accident group SPLITS, because the person
 		# who finds somebody on the ground is whoever finds them.
 		#
-		# `expire_discipline_record` is a tool with NO route here on purpose:
+		# `expire_incident_record` is a tool with NO route here on purpose:
 		# ageing a step out of a chain is a policy decision made at a desk with
 		# the handbook open. The assertion below in the other direction is what
 		# keeps that a decision rather than an omission.
