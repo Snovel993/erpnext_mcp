@@ -71,7 +71,7 @@ import frappe
 from .. import breaks as breaks_mod
 from ..services import push as push_service
 from .. import compat, geo, minors, shifts, timezones
-from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
+from ..args import as_bool, as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import employee as employee_tool
@@ -2296,6 +2296,281 @@ def _schedule_rows(rows) -> list:
 		}
 		for entry in (rows or [])
 	]
+
+
+# ── 11a. create_break_policy ────────────────────────────────────────────
+
+_VALID_STATES = ("OR", "WA")
+
+_SCHEDULE_TABLES = ("rest_schedule", "meal_schedule", "minor_rest_schedule", "minor_meal_schedule")
+
+
+def _validated_schedule_rows(raw, label: str) -> list[dict]:
+	"""Validate and normalise a list of break-schedule row dicts."""
+	if not isinstance(raw, list):
+		raise ToolError(f"{label} must be a list of row objects, got {type(raw).__name__}.")
+	out = []
+	for i, entry in enumerate(raw):
+		if not isinstance(entry, dict):
+			raise ToolError(f"{label}[{i}] must be an object, got {type(entry).__name__}.")
+		hours_from = entry.get("hours_from")
+		hours_to = entry.get("hours_to")
+		periods_owed = entry.get("periods_owed")
+		minutes_each = entry.get("minutes_each")
+		missing = []
+		if hours_from is None:
+			missing.append("hours_from")
+		if hours_to is None:
+			missing.append("hours_to")
+		if periods_owed is None:
+			missing.append("periods_owed")
+		if minutes_each is None:
+			missing.append("minutes_each")
+		if missing:
+			raise ToolError(
+				f"{label}[{i}] is missing {', '.join(missing)}. "
+				"Each row needs hours_from, hours_to, periods_owed and minutes_each."
+			)
+		try:
+			hours_from = float(hours_from)
+			hours_to = float(hours_to)
+		except (TypeError, ValueError):
+			raise ToolError(f"{label}[{i}]: hours_from and hours_to must be numbers.")
+		try:
+			periods_owed = int(periods_owed)
+			minutes_each = int(minutes_each)
+		except (TypeError, ValueError):
+			raise ToolError(f"{label}[{i}]: periods_owed and minutes_each must be integers.")
+		if hours_from < 0 or hours_to <= hours_from:
+			raise ToolError(f"{label}[{i}]: hours_from must be >= 0 and hours_to must be > hours_from.")
+		if periods_owed < 1:
+			raise ToolError(f"{label}[{i}]: periods_owed must be >= 1.")
+		if minutes_each < 1:
+			raise ToolError(f"{label}[{i}]: minutes_each must be >= 1.")
+		paid = entry.get("paid", True)
+		if isinstance(paid, str):
+			paid = paid.strip().lower() in ("1", "true", "yes")
+		out.append({
+			"hours_from": hours_from,
+			"hours_to": hours_to,
+			"periods_owed": periods_owed,
+			"minutes_each": minutes_each,
+			"paid": 1 if paid else 0,
+		})
+	return out
+
+
+def _validated_heat_rows(raw, label: str) -> list[dict]:
+	"""Validate and normalise a list of heat-break row dicts."""
+	if not isinstance(raw, list):
+		raise ToolError(f"{label} must be a list of row objects, got {type(raw).__name__}.")
+	out = []
+	for i, entry in enumerate(raw):
+		if not isinstance(entry, dict):
+			raise ToolError(f"{label}[{i}] must be an object, got {type(entry).__name__}.")
+		hi_from = entry.get("heat_index_from")
+		hi_to = entry.get("heat_index_to")
+		mins = entry.get("minutes_each")
+		every = entry.get("every_hours")
+		missing = []
+		if hi_from is None:
+			missing.append("heat_index_from")
+		if hi_to is None:
+			missing.append("heat_index_to")
+		if mins is None:
+			missing.append("minutes_each")
+		if every is None:
+			missing.append("every_hours")
+		if missing:
+			raise ToolError(
+				f"{label}[{i}] is missing {', '.join(missing)}. "
+				"Each row needs heat_index_from, heat_index_to, minutes_each and every_hours."
+			)
+		concurrent = entry.get("concurrent_with_rest", True)
+		if isinstance(concurrent, str):
+			concurrent = concurrent.strip().lower() in ("1", "true", "yes")
+		out.append({
+			"heat_index_from": float(hi_from),
+			"heat_index_to": float(hi_to),
+			"minutes_each": int(mins),
+			"every_hours": float(every),
+			"concurrent_with_rest": 1 if concurrent else 0,
+		})
+	return out
+
+
+def create_break_policy(args: dict) -> ToolResult:
+	"""Create a Labor Break Policy — the break schedule for one state."""
+	compat.require_doctype(
+		BREAK_POLICY_DOCTYPE,
+		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
+	)
+	employee_tool.require_shift_role()
+
+	work_state = as_str(args, "work_state", required=True).upper()
+	if work_state not in _VALID_STATES:
+		raise ToolError(f"work_state must be one of {', '.join(_VALID_STATES)}, got {work_state!r}.")
+
+	effective_from = as_date(args, "effective_from", required=True)
+
+	policy_id = as_str(args, "policy_id") or f"{work_state}-{effective_from}"
+	if frappe.db.exists(BREAK_POLICY_DOCTYPE, policy_id):
+		raise ToolError(
+			f"A Labor Break Policy named {policy_id!r} already exists. "
+			"Nothing was created."
+		)
+
+	enabled = as_bool(args, "enabled", default=True)
+	effective_to = as_date(args, "effective_to")
+	regulation_citations = as_str(args, "regulation_citations")
+	max_hours = args.get("max_hours_without_rest")
+	if max_hours is not None:
+		max_hours = float(max_hours)
+	minor_max = args.get("minor_max_hours_without_rest")
+	if minor_max is not None:
+		minor_max = float(minor_max)
+	notes = as_str(args, "notes")
+
+	doc = frappe.new_doc(BREAK_POLICY_DOCTYPE)
+	doc.policy_id = policy_id
+	doc.work_state = work_state
+	doc.effective_from = effective_from
+	doc.enabled = 1 if enabled else 0
+	if effective_to:
+		doc.effective_to = effective_to
+	if regulation_citations:
+		doc.regulation_citations = regulation_citations
+	if max_hours is not None:
+		doc.max_hours_without_rest = max_hours
+	if minor_max is not None:
+		doc.minor_max_hours_without_rest = minor_max
+	if notes:
+		doc.notes = notes
+
+	for table_name in _SCHEDULE_TABLES:
+		raw = args.get(table_name)
+		if raw:
+			for row_dict in _validated_schedule_rows(raw, table_name):
+				doc.append(table_name, row_dict)
+
+	raw_heat = args.get("heat_schedule")
+	if raw_heat:
+		for row_dict in _validated_heat_rows(raw_heat, "heat_schedule"):
+			doc.append("heat_schedule", row_dict)
+
+	doc.insert(ignore_permissions=True)
+
+	policy_dict = _describe_break_policy(dict(doc.as_dict()))
+	return ToolResult(
+		data=policy_dict,
+		summary=f"created break policy {doc.name} for {work_state} effective {effective_from}",
+		docstatus_delta="none → 0 (created)",
+	)
+
+
+# ── 11b. update_break_policy ────────────────────────────────────────────
+
+
+def update_break_policy(args: dict) -> ToolResult:
+	"""Update an existing Labor Break Policy."""
+	compat.require_doctype(
+		BREAK_POLICY_DOCTYPE,
+		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
+	)
+	employee_tool.require_shift_role()
+
+	policy_name = as_str(args, "policy") or as_str(args, "name") or as_str(args, "policy_id")
+	if not policy_name:
+		raise ToolError("policy is required — the policy_id or docname of the policy to update.")
+
+	if not frappe.db.exists(BREAK_POLICY_DOCTYPE, policy_name):
+		raise ToolError(f"No Labor Break Policy named {policy_name!r}. Nothing was changed.")
+
+	if as_str(args, "work_state"):
+		raise ToolError(
+			"work_state cannot be changed — create a new policy for the other state instead. "
+			"Nothing was changed."
+		)
+
+	doc = frappe.get_doc(BREAK_POLICY_DOCTYPE, policy_name)
+	changes = {}
+
+	enabled_val = as_bool(args, "enabled", default=None)
+	if enabled_val is not None:
+		before = bool(doc.enabled)
+		if enabled_val != before:
+			changes["enabled"] = [before, enabled_val]
+			doc.enabled = 1 if enabled_val else 0
+
+	new_effective_from = as_date(args, "effective_from")
+	if new_effective_from and str(new_effective_from) != str(doc.effective_from or ""):
+		changes["effective_from"] = [str(doc.effective_from or ""), new_effective_from]
+		doc.effective_from = new_effective_from
+
+	new_effective_to = as_date(args, "effective_to")
+	if new_effective_to is not None:
+		old = str(doc.effective_to or "")
+		if new_effective_to != old:
+			changes["effective_to"] = [old or None, new_effective_to or None]
+			doc.effective_to = new_effective_to or None
+
+	new_citations = as_str(args, "regulation_citations")
+	if new_citations and new_citations != (doc.regulation_citations or ""):
+		changes["regulation_citations"] = [doc.regulation_citations or None, new_citations]
+		doc.regulation_citations = new_citations
+
+	new_max = args.get("max_hours_without_rest")
+	if new_max is not None:
+		new_max = float(new_max)
+		old_max = doc.max_hours_without_rest or None
+		if new_max != old_max:
+			changes["max_hours_without_rest"] = [old_max, new_max]
+			doc.max_hours_without_rest = new_max
+
+	new_minor_max = args.get("minor_max_hours_without_rest")
+	if new_minor_max is not None:
+		new_minor_max = float(new_minor_max)
+		old_mm = doc.minor_max_hours_without_rest or None
+		if new_minor_max != old_mm:
+			changes["minor_max_hours_without_rest"] = [old_mm, new_minor_max]
+			doc.minor_max_hours_without_rest = new_minor_max
+
+	new_notes = as_str(args, "notes")
+	if new_notes and new_notes != (doc.notes or ""):
+		changes["notes"] = [doc.notes or None, new_notes]
+		doc.notes = new_notes
+
+	for table_name in _SCHEDULE_TABLES:
+		raw = args.get(table_name)
+		if raw is not None:
+			validated = _validated_schedule_rows(raw, table_name)
+			old_count = len(doc.get(table_name) or [])
+			doc.set(table_name, [])
+			for row_dict in validated:
+				doc.append(table_name, row_dict)
+			changes[table_name] = [f"{old_count} rows", f"{len(validated)} rows"]
+
+	raw_heat = args.get("heat_schedule")
+	if raw_heat is not None:
+		validated = _validated_heat_rows(raw_heat, "heat_schedule")
+		old_count = len(doc.get("heat_schedule") or [])
+		doc.set("heat_schedule", [])
+		for row_dict in validated:
+			doc.append("heat_schedule", row_dict)
+		changes["heat_schedule"] = [f"{old_count} rows", f"{len(validated)} rows"]
+
+	if not changes:
+		raise ToolError("Nothing to change — every field matches the stored value.")
+
+	doc.save(ignore_permissions=True)
+
+	policy_dict = _describe_break_policy(dict(doc.as_dict()))
+	policy_dict["changes"] = changes
+	return ToolResult(
+		data=policy_dict,
+		summary=f"updated break policy {doc.name}: {', '.join(changes)}",
+		docstatus_delta="0 → 0 (amended)",
+	)
 
 
 # ── 12. get_shift_production ─────────────────────────────────────────────

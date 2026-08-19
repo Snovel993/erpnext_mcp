@@ -843,9 +843,12 @@ class ToolRegistration(unittest.TestCase):
 		# model registry changed; the totals moved because the catalogue did.
 		# v0.93.0 adds ONE write as well: `recover_mobile_access`, the lost-phone
 		# path — revoke, re-mint, verify by badge, and never touch the Employee.
-		self.assertEqual(len(self.registry.TOOLS), 750)
+		# v0.101.0 adds two writes: `create_break_policy` and
+		# `update_break_policy` — the break schedule for a state is now writeable
+		# through the MCP surface.
+		self.assertEqual(len(self.registry.TOOLS), 752)
 		self.assertEqual(len(self.registry.READ_TOOLS), 375)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 375)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 377)
 
 
 if __name__ == "__main__":

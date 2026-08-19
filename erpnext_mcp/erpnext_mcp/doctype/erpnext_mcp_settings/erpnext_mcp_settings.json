@@ -490,6 +490,8 @@
   "allow_log_shift_break",
   "allow_end_shift_break",
   "allow_get_break_policy",
+  "allow_create_break_policy",
+  "allow_update_break_policy",
   "allow_get_shift_production",
   "allow_get_shift_crew_timeline",
   "allow_log_shift_location",
@@ -4137,6 +4139,20 @@
    "fieldname": "allow_get_break_policy",
    "fieldtype": "Check",
    "label": "Get Break Policy"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Create a Labor Break Policy — the break schedule for one state in one effective period. A policy is a STATE's rule, not a company's. OFF by default: writing a break schedule is a compliance decision an operator should take on purpose.",
+   "fieldname": "allow_create_break_policy",
+   "fieldtype": "Check",
+   "label": "Create Break Policy"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Update an existing Labor Break Policy: toggle enabled, change dates, add or replace schedule rows. Schedule tables are replaced wholesale — there is no append mode. OFF by default.",
+   "fieldname": "allow_update_break_policy",
+   "fieldtype": "Check",
+   "label": "Update Break Policy"
   },
   {
    "default": "1",

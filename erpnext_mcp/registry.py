@@ -15684,6 +15684,131 @@ TOOLS = {
 		available=_needs_doctype("Labor Break Policy"),
 		requires="the Labor Break Policy DocType, which ships with erpnext_mcp v0.58.0",
 	),
+	"create_break_policy": _tool(
+		shifts.create_break_policy,
+		"MUTATING (default OFF). Create a Labor Break Policy — the break schedule "
+		"for one state in one effective period.\n\n"
+		"A policy is a STATE's rule, not a company's: OAR 839-020-0050 is Oregon's "
+		"whoever employs you. The record is keyed on work_state and effective_from.\n\n"
+		"SCHEDULE ROWS are passed as arrays of objects, each with hours_from, "
+		"hours_to, periods_owed, minutes_each and an optional paid flag (default "
+		"true). Heat rows need heat_index_from, heat_index_to, minutes_each, "
+		"every_hours and optional concurrent_with_rest.\n\n"
+		"REFUSES: a duplicate policy_id.",
+		{
+			"work_state": _field(_STRING, "OR or WA. Required."),
+			"effective_from": _field(_STRING, "YYYY-MM-DD. Required."),
+			"policy_id": _field(
+				_STRING,
+				"Unique identifier. Default: '{work_state}-{effective_from}'.",
+			),
+			"enabled": _field(_BOOLEAN, "Default true."),
+			"effective_to": _field(_STRING, "YYYY-MM-DD. Blank means current."),
+			"regulation_citations": _field(_STRING, "The statutes this schedule is read from."),
+			"max_hours_without_rest": _field(
+				_NUMBER, "Maximum hours without a rest period. WA: 3. OR: null."
+			),
+			"minor_max_hours_without_rest": _field(
+				_NUMBER, "Maximum hours without rest for a worker under 18."
+			),
+			"rest_schedule": {
+				"type": "array",
+				"description": (
+					"Adult rest period bands. Each object: hours_from, hours_to, "
+					"periods_owed, minutes_each, paid (bool, default true)."
+				),
+				"items": {"type": "object"},
+			},
+			"meal_schedule": {
+				"type": "array",
+				"description": (
+					"Adult meal period bands. Same shape as rest_schedule."
+				),
+				"items": {"type": "object"},
+			},
+			"minor_rest_schedule": {
+				"type": "array",
+				"description": (
+					"Rest periods for workers under 18. Same shape as rest_schedule."
+				),
+				"items": {"type": "object"},
+			},
+			"minor_meal_schedule": {
+				"type": "array",
+				"description": (
+					"Meal periods for workers under 18. Same shape as rest_schedule."
+				),
+				"items": {"type": "object"},
+			},
+			"heat_schedule": {
+				"type": "array",
+				"description": (
+					"Heat cool-down bands. Each object: heat_index_from, heat_index_to, "
+					"minutes_each, every_hours, concurrent_with_rest (bool, default true)."
+				),
+				"items": {"type": "object"},
+			},
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("work_state", "effective_from"),
+		mutating=True,
+		title="Create a break policy",
+		available=_needs_doctype("Labor Break Policy"),
+		requires="the Labor Break Policy DocType, which ships with erpnext_mcp v0.58.0",
+	),
+	"update_break_policy": _tool(
+		shifts.update_break_policy,
+		"MUTATING (default OFF). Update an existing Labor Break Policy: toggle "
+		"enabled, change dates, add or replace schedule rows.\n\n"
+		"SCHEDULE TABLES ARE REPLACED WHOLESALE when passed — there is no "
+		"append-one-row mode, because a schedule that is half old bands and half "
+		"new is a schedule nobody approved. Pass the complete table.\n\n"
+		"CANNOT re-key: work_state is refused because the policy_id is built from "
+		"it and every shift reference points at that name.",
+		{
+			"policy": _field(_STRING, "The policy_id or docname. Required."),
+			"name": _field(_STRING, "Alias for policy."),
+			"policy_id": _field(_STRING, "Alias for policy."),
+			"enabled": _field(_BOOLEAN, "Toggle the policy on or off."),
+			"effective_from": _field(_STRING, "New effective date, YYYY-MM-DD."),
+			"effective_to": _field(_STRING, "New end date, YYYY-MM-DD. Empty string clears it."),
+			"regulation_citations": _field(_STRING, "New regulation citations."),
+			"max_hours_without_rest": _field(_NUMBER, "New max hours without rest."),
+			"minor_max_hours_without_rest": _field(_NUMBER, "New minor max hours without rest."),
+			"rest_schedule": {
+				"type": "array",
+				"description": "Replace the adult rest schedule. Same row shape as create.",
+				"items": {"type": "object"},
+			},
+			"meal_schedule": {
+				"type": "array",
+				"description": "Replace the adult meal schedule.",
+				"items": {"type": "object"},
+			},
+			"minor_rest_schedule": {
+				"type": "array",
+				"description": "Replace the minor rest schedule.",
+				"items": {"type": "object"},
+			},
+			"minor_meal_schedule": {
+				"type": "array",
+				"description": "Replace the minor meal schedule.",
+				"items": {"type": "object"},
+			},
+			"heat_schedule": {
+				"type": "array",
+				"description": "Replace the heat schedule.",
+				"items": {"type": "object"},
+			},
+			"notes": _field(_STRING, "New notes."),
+			"work_state": _field(_STRING, "Always refused — see the description."),
+		},
+		required=("policy",),
+		mutating=True,
+		title="Update a break policy",
+		available=_needs_doctype("Labor Break Policy"),
+		requires="the Labor Break Policy DocType, which ships with erpnext_mcp v0.58.0",
+	),
 	"get_shift_production": _tool(
 		shifts.get_shift_production,
 		"Per-worker bucket counts for a shift, sorted by count descending.\n\n"

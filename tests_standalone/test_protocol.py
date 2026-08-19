@@ -1081,10 +1081,15 @@ class Catalogue(SeededTestCase):
 		packing house ever asks — given this tag, whose buckets are in this bin.
 		Three reads and one write, which is why the write count moves by one and
 		the read count by three.
+
+		v0.101.0 IS BREAK POLICY MANAGEMENT, two mutating tools:
+		`create_break_policy` writes a new Labor Break Policy and
+		`update_break_policy` amends an existing one. Both are writes, so the
+		mutating count moves by two and the read count stays.
 		"""
-		self.assertEqual(len(registry.TOOLS), 750)
+		self.assertEqual(len(registry.TOOLS), 752)
 		self.assertEqual(len(registry.READ_TOOLS), 375)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 375)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 377)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
