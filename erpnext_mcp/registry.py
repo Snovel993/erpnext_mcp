@@ -19483,6 +19483,13 @@ TOOLS = {
 			"issued_on": _field(_STRING, "YYYY-MM-DD. Defaults to today."),
 			"issued_by": _field(_STRING, "Who issued it."),
 			"company": _field(_STRING, "Company."),
+			"evidence_files": _field(
+				{"type": "array", "items": {"type": ["string", "object"]}},
+				"Photographs of what this is about. File docnames from commit_staged_file, "
+				"file URLs, or objects like {\"file\": \"...\", \"evidence_type\": \"Photo\"}. "
+				"Max 40. Attached to the record privately after it is created; anything that "
+				"could not be filed comes back in `warnings` rather than failing the record.",
+			),
 		},
 		required=("employee", "discipline_type", "incident_description", "expected_improvement", "followup_date"),
 		mutating=True,

@@ -5091,6 +5091,16 @@ ATTACHMENT_PARENTS = {
 	"Compliance Alert": False,
 	"Farm Shift": False,
 	payroll_tools.PAYROLL_ENTRY: True,
+	# v0.96.0. The photographs `create_discipline_record` now files against an
+	# incident record, readable back. `True` — the HR gate — because this is a
+	# personnel document in the same sense an I-9 is: REPORTING what happened is
+	# the field role's since v0.94.0, and READING somebody's disciplinary file is
+	# not, which is the line `get_discipline_record` already draws. Note the
+	# doctype's own DocPerms are narrower still (System Manager, HR Manager), and
+	# `files.list_attachments` honours them — so this entry opens the door for
+	# the accounts that hold those roles and does not manufacture a permission
+	# for anybody else.
+	discipline_tools.DISCIPLINE: True,
 }
 
 
@@ -7547,6 +7557,7 @@ def create_discipline_record(
 	suspension_end=None,
 	company=None,
 	report_direction=None,
+	evidence_files=None,
 ) -> dict:
 	"""Report one incident, from a handset — the farm's direction or the worker's.
 
@@ -7575,6 +7586,21 @@ def create_discipline_record(
 	which is the one forgery this record is most exposed to. `reported_by` is
 	resolved server-side by the tool for the same reason, and the two are distinct
 	facts: widening this gate does not blur who reported what.
+
+	`evidence_files` SINCE v0.96.0, IN THE SAME SHAPE `complete_task_via_mobile`
+	TAKES. This route accepted no file token at all, so a foreman photographing
+	the thing a warning is about had nowhere to send the photograph and the app
+	kept it and said so. The tokens are the ones `finalize_staged_file` handed
+	back; `_evidence` renames them and `discipline._file_the_evidence` hangs them
+	off the record, privately, after it exists.
+
+	IT IS NOT AN ALLOW-LIST ENTRY ON `attach_file_to_document`, which is the
+	other way this could have gone and does not work: that route asks Frappe for
+	`write` on the parent, and `Farm Incident Record` grants write to System
+	Manager and HR Manager alone. A Foreman — the role this method was
+	deliberately opened to in v0.94.0 — would have been refused at the second
+	call having been allowed at the first. The evidence rides the create instead,
+	on one gate.
 	"""
 	personnel.require_shift_role()
 	allowed = guard.require_scope(user)
@@ -7607,6 +7633,9 @@ def create_discipline_record(
 		if value not in (None, ""):
 			inner[key] = str(value).strip()
 	inner["source_language"] = _caller_language(user, issuer)
+	evidence = _evidence(evidence_files)
+	if evidence:
+		inner["evidence_files"] = evidence
 
 	return discipline_tools.create_incident_record(inner).data
 

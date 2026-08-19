@@ -64,10 +64,90 @@ from ..erpnext_mcp.doctype.farm_incident_record.farm_incident_record import (
 )
 from ..errors import ToolError
 from ..result import ToolResult
-from . import narrative
+from . import inspections, narrative
 
 DISCIPLINE = "Farm Incident Record"
 EMPLOYEE = "Employee"
+
+
+def _file_the_evidence(record: str, raw) -> list:
+	"""Hang already-uploaded photographs off one incident record, privately.
+
+	v0.96.0. WHAT A WARNING IS ABOUT IS USUALLY A THING YOU CAN PHOTOGRAPH — a
+	bin left in the row, a guard taken off a saw, a cabin — and until this
+	argument existed there was nowhere to send the picture. `create_discipline_record`
+	took five fields and no file token, so a foreman holding the phone that had
+	just taken the photograph filed a sentence describing it and kept the
+	photograph on the handset. The sentence is what a dispute then turns on.
+
+	THE OTHER HALF OF THE FIX IS NOT AN ALLOW-LIST ENTRY, and that is worth
+	saying because it is the obvious-looking alternative. `attach_file_to_document`
+	on the mobile surface runs `files._require_parent_write`, which asks Frappe
+	for `write` on the parent — and `Farm Incident Record` grants create/write to
+	System Manager and HR Manager and to nobody else. Adding it to that route's
+	allow-list would publish a door that then refused every Foreman who walked
+	through it, which is the reporting role this record was deliberately opened
+	to in v0.94.0. Filing the evidence AS PART OF the create is what keeps the
+	two halves of one act on one gate.
+
+	`inspections.normalise_evidence` DOES THE CHECKING, unchanged and unforked: a
+	File docname that is not on this site is refused there with the sentence
+	about evidence that points at nothing, and the forty-entry cap is its. This
+	only takes the file references it returns and gives them a home — the record
+	has no evidence child table and does not need one, because what is wanted
+	here is the Desk's own attachment list rather than a queryable frame.
+
+	A FILE ALREADY ATTACHED SOMEWHERE ELSE IS LEFT ALONE AND REPORTED, not moved
+	and not raised on. Re-pointing it would silently take evidence off whatever
+	it was filed against, and raising would fail a record that has already been
+	inserted — the incident is the thing being preserved here, and an attachment
+	that did not stick is recoverable in a way an unwritten warning is not.
+	"""
+	rows = inspections.normalise_evidence(raw, "evidence_files")
+	filed, skipped = [], []
+	for row in rows:
+		docname = str(row.get("file") or "")
+		if not docname:
+			# A bare file_url with no File behind it. `normalise_evidence` allows
+			# it for the child tables that store the URL; there is nothing to
+			# attach here, so it is reported rather than silently dropped.
+			skipped.append({"file_url": row.get("file_url"), "reason": "no File record to attach"})
+			continue
+		current = (
+			frappe.db.get_value(
+				"File", docname, ["attached_to_doctype", "attached_to_name", "file_name"], as_dict=True
+			)
+			or {}
+		)
+		already = (str(current.get("attached_to_doctype") or ""), str(current.get("attached_to_name") or ""))
+		if already[0] and already != (DISCIPLINE, record):
+			skipped.append(
+				{
+					"file": docname,
+					"reason": f"already attached to {already[0]} {already[1]}",
+				}
+			)
+			continue
+		if already != (DISCIPLINE, record):
+			handle = frappe.get_doc("File", docname)
+			handle.attached_to_doctype = DISCIPLINE
+			handle.attached_to_name = record
+			# PRIVATE, THROUGH THE DOCUMENT. `is_private` is not a flag on a row
+			# — flipping it MOVES the bytes and rewrites `file_url`, and the File
+			# controller is what does the moving. A photograph attached to
+			# somebody's disciplinary file served from a public URL is a breach
+			# nobody has to guess a password for.
+			handle.is_private = 1
+			handle.flags.ignore_permissions = True
+			handle.save()
+		filed.append(
+			{
+				"file": docname,
+				"file_name": current.get("file_name"),
+				"evidence_type": row.get("evidence_type"),
+			}
+		)
+	return [filed, skipped]
 
 #: Most steps one chain carries. An employee with more than this is not a
 #: discipline question any more, and a list nobody can read is not a defence.
@@ -400,6 +480,15 @@ def create_incident_record(args: dict) -> ToolResult:
 	A STEP AFTER A TERMINATION IS REFUSED OUTRIGHT. There is no chain past the
 	end of employment, and a record filed after one is either about somebody who
 	was rehired — in which case the new chain starts clean — or a mistake.
+
+	`evidence_files` IS OPTIONAL AND NEVER FAILS THE RECORD, v0.96.0. What a
+	warning is about is usually a thing somebody can photograph, and until this
+	argument existed the route accepted no file token at all — so the photograph
+	stayed on the handset and the record carried a sentence describing it. The
+	files are attached after the insert and anything that could not be filed
+	comes back in `warnings` rather than raising: the incident is the thing being
+	preserved, and an attachment that did not stick can be sent again while an
+	unwritten warning cannot. See `_file_the_evidence`.
 	"""
 	_require()
 	company = resolve_company(as_str(args, "company"))
@@ -489,6 +578,13 @@ def create_incident_record(args: dict) -> ToolResult:
 	doc.employee_statement = as_str(args, "employee_statement")
 	doc.insert(ignore_permissions=True)
 
+	# v0.96.0. The photographs of what this is about, filed against the record
+	# the moment it exists. AFTER the insert because an attachment needs a
+	# parent, and inside this call rather than behind a second one because the
+	# role that may report an incident is not the role that may write to the
+	# record afterwards — see `_file_the_evidence`.
+	evidence_filed, evidence_skipped = _file_the_evidence(doc.name, args.get("evidence_files"))
+
 	# The manager's own account of the conversation, where they gave one at the
 	# same time. Appended rather than written into a column so it carries an
 	# author and a timestamp like every other narrative entry.
@@ -525,11 +621,21 @@ def create_incident_record(args: dict) -> ToolResult:
 			"chain is the chain."
 		)
 
+	if evidence_skipped:
+		warnings.append(
+			f"{len(evidence_skipped)} evidence file(s) were not filed against this record: "
+			+ "; ".join(str(entry.get("reason") or "") for entry in evidence_skipped)
+			+ ". The record itself was created — upload the photograph again and file the new one."
+		)
+
 	return ToolResult(
 		data={
 			**described,
 			"chain_length": len(history) + 1,
 			"prior_records": [step["name"] for step in history],
+			"evidence_filed": evidence_filed,
+			"evidence_count": len(evidence_filed),
+			"evidence_skipped": evidence_skipped or None,
 			"warnings": warnings or None,
 			"message_key": "discipline.created",
 		},
