@@ -2502,6 +2502,7 @@ def add_worker_to_shift(
 def end_shift(
 	user: str,
 	shift=None,
+	farm_shift=None,
 	end_datetime=None,
 	supervisor_signature_file_token=None,
 	reviewed_on=None,
@@ -2518,9 +2519,24 @@ def end_shift(
 	The close is what writes one Attendance record per crew member, each spanning
 	that person's own joined_at to their own left_at. It happens once: the tool
 	refuses a shift that is already closed rather than writing a second set.
+
+	`farm_shift` IS ACCEPTED AS A SECOND SPELLING OF `shift`, v0.96.0. It is the
+	name the dispatch surface already uses — `assign_farm_task` and
+	`create_farm_task` have taken both since v0.72.0 — and it is the column the
+	Farm Task and the Attendance row actually carry, so a client that learnt the
+	word there sent it here too. `routes.bind` reduces a body to the keys the
+	method DECLARES, so an undeclared `farm_shift` was dropped before any guard
+	saw it and the close came back saying the argument was required while it sat
+	in the body. Declaring it is what makes the refusal honest either way.
+
+	THE TWO SPELLINGS DISAGREEING IS REFUSED rather than resolved, by
+	`_one_spelling`: one of them names a shift that is not being closed, and
+	nothing in the body says which. Attendance for a whole crew is written off
+	this call and guessing is not available.
 	"""
 	allowed = guard.require_scope(user)
-	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	named_shift, shift_label = _one_spelling(shift, farm_shift, "shift", "farm_shift")
+	name = guard.require_scoped_doc(FARM_SHIFT, named_shift, shift_label, allowed)
 
 	inner = {"shift": name}
 	for key, value in (
