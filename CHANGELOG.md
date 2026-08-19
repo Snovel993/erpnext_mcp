@@ -3,6 +3,47 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.96.0 — 2026-08-18 — seven places the phone and the farm disagreed about a word
+
+Wave 1 of `fafo_ios/SERVER_CHANGES.md`. Seven items with almost nothing in
+common as features, and one thing in common as failures: in every one of them
+the iOS app and this server disagreed about a name, a value or a shape, and the
+disagreement was invisible from either side alone. Both suites were green while
+the break coach on the shift screen said "Break schedule unavailable".
+
+| # | What was wrong | What it cost |
+|---|---|---|
+| 13 | `get_break_policy` called `resolve_company(args, actor)`, which is not that function's signature — the dict met `.strip()` | HTTP 500 on every call with a company in the body, which is every real call |
+| 8 | shift timestamps compared as strings, and `"…04"` is a prefix of `"…04.560880"` | a foreman who started a shift and scanned their own badge was told they joined before it began |
+| 9 | `break_kind` offered Paid Rest, Unpaid Meal, Cool-Down | water and shade breaks — the two OAR 437-004-1131 is written about — were refused, so the log that IS the heat-relief evidence was never created |
+| 1 | `end_shift` did not declare `farm_shift`, so `routes.bind` dropped it | "farm_shift is required" on a body that carried it |
+| 6 | no `phase` on task evidence | before/after lived in the filename, readable and unqueryable |
+| 7 | `shape.task` dropped `template` and `checklist` | a worker could not reach their own task's SOP |
+| 10 | `create_discipline_record` took no file token | a foreman photographing what a warning is about had nowhere to send it |
+
+Four comparisons beyond the reported one carried the same string-prefix defect
+and are fixed with it, including the close's own "it would have finished before
+it began". The guards still refuse what they were written for — an hour-early
+join and a six-hour-early close are asserted as still refused.
+
+On item 10 the allow-list would not have worked on its own:
+`attach_file_to_document` asks Frappe for `write` on the parent, and `Farm
+Incident Record` grants that to System Manager and HR Manager alone, so the
+route would have refused every Foreman — the role reporting was opened to in
+v0.94.0. The evidence rides the create instead. The doctype joins
+`ATTACHMENT_PARENTS` HR-gated, for reading it back.
+
+Three doctype JSONs change and all three changes are additive — a `bench
+migrate` and nothing else. No new tools, so no `allow_*` switch is stranded.
+Nothing already stored changes meaning: `cool_down_logged` still counts
+Cool-Down alone, an unset phase stays legal and emits no key, and a task with no
+template still reports neither `template` nor `checklist`.
+
+Forty-two tests in `tests_standalone/test_wave1_mobile_gaps.py`, each with its
+negative control. Run against the previous tree, 32 of the 42 fail.
+
+See `RELEASES/v0.96.0.md`.
+
 ## 0.95.0 — 2026-08-18 — the tool finishes the rename the doctype started
 
 v0.94.0 renamed the `Discipline Record` DocType to `Farm Incident Record` and
