@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.103.0 — 2026-08-19 — the card says where somebody belongs
+
+Tim, on the badges the pickers carry: "job title, assigned crew, and camp and
+cabin number. That would finish off things nicely I think." The job title was
+already on the card. The other two were not, because **neither is on the Employee
+record** — a crew is a supervisor or a shift, a cabin is a Housing Assignment
+against a Housing Unit — so the card now goes and asks two more registers.
+
+**The crew is the durable answer.** `reports_to`, then `department`, then
+`branch`, and only where the site records none of those, the one open Farm Shift
+they are standing on. A card is printed once and lives in a pocket for a season,
+so the line has to still be true in September; `crew_source` names which register
+answered. Two open shifts print nothing rather than guess.
+
+**The cabin is the current Housing Assignment**, printed as `<camp> · <cabin>`
+where the camp is the parcel — a farm with two camps can have a Cabin 3 on each.
+Current means no `end_date`, which is `housing._current_assignments`' own
+definition rather than a second one.
+
+**Neither lookup may lose a badge.** A camp register that has not migrated, a
+worker never rostered, an HR app without `reports_to` — each is a card printed
+without that line, never a badge nobody can issue. `render/badge_card.py` calls
+both inside a guard of their own and filters its Employee columns through the
+doctype meta first, so a missing column cannot cost the card its photograph.
+
+Three fixed slots rather than a stack that closes up: the sheet lays the card out
+in Python and the Print Format in Jinja, and a conditional stack would need the
+same arithmetic twice and would drift. Each line clips rather than wraps. The
+same three facts reach the single card, the sheet, the ID card PDF, the Desk's
+Print button and the wallet pass.
+
 ## 0.102.0 — 2026-08-19 — somewhere to stand while you enrol somebody
 
 Item 20. `create_mobile_user` has made the account, scoped it and minted the

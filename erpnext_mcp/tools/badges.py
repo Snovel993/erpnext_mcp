@@ -66,6 +66,12 @@ BADGE_DOCTYPE = bucket_log.BADGE_DOCTYPE
 EMPLOYEE = "Employee"
 FARM_SHIFT = "Farm Shift"
 
+#: The camp registers a card reads. Both are this app's own doctypes and both
+#: are optional to a card: a site that has not migrated them, or a worker who
+#: lives off the farm, prints a badge with no cabin line on it.
+HOUSING_ASSIGNMENT = "Housing Assignment"
+HOUSING_UNIT = "Housing Unit"
+
 #: Cards one sheet call produces. The same hundred `generate_asset_qr_sheet`
 #: takes, for the same reason: past that the answer is a multi-megabyte JSON
 #: payload of base64 PNGs, and a crew of a hundred is already two Avery sheets.
@@ -116,7 +122,24 @@ BADGE_LOGO_FIELD = "badge_logo"
 
 #: What a badge card carries, and the label printed above the QR. Kept here
 #: rather than in the caller so the sheet and the single card agree.
-_EMPLOYEE_FIELDS = ("name", "employee_name", "employee_number", "designation", "status", "company", "image")
+#:
+#: v0.103.0 adds the three columns `_crew` falls back through. They are read for
+#: the CREW LINE and nothing else — see that function for the order and why the
+#: order is that one — and each is passed through `compat.existing_fields`, so a
+#: site whose HR app spells its Employee differently reads a row without them
+#: rather than failing on a column that is not there.
+_EMPLOYEE_FIELDS = (
+	"name",
+	"employee_name",
+	"employee_number",
+	"designation",
+	"status",
+	"company",
+	"image",
+	"reports_to",
+	"department",
+	"branch",
+)
 
 
 def _require() -> None:
@@ -149,6 +172,190 @@ def _initials(employee_name: str) -> str:
 	if len(words) == 1:
 		return words[0][:2].upper()
 	return (words[0][:1] + words[-1][:1]).upper()
+
+
+# ── the three lines under the name ───────────────────────────────────────
+#
+# v0.103.0, and it is Tim's sentence: job title, assigned crew, and camp and
+# cabin number "would finish off things nicely". The job title was already on the
+# card. The other two were not, and the reason they were not is that NEITHER IS
+# ON THE EMPLOYEE RECORD — a crew is a Farm Shift or a supervisor, a cabin is a
+# Housing Assignment against a Housing Unit — so a card that carried them had to
+# go and ask two more registers.
+#
+# BOTH LOOKUPS ARE BEST-EFFORT AND NEITHER MAY LOSE A BADGE. `_company_logo`
+# above sets the posture and these keep it: a site that has not migrated the camp
+# register, a worker who has never been rostered, an HR app that spells its
+# Employee without `reports_to` — each is a card printed WITHOUT that line rather
+# than a badge nobody can issue. What goes wrong at a shed door on a Monday is a
+# picker with no card, and no cabin number is worth risking one for.
+
+
+def _label(doctype: str, name: str, field: str) -> str:
+	"""A linked record's printable label, falling back to its docname. Never raises.
+
+	ERPNext suffixes a Department's docname with the company abbreviation —
+	`Harvest - ETC` — which is correct in a Link field and is not what anybody
+	wants printed on a card. The doctype's own title column is asked for first
+	and the docname is what arrives when there is no such column, no such row, or
+	no such doctype.
+	"""
+	name = str(name or "").strip()
+	if not name:
+		return ""
+	try:
+		if compat.has_field(doctype, field):
+			return str(frappe.db.get_value(doctype, name, field) or name)
+	except Exception:
+		pass
+	return name
+
+
+def _crew(row: dict) -> dict:
+	"""Which crew this badge belongs to, and where that answer came from.
+
+	THE DURABLE ANSWER WINS, AND THAT ORDERING IS THE WHOLE DESIGN. A card is
+	printed once and then lives in a back pocket for a season, so the crew line
+	has to be a fact that is still true in September. `Employee.reports_to` is
+	that fact — a picker who reports to Ramirez is on Ramirez's crew for as long
+	as the record says so — and a Farm Shift is not: it is one morning's roster,
+	and a card that printed `SHIFT-2026-0114`'s foreman would be wrong by
+	Wednesday and unfixable without a reprint.
+
+	So the order is `reports_to`, then `department`, then `branch`, then — only
+	where the site records none of the three — the ONE open shift they are
+	standing on. That last one is a stopgap and it is reported as one:
+	`crew_source` says which register answered, so a caller that cares about the
+	difference between "this is who they work for" and "this is who they happened
+	to be with when the card was printed" can tell them apart.
+
+	AMBIGUITY PRINTS NOTHING. Two open shifts naming one person is a roster
+	somebody has to fix, and `dispatch._open_shift_for` already refuses to guess
+	between them for a reason that applies twice over here — a card cannot be
+	corrected once it is laminated.
+	"""
+	crew = {"crew": None, "crew_source": None, "shift": None, "shift_type": None, "foreman": None}
+	employee = str(row.get("name") or "").strip()
+	if not employee:
+		return crew
+
+	supervisor = str(row.get("reports_to") or "").strip()
+	if supervisor:
+		crew["crew"] = _label(EMPLOYEE, supervisor, "employee_name") or supervisor
+		crew["crew_source"] = "reports_to"
+		crew["foreman"] = supervisor
+		return crew
+
+	department = str(row.get("department") or "").strip()
+	if department:
+		crew["crew"] = _label("Department", department, "department_name") or department
+		crew["crew_source"] = "department"
+		return crew
+
+	branch = str(row.get("branch") or "").strip()
+	if branch:
+		crew["crew"] = branch
+		crew["crew_source"] = "branch"
+		return crew
+
+	# The stopgap. Imported here rather than at the top of the file because it is
+	# the only reader of the dispatch module in this one, and because a card must
+	# not stop being printable if that chain fails to import.
+	try:
+		from .dispatch import _open_shift_for
+
+		shift = _open_shift_for(employee, str(row.get("company") or ""))
+	except Exception:
+		shift = ""
+	if not shift:
+		return crew
+	try:
+		found = (
+			frappe.db.get_value(
+				FARM_SHIFT,
+				shift,
+				compat.existing_fields(FARM_SHIFT, ("foreman", "foreman_name", "shift_type")),
+				as_dict=True,
+			)
+			or {}
+		)
+	except Exception:
+		found = {}
+	label = str(found.get("foreman_name") or found.get("foreman") or "").strip()
+	crew["crew"] = label or shift
+	crew["crew_source"] = "open shift"
+	crew["shift"] = shift
+	crew["shift_type"] = str(found.get("shift_type") or "") or None
+	crew["foreman"] = str(found.get("foreman") or "") or None
+	return crew
+
+
+def _housing(row: dict) -> dict:
+	"""Where this person sleeps: the camp, the cabin, and the assignment behind them.
+
+	CURRENT MEANS NO `end_date`, which is `housing._current_assignments`' own
+	definition and not a second one invented here. `status` is a Select an
+	operator maintains by hand and `end_date` is what `end_housing_assignment`
+	actually writes, so a card that trusted the Select would print a cabin
+	somebody moved out of in June.
+
+	THE CAMP IS THE PARCEL. A labor camp is a place — `housing.create_housing_unit`
+	numbers a unit within a parcel and refuses a second unit of the same name on
+	it — so `<parcel> · <unit>` is the pair that identifies a bed to somebody
+	walking the camp at six in the morning, and either half alone is ambiguous
+	across a farm with two camps that both have a Cabin 3.
+
+	THE MOST RECENT ONE WINS where a worker holds two open assignments. That is
+	a data problem `get_housing_capacity` already surfaces, and unlike the crew
+	line there is no honest way to print nothing: somebody sleeps somewhere, and
+	the newest assignment is the best guess at where.
+	"""
+	housing = {"housing": None, "camp": None, "cabin": None, "housing_assignment": None, "unit": None}
+	employee = str(row.get("name") or "").strip()
+	if not employee or not compat.doctype_exists(HOUSING_ASSIGNMENT):
+		return housing
+
+	try:
+		rows = (
+			frappe.db.get_all(
+				HOUSING_ASSIGNMENT,
+				filters={"employee": employee, "end_date": ("is", "not set")},
+				fields=compat.existing_fields(
+					HOUSING_ASSIGNMENT, ("name", "unit", "parcel", "assigned_date", "status")
+				),
+				order_by="assigned_date desc",
+				limit=5,
+			)
+			or []
+		)
+	except Exception:
+		return housing
+
+	live = [entry for entry in rows if str(entry.get("status") or "Current") != "Ended"]
+	if not live:
+		return housing
+	found = dict(live[0])
+
+	unit = str(found.get("unit") or "").strip()
+	cabin = _label(HOUSING_UNIT, unit, "unit_name") if unit else ""
+	camp = str(found.get("parcel") or "").strip()
+	if not camp and unit:
+		# The assignment carries its own `parcel` and may not have been given one.
+		# The unit always has: `create_housing_unit` requires it.
+		try:
+			camp = str(frappe.db.get_value(HOUSING_UNIT, unit, "parcel") or "")
+		except Exception:
+			camp = ""
+
+	housing["housing_assignment"] = str(found.get("name") or "") or None
+	housing["unit"] = unit or None
+	housing["cabin"] = cabin or None
+	housing["camp"] = camp or None
+	if cabin and camp:
+		housing["housing"] = f"{camp} · {cabin}"
+	else:
+		housing["housing"] = cabin or camp or None
+	return housing
 
 
 def _company_prefix(company: str) -> str:
@@ -444,6 +651,13 @@ def _card(row: dict, badge_id: str, company: str, rendered: dict) -> dict:
 		"designation": row.get("designation") or None,
 		"company": company,
 		"badge_id": badge_id,
+		# v0.103.0. The two lines under the designation, and the workings behind
+		# them. `crew` and `housing` are what a layout prints; `crew_source`,
+		# `shift`, `camp`, `cabin` and the docnames are what a caller checks —
+		# a handset that wants to link to the Housing Assignment should not have
+		# to parse `"Mill Creek · Cabin 3"` back apart to find it.
+		**_crew(row),
+		**_housing(row),
 		# The photograph if the Employee record has one, and the initials that
 		# go in its place when it does not. Both, always — a print template
 		# should not have to ask this app a second question to lay out a card.
@@ -574,6 +788,11 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	call, because a replacement that leaves its predecessor resolving is how a
 	found badge keeps earning.
 
+	v0.103.0: the card carries the JOB TITLE, the CREW and the CAMP AND CABIN as
+	well as the name and the number. See `_crew` and `_housing` — both are
+	best-effort, both name where their answer came from, and a site that records
+	neither prints exactly the card it printed before.
+
 	v0.94.0: `require_hiring_role`, NOT `require_hr_role`. A badge is an
 	IDENTIFIER, not PII — it carries a name and a designation, both of which are
 	already on the front of the worker's shirt — and issuing one is step 9 of a
@@ -662,8 +881,9 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 
 def generate_employee_badge_sheet(args: dict) -> ToolResult:
 	"""MUTATING (default OFF). A printable sheet of badge cards — name, photo (or
-	initials), designation, badge ID and QR — for a crew at once. Issues a badge
-	to anybody who has none and reuses the live one where there is one.
+	initials), designation, crew, camp and cabin, badge ID and QR — for a crew at
+	once. Issues a badge to anybody who has none and reuses the live one where
+	there is one.
 
 	ONE EMPLOYEE'S FAILURE DOES NOT LOSE THE SHEET. A name that resolves to
 	nobody, somebody who has left, an entity this actor cannot reach — each is

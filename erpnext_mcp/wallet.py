@@ -509,9 +509,21 @@ def build_pass_json(card: dict, config: dict) -> dict:
 		)
 	)
 
+	# v0.103.0. The same three facts the printed card gained, in the two slots
+	# Apple gives a generic pass. Role and crew read together and belong side by
+	# side; the camp sits with the company, which is the other thing that answers
+	# "where does this person belong" rather than "what do they do".
+	# Both are omitted when unknown rather than printed empty — a labelled blank
+	# on a phone reads as a system that lost the answer.
 	secondary = [_field("badge", "Badge", badge_id)]
 	if card.get("designation"):
 		secondary.append(_field("role", "Role", card["designation"]))
+	if card.get("crew"):
+		secondary.append(_field("crew", "Crew", card["crew"]))
+
+	auxiliary = [_field("company", "Company", company)]
+	if card.get("housing"):
+		auxiliary.append(_field("housing", "Camp", card["housing"]))
 
 	return {
 		"formatVersion": 1,
@@ -546,7 +558,7 @@ def build_pass_json(card: dict, config: dict) -> dict:
 		PASS_STYLE: {
 			"primaryFields": [_field("name", "Employee", name)],
 			"secondaryFields": secondary,
-			"auxiliaryFields": [_field("company", "Company", company)],
+			"auxiliaryFields": auxiliary,
 			"backFields": back_fields,
 		},
 	}
@@ -821,6 +833,12 @@ def google_pass_object(card: dict, config: dict) -> tuple:
 		obj["textModulesData"].append(
 			{"id": "employee_number", "header": "Employee Number", "body": str(card["employee_number"])}
 		)
+	# v0.103.0, and the same rule the Apple builder above keeps: a fact the site
+	# does not record is left off the pass rather than shown as an empty row.
+	if card.get("crew"):
+		obj["textModulesData"].append({"id": "crew", "header": "Crew", "body": str(card["crew"])})
+	if card.get("housing"):
+		obj["textModulesData"].append({"id": "housing", "header": "Camp", "body": str(card["housing"])})
 
 	logo_url = str(card.get("public_logo_url") or "")
 	photo_url = str(card.get("public_photo_url") or "")

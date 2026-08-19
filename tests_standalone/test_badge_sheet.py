@@ -175,6 +175,41 @@ class TheCardMarkup(unittest.TestCase):
 		self.assertNotIn("bc-qr", html)
 		self.assertIn(f"{MAIN_ABBR}-0001", html)
 
+	def test_the_crew_and_the_cabin_are_labelled_on_the_card(self):
+		"""v0.103.0. `Mill Creek · Cabin 7` alone is a place; `Camp: Mill Creek ·
+		Cabin 7` is an instruction to whoever is walking somebody to their bunk."""
+		html = badge_sheet.card_html(_card(crew="Rosa Ramirez", housing="Mill Creek · Cabin 7"))
+		self.assertIn("bc-crew", html)
+		self.assertIn("bc-house", html)
+		self.assertIn("Crew: Rosa Ramirez", html)
+		self.assertIn("Camp: Mill Creek · Cabin 7", html)
+
+	def test_neither_line_is_drawn_when_the_site_records_neither(self):
+		"""THE NEGATIVE CONTROL. A label with nothing after it is a card that
+		looks like it lost the answer — and the fixture card has neither."""
+		html = badge_sheet.card_html(_card())
+		self.assertNotIn("bc-crew", html)
+		self.assertNotIn("bc-house", html)
+		self.assertNotIn("Crew:", html)
+
+	def test_the_three_lines_under_the_name_carry_the_clipping_class(self):
+		"""`bc-line` is what stops a long designation wrapping into the badge
+		ID, and it has to be on all three or the one without it is the one that
+		overlaps."""
+		html = badge_sheet.card_html(
+			_card(designation="Equipment Operator (Class II)", crew="Rosa Ramirez", housing="Mill Creek")
+		)
+		for cls in ("bc-role", "bc-crew", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertIn(f"bc-line {cls}", html)
+
+	def test_a_crew_name_with_html_in_it_is_escaped(self):
+		"""A crew is a supervisor's name or a department somebody typed."""
+		html = badge_sheet.card_html(_card(crew='<script>alert("x")</script>', housing="<b>x</b>"))
+		self.assertNotIn("<script>", html)
+		self.assertNotIn("<b>x</b>", html)
+		self.assertIn("&lt;script&gt;", html)
+
 	def test_a_name_with_html_in_it_is_escaped(self):
 		"""A card carries an employee's own name, typed by a person into a form."""
 		html = badge_sheet.card_html(_card(employee_name='<script>alert("x")</script>'))

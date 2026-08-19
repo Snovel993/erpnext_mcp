@@ -932,3 +932,266 @@ class TheBadgeQRIsBuiltForTheField(BadgeToolTestCase):
 		"""Overridable, because a site printing onto something smaller than a
 		badge may need the density back."""
 		self.assertEqual(self.issue(error_correction="Q")["error_correction"], "Q")
+
+
+# ── 9. what the card says about where somebody belongs ───────────────────
+
+
+class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
+	"""v0.103.0. Tim, on the badges the pickers actually carry: job title,
+	assigned crew, and camp and cabin number "would finish off things nicely".
+
+	The job title was already on the card. The other two were not, because
+	neither is on the Employee record — a crew is a supervisor or a shift, a
+	cabin is a Housing Assignment against a Housing Unit — so this is as much a
+	test of the two lookups as of the two lines they print.
+	"""
+
+	FOREMAN = "HR-EMP-00007"
+	FOREMAN_NAME = "Rosa Ramirez"
+	UNIT = "HU-MC-0007"
+
+	def setUp(self):
+		super().setUp()
+		# The ID card is a third issuer and carries its own switch.
+		self.configure(enabled=1, **ON, allow_generate_employee_id_card=1)
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": self.FOREMAN,
+					"employee_name": self.FOREMAN_NAME,
+					"company": MAIN,
+					"status": "Active",
+					"designation": "Foreman",
+				}
+			],
+		)
+		STORE.seed(
+			"Housing Unit",
+			[
+				{
+					"name": self.UNIT,
+					"unit_name": "Cabin 7",
+					"unit_type": "Cabin",
+					"parcel": "Mill Creek",
+					"owning_entity": MAIN,
+				}
+			],
+		)
+
+	def house(self, employee=EMP, **overrides):
+		"""One current housing assignment, unless `overrides` ends it."""
+		row = {
+			"name": f"HA-{employee}",
+			"unit": self.UNIT,
+			"employee": employee,
+			"employee_name": EMP_NAME,
+			"parcel": "Mill Creek",
+			"assigned_date": "2026-04-01",
+			"status": "Current",
+		}
+		row.update(overrides)
+		STORE.seed("Housing Assignment", [row])
+
+	def crew_by(self, employee=EMP, **fields):
+		"""Set the crew columns on somebody's Employee record."""
+		for field, value in fields.items():
+			frappe.db.set_value("Employee", employee, field, value)
+
+	def open_shift(self, crew, name="SHIFT-2026-0001"):
+		"""One running Farm Shift with these people on its crew list."""
+		STORE.seed(
+			"Farm Shift",
+			[
+				{
+					"name": name,
+					"company": MAIN,
+					"status": "Active",
+					"shift_type": "Harvest",
+					"foreman": self.FOREMAN,
+					"foreman_name": self.FOREMAN_NAME,
+					"start_datetime": "2026-08-19 06:00:00",
+					"crew": [{"employee": person, "joined_at": "2026-08-19 06:00:00"} for person in crew],
+				}
+			],
+		)
+
+	# ── the crew line ────────────────────────────────────────────────────
+
+	def test_the_crew_is_who_they_report_to(self):
+		"""THE DURABLE ANSWER WINS. A card is printed once and lives in a back
+		pocket for a season, so the crew line has to be a fact that is still true
+		in September. `reports_to` is that fact."""
+		self.crew_by(reports_to=self.FOREMAN)
+		card = self.issue()
+		self.assertEqual(card["crew"], self.FOREMAN_NAME)
+		self.assertEqual(card["crew_source"], "reports_to")
+		self.assertEqual(card["foreman"], self.FOREMAN)
+
+	def test_a_department_answers_when_nobody_is_named(self):
+		self.crew_by(department="Harvest - ETC")
+		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest", "company": MAIN}])
+		card = self.issue()
+		self.assertEqual(card["crew"], "Harvest")
+		self.assertEqual(card["crew_source"], "department")
+
+	def test_the_department_prints_its_name_and_not_its_docname(self):
+		"""ERPNext suffixes a Department docname with the company abbreviation.
+		`Harvest - ETC` is correct in a Link field and is not what anybody wants
+		printed on a card."""
+		self.crew_by(department="Harvest - ETC")
+		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest", "company": MAIN}])
+		self.assertNotIn("- ETC", str(self.issue()["crew"]))
+
+	def test_a_branch_answers_after_that(self):
+		self.crew_by(branch="Mill Creek Ranch")
+		card = self.issue()
+		self.assertEqual(card["crew"], "Mill Creek Ranch")
+		self.assertEqual(card["crew_source"], "branch")
+
+	def test_an_open_shift_is_the_last_resort_and_says_so(self):
+		"""A Farm Shift is one morning's roster. It answers only where the site
+		records nothing durable, and `crew_source` is what lets a caller tell the
+		stopgap from the standing fact."""
+		self.open_shift([EMP])
+		card = self.issue()
+		self.assertEqual(card["crew"], self.FOREMAN_NAME)
+		self.assertEqual(card["crew_source"], "open shift")
+		self.assertEqual(card["shift"], "SHIFT-2026-0001")
+		self.assertEqual(card["shift_type"], "Harvest")
+
+	def test_a_standing_crew_beats_the_shift_somebody_happens_to_be_on(self):
+		"""THE NEGATIVE CONTROL FOR THE ORDERING. Both facts are on the site, and
+		the card prints the one that will still be true next week."""
+		self.open_shift([EMP])
+		self.crew_by(reports_to=self.FOREMAN)
+		card = self.issue()
+		self.assertEqual(card["crew_source"], "reports_to")
+		self.assertIsNone(card["shift"])
+
+	def test_two_open_shifts_print_no_crew_at_all(self):
+		"""AMBIGUITY PRINTS NOTHING. Two open shifts naming one person is a
+		roster somebody has to fix, and a card cannot be corrected once it is
+		laminated."""
+		self.open_shift([EMP])
+		self.open_shift([EMP], name="SHIFT-2026-0002")
+		card = self.issue()
+		self.assertIsNone(card["crew"])
+		self.assertIsNone(card["crew_source"])
+
+	def test_a_site_that_records_no_crew_prints_the_card_it_always_printed(self):
+		card = self.issue()
+		self.assertIsNone(card["crew"])
+		self.assertIsNone(card["crew_source"])
+		# And the badge is still issued, which is the whole point of the posture.
+		self.assertTrue(card["created"])
+		self.assertEqual(card["badge_id"], f"{MAIN_ABBR}-0001")
+
+	# ── the camp and cabin line ──────────────────────────────────────────
+
+	def test_the_camp_and_the_cabin_are_both_on_the_card(self):
+		"""THE CAMP IS THE PARCEL. A farm with two camps can have a Cabin 3 on
+		each, so either half alone is ambiguous to somebody walking the camp at
+		six in the morning."""
+		self.house()
+		card = self.issue()
+		self.assertEqual(card["camp"], "Mill Creek")
+		self.assertEqual(card["cabin"], "Cabin 7")
+		self.assertEqual(card["housing"], "Mill Creek · Cabin 7")
+		self.assertEqual(card["unit"], self.UNIT)
+		self.assertEqual(card["housing_assignment"], f"HA-{EMP}")
+
+	def test_the_cabin_is_the_units_name_and_not_its_docname(self):
+		self.house()
+		self.assertNotIn(self.UNIT, str(self.issue()["housing"]))
+
+	def test_an_assignment_that_ended_is_not_where_somebody_sleeps(self):
+		"""CURRENT MEANS NO `end_date`, which is `housing._current_assignments`'
+		own definition. A card that trusted the `status` Select would print a
+		cabin somebody moved out of in June."""
+		self.house(end_date="2026-06-01", status="Ended")
+		card = self.issue()
+		self.assertIsNone(card["housing"])
+		self.assertIsNone(card["cabin"])
+
+	def test_a_status_of_ended_is_refused_even_with_no_end_date(self):
+		"""Both guards, because an operator who ticks the Select and does not fill
+		the date has still said the person has moved out."""
+		self.house(status="Ended")
+		self.assertIsNone(self.issue()["housing"])
+
+	def test_a_worker_who_lives_off_the_farm_still_gets_a_badge(self):
+		card = self.issue()
+		self.assertIsNone(card["housing"])
+		self.assertTrue(card["created"])
+
+	def test_the_camp_falls_back_to_the_units_own_parcel(self):
+		"""A Housing Assignment carries its own `parcel` and may not have been
+		given one. The unit always has: `create_housing_unit` requires it."""
+		self.house(parcel="")
+		self.assertEqual(self.issue()["camp"], "Mill Creek")
+
+	def test_the_newest_open_assignment_wins(self):
+		"""Two open assignments is a data problem `get_housing_capacity` already
+		surfaces, and unlike the crew line there is no honest way to print
+		nothing: somebody sleeps somewhere."""
+		STORE.seed(
+			"Housing Unit",
+			[
+				{
+					"name": "HU-MC-0011",
+					"unit_name": "Cabin 11",
+					"unit_type": "Cabin",
+					"parcel": "Mill Creek",
+					"owning_entity": MAIN,
+				}
+			],
+		)
+		self.house()
+		self.house(name="HA-NEWER", unit="HU-MC-0011", assigned_date="2026-07-01")
+		self.assertEqual(self.issue()["cabin"], "Cabin 11")
+
+	# ── every surface, not just the single card ──────────────────────────
+
+	def test_the_sheet_carries_the_same_three_lines(self):
+		"""A hiring day prints a sheet, not thirty single cards. The two paths
+		build the card through the same `_card`, and this is what holds them to
+		it."""
+		self.crew_by(reports_to=self.FOREMAN)
+		self.house()
+		data = self.tool_data("generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN})
+		card = data["cards"][0]
+		self.assertEqual(card["designation"], "Picker")
+		self.assertEqual(card["crew"], self.FOREMAN_NAME)
+		self.assertEqual(card["housing"], "Mill Creek · Cabin 7")
+
+	def test_the_printed_html_says_them_in_words_a_foreman_reads(self):
+		"""The values are on the card AND they are labelled. `Mill Creek · Cabin
+		7` alone is a place; `Camp: Mill Creek · Cabin 7` is an instruction."""
+		from erpnext_mcp import badge_sheet
+
+		self.crew_by(reports_to=self.FOREMAN)
+		self.house()
+		html = badge_sheet.card_html(self.issue())
+		self.assertIn("bc-role", html)
+		self.assertIn(f"Crew: {self.FOREMAN_NAME}", html)
+		self.assertIn("Camp: Mill Creek · Cabin 7", html)
+
+	def test_a_card_with_neither_draws_neither_line(self):
+		"""THE NEGATIVE CONTROL FOR THE MARKUP. An empty slot is whitespace; a
+		label with nothing after it is a card that looks like it lost the
+		answer."""
+		from erpnext_mcp import badge_sheet
+
+		html = badge_sheet.card_html(self.issue())
+		self.assertNotIn("bc-crew", html)
+		self.assertNotIn("bc-house", html)
+		self.assertIn("bc-name", html)
+
+	def test_the_id_card_pdf_path_carries_them_too(self):
+		self.crew_by(reports_to=self.FOREMAN)
+		self.house()
+		data = self.tool_data("generate_employee_id_card", {"employee": EMP, "company": MAIN})
+		self.assertIn(f"Crew: {self.FOREMAN_NAME}", data["card_html"])
+		self.assertIn("Camp: Mill Creek · Cabin 7", data["card_html"])

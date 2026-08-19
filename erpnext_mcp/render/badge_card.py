@@ -72,8 +72,19 @@ COMPANY = "Company"
 #: the two spellings agree, so they cannot drift in silence.
 BADGE_LOGO_FIELD = "badge_logo"
 
-#: Employee columns a card reads. `image` is Frappe's own photo field.
-_EMPLOYEE_FIELDS = ("employee_name", "designation", "employee_number", "company", "image", "status")
+#: Employee columns a card reads. `image` is Frappe's own photo field, and the
+#: last three are what `tools/badges._crew` falls back through for the crew line.
+_EMPLOYEE_FIELDS = (
+	"employee_name",
+	"designation",
+	"employee_number",
+	"company",
+	"image",
+	"status",
+	"reports_to",
+	"department",
+	"branch",
+)
 
 #: What an inlined image may weigh. A base64 `data:` URI is a third larger than
 #: the file, and it lands in the HTML twice over on a two-sided card — so a
@@ -203,6 +214,55 @@ def _qr_data_uri(badge_id: str) -> dict:
 		return blank
 
 
+def _employee_row(employee: str) -> dict:
+	"""The Employee columns a card reads, narrowed to the ones this site HAS.
+
+	v0.103.0, and the narrowing is the point. The three crew columns are standard
+	ERPNext and are not guaranteed: an HR app that declares its own Employee
+	without `reports_to` would make `get_value` raise on the whole list, and this
+	function's caller swallows exceptions — so the card would lose its
+	PHOTOGRAPH and its NAME over a column that was only ever going to print a
+	crew line. The meta is asked first, exactly as `_company_logo` asks it about
+	`badge_logo`, and the answer costs nothing: Frappe caches doctype meta.
+	"""
+	try:
+		meta = frappe.get_meta(EMPLOYEE)
+		wanted = [field for field in _EMPLOYEE_FIELDS if meta.has_field(field)]
+	except Exception:
+		wanted = list(_EMPLOYEE_FIELDS)
+	if not wanted:
+		return {}
+	try:
+		return dict(frappe.db.get_value(EMPLOYEE, employee, wanted, as_dict=True) or {})
+	except Exception:
+		return {}
+
+
+def _crew_and_housing(row: dict) -> dict:
+	"""The crew line and the camp-and-cabin line, or empty strings. Never raises.
+
+	ONE DEFINITION, ASKED FROM HERE. `tools/badges._crew` and `._housing` decide
+	what a crew is and which cabin is current, and this module is the Desk's Print
+	button rather than a second opinion about either — a card off the Print button
+	and a card off `generate_employee_badge_sheet` have to agree, and they only
+	agree if there is one implementation.
+
+	IMPORTED INSIDE THE FUNCTION, which is the rule the module docstring states
+	and the reason `_qr_data_uri` keeps it: a Jinja global is resolved when the
+	environment is BUILT, so an import error anywhere in the tool chain would
+	cost every Desk page rather than two lines on one badge.
+	"""
+	blank = {"crew": "", "crew_source": "", "housing": "", "camp": "", "cabin": ""}
+	try:
+		from ..tools import badges
+
+		found = dict(badges._crew(row))
+		found.update(badges._housing(row))
+	except Exception:
+		return blank
+	return {key: str(found.get(key) or "") for key in blank}
+
+
 def erpnext_mcp_badge_card(badge_id) -> dict:
 	"""Every fact one badge card prints. THE JINJA GLOBAL. Never raises.
 
@@ -228,6 +288,11 @@ def erpnext_mcp_badge_card(badge_id) -> dict:
 		"designation": "",
 		"employee_number": "",
 		"status": "",
+		"crew": "",
+		"crew_source": "",
+		"housing": "",
+		"camp": "",
+		"cabin": "",
 		"photo": "",
 		"initials": "?",
 		"logo": "",
@@ -256,12 +321,15 @@ def erpnext_mcp_badge_card(badge_id) -> dict:
 		card["employee"] = str(row.get("employee") or "")
 
 		if card["employee"]:
-			person = frappe.db.get_value(EMPLOYEE, card["employee"], _EMPLOYEE_FIELDS, as_dict=True) or {}
+			person = _employee_row(card["employee"])
 			card["employee_name"] = str(person.get("employee_name") or card["employee"])
 			card["designation"] = str(person.get("designation") or "")
 			card["employee_number"] = str(person.get("employee_number") or "")
 			card["status"] = str(person.get("status") or "")
 			card["photo"] = _data_uri(person.get("image"))
+			# v0.103.0. The crew and the cabin, in a guard of their own: they are
+			# two lines on a card and the photograph and the name are the card.
+			card.update(_crew_and_housing(dict(person, name=card["employee"])))
 		card["initials"] = initials(card["employee_name"])
 
 		if card["company"]:

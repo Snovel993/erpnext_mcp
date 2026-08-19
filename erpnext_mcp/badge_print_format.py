@@ -162,11 +162,32 @@ CARD_CSS = """
 
   .bc-name { left: 26mm; top: 13.2mm; width: 32mm; font-size: 10pt; font-weight: bold;
              line-height: 1.1; color: #111111; }
-  .bc-role { left: 26mm; top: 24mm; width: 32mm; font-size: 7pt; color: #5a6672;
+
+  /* THE THREE LINES UNDER THE NAME, and they are three fixed slots rather than a
+     stack that closes up. v0.103.0 put the crew and the cabin below the job
+     title, and the tempting build gives each line the next free millimetre so a
+     worker with no cabin gets a tighter card. It was not built that way: the
+     positions are absolute millimetres for the reason the block comment above
+     gives, a conditional stack would need the same arithmetic in Python for the
+     sheet and in Jinja for this format, and those two would drift. A blank slot
+     is whitespace on a card. Two layouts that disagree by 3mm is a badge whose
+     photograph moves depending on which button somebody pressed.
+
+     EACH CLIPS RATHER THAN WRAPS. A designation like "Equipment Operator (Class
+     II)" or a camp with a long parcel name would otherwise take a second line
+     and push into the badge ID, which is the one thing on the front that has to
+     stay readable. Clipped is legible; overlapped is not. */
+  .bc-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bc-role { left: 26mm; top: 23.2mm; width: 32mm; font-size: 6.8pt; color: #5a6672;
              line-height: 1.15; }
-  .bc-idlabel { left: 26mm; top: 31.4mm; font-size: 5pt; letter-spacing: .14em;
+  .bc-crew { left: 26mm; top: 26.2mm; width: 32mm; font-size: 5.8pt; color: #5a6672;
+             line-height: 1.15; }
+  .bc-house { left: 26mm; top: 29mm; width: 32mm; font-size: 5.8pt; color: #5a6672;
+              line-height: 1.15; }
+
+  .bc-idlabel { left: 26mm; top: 32.4mm; font-size: 5pt; letter-spacing: .14em;
                 text-transform: uppercase; color: #5a6672; }
-  .bc-id { left: 26mm; top: 33.6mm; width: 32mm; font-size: 11pt; font-weight: bold;
+  .bc-id { left: 26mm; top: 34.6mm; width: 32mm; font-size: 10.5pt; font-weight: bold;
            font-family: "DejaVu Sans Mono", "Courier New", monospace; color: #111111; }
 
   /* The symbol always sits on white, whatever the card behind it looks like —
@@ -244,6 +265,7 @@ CARD_MARKUP = """
   {%- set card = {"ok": False, "badge_id": doc.badge_id, "active": doc.active,
                   "employee": doc.employee, "employee_name": doc.employee,
                   "company_name": doc.company, "designation": "", "employee_number": "",
+                  "crew": "", "housing": "",
                   "photo": "", "logo": "", "initials": "?", "qr": ""} -%}
 {%- endif -%}
 
@@ -266,7 +288,13 @@ CARD_MARKUP = """
 
   <div class="bc-abs bc-name">{{ card.employee_name or doc.employee or "" }}</div>
   {%- if card.designation %}
-  <div class="bc-abs bc-role">{{ card.designation }}</div>
+  <div class="bc-abs bc-line bc-role">{{ card.designation }}</div>
+  {%- endif %}
+  {%- if card.crew %}
+  <div class="bc-abs bc-line bc-crew">Crew: {{ card.crew }}</div>
+  {%- endif %}
+  {%- if card.housing %}
+  <div class="bc-abs bc-line bc-house">Camp: {{ card.housing }}</div>
   {%- endif %}
   <div class="bc-abs bc-idlabel">Badge</div>
   <div class="bc-abs bc-id">{{ card.badge_id or doc.badge_id or "" }}</div>

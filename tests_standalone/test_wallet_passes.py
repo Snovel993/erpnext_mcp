@@ -262,6 +262,29 @@ class ThePassContent(unittest.TestCase):
 		self.assertIn("generic", self.content)
 		self.assertNotIn("eventTicket", self.content)
 
+	def test_the_crew_and_the_camp_reach_the_phone_too(self):
+		"""v0.103.0. The printed card gained a crew line and a camp-and-cabin
+		line; the pass a worker carries instead of the card carries the same
+		three facts. Role and crew read together and sit side by side; the camp
+		sits with the company, which is the other answer to "where does this
+		person belong"."""
+		card = dict(CARD, crew="Rosa Ramirez", housing="Mill Creek \u00b7 Cabin 7")
+		content = wallet.build_pass_json(card, wallet.apple_config({}))
+		generic = content[wallet.PASS_STYLE]
+		self.assertIn("Rosa Ramirez", [field["value"] for field in generic["secondaryFields"]])
+		self.assertIn("Crew", [field["label"] for field in generic["secondaryFields"]])
+		auxiliary = generic["auxiliaryFields"]
+		self.assertIn("Mill Creek \u00b7 Cabin 7", [field["value"] for field in auxiliary])
+		self.assertIn("Camp", [field["label"] for field in auxiliary])
+
+	def test_a_pass_for_somebody_the_site_records_neither_for_shows_neither(self):
+		"""THE NEGATIVE CONTROL. A labelled blank on a phone reads as a system
+		that lost the answer."""
+		content = wallet.build_pass_json(dict(CARD), wallet.apple_config({}))
+		generic = content[wallet.PASS_STYLE]
+		self.assertNotIn("Crew", [field["label"] for field in generic["secondaryFields"]])
+		self.assertEqual([field["label"] for field in generic["auxiliaryFields"]], ["Company"])
+
 	def test_a_badge_with_no_designation_still_produces_a_pass(self):
 		card = dict(CARD, designation="")
 		content = wallet.build_pass_json(card, wallet.apple_config({}))
@@ -765,6 +788,18 @@ class TheTool(WalletToolTestCase):
 		self.assertEqual(
 			result["google"]["object"]["heroImage"]["sourceUri"]["uri"], f"https://erp.example.test{url}"
 		)
+
+	def test_the_google_object_carries_the_crew_and_the_camp_as_text_modules(self):
+		"""v0.103.0, and the same rule the Apple builder keeps: a fact the site
+		does not record is left off the pass rather than shown as an empty row."""
+		card = dict(CARD, crew="Rosa Ramirez", housing="Mill Creek \u00b7 Cabin 7")
+		obj = wallet.build_google_pass(card, wallet.google_config({}))["object"]
+		modules = {entry["id"]: entry["body"] for entry in obj["textModulesData"]}
+		self.assertEqual(modules["crew"], "Rosa Ramirez")
+		self.assertEqual(modules["housing"], "Mill Creek \u00b7 Cabin 7")
+
+		bare = wallet.build_google_pass(dict(CARD), wallet.google_config({}))["object"]
+		self.assertNotIn("crew", {entry["id"] for entry in bare["textModulesData"]})
 
 	def test_it_says_it_is_unsigned_rather_than_implying_it_worked(self):
 		result = self.build()
