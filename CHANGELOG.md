@@ -3,6 +3,109 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.100.1 — 2026-08-19 — the folder the owner could not open
+
+Item 17. The farm owner opened an employee's Documents section on the handset
+and got this back:
+
+```
+<owner>@… is not permitted to read Employee HR-EMP-00011,
+so its attachments are not available.
+```
+
+That sentence is `tools/files._require_parent_read`, and **it was correct**. The
+account holds `Farm Manager`, which clears every gate this app owns; what it does
+not hold is a Frappe **DocPerm** on `Employee`. So the manager who runs the hire
+could file a licence photograph against a person and could not read the folder
+back — six routes on this surface put documents onto an Employee, and the door
+that asks what is already there was shut to the account that uses them most.
+
+### Why this app cannot simply grant the permission
+
+`Employee` belongs to Frappe HR. `roles.py` rule 1 forbids writing a Custom
+DocPerm on another app's doctype, and the reason is not tidiness: **one Custom
+DocPerm makes Frappe ignore every standard permission that doctype has, for every
+role on the site, silently, during `bench migrate`.** A one-line grant here would
+revoke HR Manager, HR User and System Manager from `Employee` on a live site.
+
+**v0.62.0 already saw this and answered it, and the answer has two holes it
+cannot close from where it stands.** `create_mobile_user` assigns Frappe HR's own
+`HR User` as a **companion role** alongside `Farm Manager`. That works — on the
+sites and for the accounts where it can run. It cannot run in two cases:
+
+- **A bench with no `hrms` has no `HR User` role at all.** Enrolment reports it in
+  `companion_roles_missing` and carries on. No amount of re-enrolling conjures a
+  role the site does not have.
+- **An account enrolled before v0.62.0 never received it.** Enrolment is a
+  one-time write and nothing re-runs it. The owner's handset account is this case.
+
+### `BROKERED_PARENTS` — one entry, and it is meant to stay that short
+
+On `Employee` only, `list_attachments` and `get_attachment_content` now answer for
+the read themselves rather than delegating it to Frappe's DocPerm.
+
+**This is not a widening, and the reason is that the gates it keeps are stricter
+than the one it stands in for.** Frappe's DocPerm asks a single question — may
+this account read this doctype — and answers it for the whole table. This surface
+asks three, and all three still run:
+
+| gate | what it refuses |
+|---|---|
+| `ATTACHMENT_PARENTS` | any doctype this door does not open at all |
+| `employee.HR_ROLES` | Field Worker, Foreman, Crew Leader — `Employee` is flagged personnel |
+| `require_scoped_doc` | any docname outside the companies the caller's grant names |
+
+The third has no equivalent in Frappe's model without a User Permission per row,
+and it is what makes "only company-scoped employees" true of this door and *not*
+true of the DocPerm it replaces. An employee in another entity reads as **not
+found**, which is the same refusal every scoped read gives, so the door cannot be
+used to map the site's docnames either.
+
+**The four parents deliberately left off the set are the point of it.**
+
+- **`Farm Payroll Entry` — never.** One run holds a slip for every person on it,
+  its DocPerms are System Manager / HR Manager / HR User by design, and brokering
+  it would put the crew's wages in front of every Farm Manager. A worker's own
+  stub still does not come through this door at all: `get_my_pay_stub_pdf` carries
+  its bytes in its own answer and matches the one file that is theirs by name.
+- **`Farm Incident Record` — no.** v0.96.0 put it on `ATTACHMENT_PARENTS` with the
+  explicit promise that the entry "does not manufacture a permission for anybody
+  else". Brokering it would manufacture exactly that and make the sentence false.
+- **`I-9 Form` — unnecessary.** `roles.HIRING_FORMS` already grants Farm Manager
+  read and write through this app's own table, which rule 1 permits because the
+  doctype is this app's. There is nothing to broker.
+- **Every `False` parent — unnecessary**, and checked rather than assumed: the
+  phone roles hold Frappe read on all seven directly.
+
+### The two readers behind it
+
+`files.list_attachments_on_authorized_parent` and
+`files.attachment_content_on_authorized_parent` join
+`read_attached_bytes_unchecked` as functions that skip `_require_parent_read`.
+Neither is whitelisted, `registry.py` publishes neither, and no route binds to
+either — **what makes them safe to exist is the signature**. The first takes a
+parent doctype and docname and never a File docname, so the File table cannot be
+walked with it. The second takes the parent **and** the file, and refuses unless
+the file actually hangs off that parent — a File docname is a global handle, and
+requiring the pair to agree is what stops one being brought to a parent of the
+caller's choosing. `_require_parent_exists` is split out of `_require_parent_read`
+so that skipping the permission check does not also skip the existence check: a
+docname that was never on the site is an error, not a cheerful empty folder.
+
+Response shapes are unchanged — `API_CONTRACT.md` §15.1 and §15.2 decode exactly
+as before, on both the brokered and the unbrokered path.
+
+### The tests are written against the denial, not against the role
+
+`tests_standalone/test_employee_documents.py`, and the first class in it is the
+**negative control**. The harness's `frappe.has_permission` is **default-allow**,
+so a brokering test that forgot to deny anything would pass identically against
+the unbrokered code; `TheDenialIsReal` proves the tool still refuses with the
+denial in place and still allows without it, before anything claims to have got
+round it. Reverting `BROKERED_PARENTS` to an empty set turns three tests red and
+leaves every "still refuses" class green, which is the split that says the suite
+is measuring the fix rather than the fixtures.
+
 ## 0.100.0 — 2026-08-18 — the afternoon, and the people who were in it
 
 Wave 3 of `fafo_ios/SERVER_CHANGES.md`, items 4, 15, 17 and 23 — "Compliance &

@@ -5279,6 +5279,67 @@ ATTACHMENT_PARENTS = {
 	FARM_TASK_TEMPLATE: False,
 }
 
+#: The parents whose folder this surface opens on the strength of ITS OWN gates
+#: rather than on Frappe's DocPerm for the doctype. ONE ENTRY, AND IT IS MEANT TO
+#: STAY THAT SHORT.
+#:
+#: v0.100.1. WHAT WENT WRONG. A farm owner opening an employee's Documents
+#: section on the handset got "…is not permitted to read Employee HR-EMP-00011,
+#: so its attachments are not available" — `tools/files._require_parent_read`,
+#: which is correct code refusing on a permission the account genuinely does not
+#: hold. `Employee` belongs to Frappe HR; `roles.py` rule 1 forbids this app
+#: writing a Custom DocPerm on another app's doctype, because one Custom DocPerm
+#: makes Frappe ignore EVERY standard permission that doctype has, for every role
+#: on the site, silently, during `bench migrate`. So this app cannot grant it.
+#:
+#: v0.62.0 ANSWERED THAT WITH A COMPANION ROLE AND THE ANSWER IS INCOMPLETE.
+#: `create_mobile_user` assigns Frappe HR's own `HR User` alongside `Farm Manager`
+#: — see `roles.py` — which works, and closes on exactly the sites and exactly the
+#: accounts where it can run. It cannot run in two cases. A bench with no `hrms`
+#: installed HAS NO `HR User` ROLE at all: enrolment reports it in
+#: `companion_roles_missing` and carries on, and no amount of re-enrolling
+#: conjures the role. And an account enrolled BEFORE v0.62.0 never received it,
+#: because enrolment is a one-time write. The owner's account is the second case.
+#:
+#: WHY BROKERING IS NOT A WIDENING HERE. The three gates `_attachment_parent`
+#: runs before this is consulted are STRICTER than the one being skipped, not
+#: looser. Frappe's DocPerm asks one question — may this account read this
+#: doctype — and answers it for the whole table. This surface asks three: the
+#: parent has to be on `ATTACHMENT_PARENTS` at all, `Employee` is flagged True so
+#: `employee.HR_ROLES` rides with it (System Manager, HR Manager, HR User, Farm
+#: Manager — a Field Worker, Foreman or Crew Leader is refused here and would be
+#: refused by Frappe too), and `require_scoped_doc` refuses any docname outside
+#: the companies this caller's Mobile Access Grant names. That last one is a
+#: scope Frappe's model cannot express without a User Permission per row, and it
+#: is the reason the phrase "only company-scoped employees" is true of this door
+#: and is not true of the DocPerm it stands in for.
+#:
+#: THE FOUR PARENTS THAT ARE DELIBERATELY ABSENT ARE THE POINT OF THE SET.
+#:
+#: `Farm Payroll Entry` — NEVER. One run holds a slip for every person on it, its
+#: DocPerms are System Manager / HR Manager / HR User by design, and brokering it
+#: would put the whole crew's wages in front of every Farm Manager. A worker's own
+#: stub does not come through this door at all: `get_my_pay_stub_pdf` carries its
+#: bytes in its own answer and matches the ONE file that is theirs by name.
+#:
+#: `Farm Incident Record` — NO. `ATTACHMENT_PARENTS` flags it True and its own
+#: DocPerms are narrower still (System Manager, HR Manager), which v0.96.0 chose
+#: on purpose: that entry "opens the door for the accounts that hold those roles
+#: and does not manufacture a permission for anybody else". Brokering it would
+#: manufacture exactly that permission and make the sentence false.
+#:
+#: `I-9 Form` — UNNECESSARY. `roles.HIRING_FORMS` already grants Farm Manager read
+#: and write on it through this app's own permission table, which rule 1 permits
+#: because the I-9 Form doctype is THIS APP'S. There is nothing to broker.
+#:
+#: EVERY `False` PARENT — UNNECESSARY, and this is worth checking rather than
+#: assuming. Farm Task, Farm Task Assignment, Housing Unit, Housing Inspection,
+#: Compliance Alert, Farm Shift and Farm Task Template are all doctypes `roles.py`
+#: grants the phone roles read on directly, so `_require_parent_read` already
+#: passes for them and adding one here would change nothing except the number of
+#: places a future reader has to check.
+BROKERED_PARENTS = frozenset({EMPLOYEE})
+
 
 def _attachment_parent(doctype, docname, allowed: list) -> tuple:
 	"""One parent document, proved readable by this caller. Returns (doctype, name).
@@ -5335,6 +5396,16 @@ def list_attachments(user: str, doctype=None, docname=None) -> dict:
 	call, which is what makes the tool's promise about `is_private` mean something
 	here.
 
+	v0.100.1: EXCEPT ON `Employee`, WHERE THIS SURFACE ANSWERS FOR THE READ ITSELF.
+	`BROKERED_PARENTS` is the one-entry set and carries the whole argument. The
+	short version: `Employee` belongs to Frappe HR, this app may not write a
+	DocPerm on it, the companion role v0.62.0 assigns cannot be assigned on a
+	bench without `hrms` and was never assigned to an account enrolled before
+	that release — and the three gates below are stricter than the DocPerm being
+	stood in for, because one of them is a company scope Frappe's model cannot
+	express. Nothing else on the list is brokered, and the four that are
+	deliberately not are named there.
+
 	THE PARENT DOCTYPE IS A CLOSED LIST AND A PERSONNEL PARENT CARRIES THE HR
 	ROLE. See `ATTACHMENT_PARENTS`. The tool takes any doctype on the site, which
 	is right on a console and would be a way to walk the File table from an
@@ -5355,7 +5426,12 @@ def list_attachments(user: str, doctype=None, docname=None) -> dict:
 	allowed = guard.require_scope(user)
 	parent, name = _attachment_parent(doctype, docname, allowed)
 
-	data = file_tools.list_attachments({"doctype": parent, "name": name}).data
+	if parent in BROKERED_PARENTS:
+		# The three gates above have already answered a stricter question than the
+		# one `files.list_attachments` would ask. See `BROKERED_PARENTS`.
+		data = file_tools.list_attachments_on_authorized_parent(parent, name).data
+	else:
+		data = file_tools.list_attachments({"doctype": parent, "name": name}).data
 	rows = []
 	for row in data.get("attachments") or []:
 		rows.append(
@@ -5416,6 +5492,13 @@ def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> d
 	Journal Entry, and the tool alone would decide it on Frappe roles that a Farm
 	Manager scoped to one company legitimately holds.
 
+	v0.100.1: ON `Employee` THERE IS ONLY THE SECOND CHECK, WHICH IS THE ONE THIS
+	DOCSTRING ALREADY CALLED THE ONE THAT MATTERS. See `BROKERED_PARENTS`. The
+	brokered reader is handed the parent `_attachment_parent` just proved AND the
+	File docname, and refuses unless the file actually hangs off that parent — so
+	the global-handle problem the paragraph above is about is closed by the same
+	argument on both paths, rather than by the DocPerm on either.
+
 	AN UNATTACHED FILE IS REFUSED HERE, where the tool allows its owner to read
 	one. There is no parent to scope it by and nothing on this surface produces
 	one — `finalize_staged_file` commits evidence unattached on purpose, and
@@ -5462,13 +5545,23 @@ def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> d
 		)
 	# The gate the tool cannot run: a File docname is global, and whose record it
 	# hangs off is this surface's question rather than Frappe's.
-	_attachment_parent(parent_doctype, parent_name, allowed)
+	parent, name_on_parent = _attachment_parent(parent_doctype, parent_name, allowed)
 
-	inner = {"name": docname}
-	if max_bytes not in (None, ""):
-		inner["max_bytes"] = max_bytes
+	if parent in BROKERED_PARENTS:
+		# Same brokering `list_attachments` does one method up, and the file is
+		# still checked against the parent that was just proved — see
+		# `files.attachment_content_on_authorized_parent`, which refuses a File
+		# that hangs off anything else. The list and the open have to agree about
+		# this or the folder would show a document that would not open.
+		data = file_tools.attachment_content_on_authorized_parent(
+			parent, name_on_parent, docname, max_bytes if max_bytes not in (None, "") else None
+		).data
+	else:
+		inner = {"name": docname}
+		if max_bytes not in (None, ""):
+			inner["max_bytes"] = max_bytes
 
-	data = file_tools.get_attachment_content(inner).data
+		data = file_tools.get_attachment_content(inner).data
 	return {
 		"name": data.get("name"),
 		"file": data.get("name"),

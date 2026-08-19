@@ -61,7 +61,49 @@ def list_attachments(args: dict) -> ToolResult:
 	doctype = as_str(args, "doctype", required=True)
 	name = as_str(args, "name", required=True)
 	_require_parent_read(doctype, name)
+	return list_attachments_on_authorized_parent(doctype, name)
 
+
+def list_attachments_on_authorized_parent(doctype: str, name: str) -> ToolResult:
+	"""The body of `list_attachments`, for a caller that has ALREADY authorized the parent.
+
+	v0.100.1. THE SECOND FUNCTION IN THIS FILE THAT SKIPS `_require_parent_read`,
+	and the same reasoning `read_attached_bytes_unchecked` sets out one screen
+	down applies here: it is not whitelisted, `registry.py` does not publish it,
+	no route binds to it, and what makes it safe to exist is the SIGNATURE. It
+	takes a parent DOCTYPE and a parent DOCNAME — never a File docname, never a
+	filter — so a caller cannot walk the File table with it and cannot reach an
+	unattached file. It answers exactly one question: what is filed against the
+	record you already proved you may read.
+
+	WHO PROVES IT INSTEAD. `api/mobile._attachment_parent`, which is a STRICTER
+	gate than the one skipped here and not a weaker one. Frappe's DocPerm asks
+	"may this account read this doctype"; the mobile gate asks three questions —
+	is the parent on `ATTACHMENT_PARENTS` at all, does a personnel parent bring
+	`employee.HR_ROLES` with it, and is the docname inside the companies this
+	caller's Mobile Access Grant names. The last of those is a scope Frappe's
+	permission model does not express at all without a User Permission per row.
+
+	WHY IT HAD TO EXIST — AND IT IS NOT "FARM MANAGER LACKS A ROLE". `Employee`
+	belongs to Frappe HR, `roles.py` rule 1 forbids this app writing a Custom
+	DocPerm on another app's doctype (it would make Frappe ignore every standard
+	permission that doctype has, for every role on the site, silently, during
+	`bench migrate`), and v0.62.0's answer was to assign `HR User` as a COMPANION
+	ROLE at enrolment. That answer has two holes it cannot close from where it
+	stands. A bench with no `hrms` installed HAS NO `HR User` ROLE — `create_mobile_user`
+	says so in `companion_roles_missing` and enrols the manager anyway — so on
+	that site the companion grant can never be made. And an account enrolled
+	BEFORE v0.62.0 never got the grant, because enrolment is a one-time write and
+	nothing re-runs it. The farm owner's own handset account is the second case,
+	which is how this surfaced: the manager who runs the hire could file a licence
+	photograph against an Employee and could not read the folder back.
+	"""
+	_require_parent_exists(doctype, name)
+	return _attachment_list(doctype, name)
+
+
+def _attachment_list(doctype: str, name: str) -> ToolResult:
+	"""Every File on one parent, rendered. The parent's authorization is the caller's."""
 	fields = compat.existing_fields(
 		"File",
 		[
@@ -111,10 +153,56 @@ def list_attachments(args: dict) -> ToolResult:
 def get_attachment_content(args: dict) -> ToolResult:
 	"""One attachment's bytes, base64-encoded, if it is small enough and allowed."""
 	name = as_str(args, "name", required=True)
+	max_bytes = _resolve_max_bytes(as_int(args, "max_bytes", DEFAULT_MAX_BYTES))
+	doc = _open_attachment(name)
+	_authorize_file(doc)
+	return _attachment_payload(doc, max_bytes)
+
+
+def attachment_content_on_authorized_parent(
+	doctype: str, name: str, file_docname: str, max_bytes=None
+) -> ToolResult:
+	"""One file's bytes, for a caller that has ALREADY authorized the parent it hangs off.
+
+	v0.100.1. THE READ SIDE OF `list_attachments_on_authorized_parent`, and the
+	argument for it is that one's — read it there. What is worth saying twice is
+	what keeps this signature from being a hole.
+
+	IT TAKES THE PARENT **AND** THE FILE DOCNAME, AND REQUIRES THEM TO AGREE. A
+	File docname is a global handle: the whole reason `_authorize_file` exists is
+	that a caller holding one can otherwise name any file on the site. So this
+	refuses unless the file is actually attached to the parent that was proved —
+	which means a caller cannot bring a File docname of their own choosing and
+	pair it with a parent they happen to be allowed to read. The authorization
+	this skips is the parent's, and the parent is an argument rather than
+	something read off the file.
+
+	`api/mobile.get_attachment_content` IS THE ONLY CALLER and it derives the
+	parent from the File FIRST, then runs `_attachment_parent` on that derived
+	pair, then passes both here. So the agreement check below is a second reading
+	of a fact that route has already established — belt and braces, deliberately,
+	because the day a second caller appears it will not necessarily have done it
+	in that order.
+	"""
+	max_bytes = _resolve_max_bytes(as_int({"max_bytes": max_bytes}, "max_bytes", DEFAULT_MAX_BYTES))
+	doc = _open_attachment(file_docname)
+	if str(doc.get("attached_to_doctype") or "") != str(doctype) or str(
+		doc.get("attached_to_name") or ""
+	) != str(name):
+		raise ToolError(
+			f"File {file_docname} is not attached to {doctype} {name} — it hangs off "
+			f"{doc.get('attached_to_doctype') or '<nothing>'} "
+			f"{doc.get('attached_to_name') or ''}".strip()
+			+ ", and this reader only opens a file on the parent it was given. Nothing was read."
+		)
+	return _attachment_payload(doc, max_bytes)
+
+
+def _resolve_max_bytes(max_bytes) -> int:
+	"""The ceiling on one returned file, validated. Shared by both readers above."""
 	# Not `as_int(...) or DEFAULT`: that idiom turns an explicit 0 back into the
 	# default, so a caller asking for something impossible gets a silent success
 	# instead of the refusal below.
-	max_bytes = as_int(args, "max_bytes", DEFAULT_MAX_BYTES)
 	if max_bytes is None:
 		max_bytes = DEFAULT_MAX_BYTES
 	if max_bytes <= 0:
@@ -125,7 +213,17 @@ def get_attachment_content(args: dict) -> ToolResult:
 			f"{ABSOLUTE_MAX_BYTES} bytes ({human_size(ABSOLUTE_MAX_BYTES)}). "
 			"Fetch larger files from their file_url."
 		)
+	return max_bytes
 
+
+def _open_attachment(name: str):
+	"""The File document behind a docname, proved to exist and not to be a folder.
+
+	NO AUTHORIZATION HAPPENS HERE. Every caller runs its own immediately after —
+	`_authorize_file` on the tool path, the parent-agreement check on the brokered
+	one — and splitting the lookup out is what lets those two be different without
+	the error messages for "no such file" drifting apart.
+	"""
 	if not frappe.db.exists("File", name):
 		raise ToolError(
 			f"no File named {name!r}. Note this is the File docname, not the "
@@ -134,8 +232,11 @@ def get_attachment_content(args: dict) -> ToolResult:
 	doc = frappe.get_doc("File", name)
 	if doc.get("is_folder"):
 		raise ToolError(f"File {name!r} is a folder, not a document")
-	_authorize_file(doc)
+	return doc
 
+
+def _attachment_payload(doc, max_bytes: int) -> ToolResult:
+	"""One authorized File, read and rendered. The size ceilings live here."""
 	declared = int(doc.get("file_size") or 0)
 	if declared > max_bytes:
 		raise ToolError(
@@ -655,12 +756,24 @@ def _check_attachment_limit(
 
 
 # ── permission ──────────────────────────────────────────────────────────────
-def _require_parent_read(doctype: str, name: str) -> None:
-	"""Refuse unless the acting user may read the document being asked about."""
+def _require_parent_exists(doctype: str, name: str) -> None:
+	"""The parent named has to be a real record on this site. NOT a permission check.
+
+	Split from `_require_parent_read` so the brokered readers above can prove the
+	record exists without also asking Frappe's DocPerm about it. Keeping the two
+	sentences in one function is what would make "skip the permission check" mean
+	"skip the existence check too", which is how a brokered read starts answering
+	an empty list for a docname that was never there.
+	"""
 	if not compat.doctype_exists(doctype):
 		raise ToolError(f"no DocType named {doctype!r} on this site")
 	if not frappe.db.exists(doctype, name):
 		raise ToolError(f"no {doctype} named {name!r}")
+
+
+def _require_parent_read(doctype: str, name: str) -> None:
+	"""Refuse unless the acting user may read the document being asked about."""
+	_require_parent_exists(doctype, name)
 	if not frappe.has_permission(doctype, "read", doc=name):
 		raise ToolError(
 			f"{frappe.session.user} is not permitted to read {doctype} {name}, so "
