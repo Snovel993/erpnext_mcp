@@ -2,8 +2,9 @@
 """A crew's badges on one sheet of Letter, laid out at CR-80. v0.56.0.
 
 `generate_employee_badge_sheet` has issued a crew's badges since v0.50.0 and
-returns CARD DATA — a name, a designation, a crew, a camp and cabin, a photo
-URL, a base64 QR and a `print` block of numbers a layout must honour. `_print_spec` says in its own
+returns CARD DATA — a name, the Employee form's Company Details (designation,
+department, branch, who they report to), a camp and cabin, a photo URL, a base64
+QR and a `print` block of numbers a layout must honour. `_print_spec` says in its own
 docstring that this app does not lay the card out, and that was the right call
 for a tool whose answer is consumed by an Avery template, a label printer, a
 handset preview and an MCP client in turn.
@@ -147,16 +148,14 @@ def card_html(card: dict) -> str:
 	else:
 		parts.append(f'<div class="bc-abs bc-initials">{_esc(card.get("photo_placeholder") or "?")}</div>')
 	parts.append(f'<div class="bc-abs bc-name">{_esc(card.get("employee_name"))}</div>')
-	# The three lines under the name, each in its own fixed slot — see `CARD_CSS`
-	# in `badge_print_format.py` for why they do not close up, and note that the
-	# labels here are the same two words the Jinja format prints. A card off this
-	# sheet and a card off the Print button have to be the same card.
+	# Under the name: the job title and the department. See `CARD_CSS` in
+	# `badge_print_format.py` for why these are fixed slots that do not close up,
+	# and note that every label here is the same word the Jinja format prints. A
+	# card off this sheet and a card off the Print button have to be the same card.
 	if card.get("designation"):
 		parts.append(f'<div class="bc-abs bc-line bc-role">{_esc(card.get("designation"))}</div>')
-	if card.get("crew"):
-		parts.append(f'<div class="bc-abs bc-line bc-crew">Crew: {_esc(card.get("crew"))}</div>')
-	if card.get("housing"):
-		parts.append(f'<div class="bc-abs bc-line bc-house">Camp: {_esc(card.get("housing"))}</div>')
+	if card.get("department"):
+		parts.append(f'<div class="bc-abs bc-line bc-dept">{_esc(card.get("department"))}</div>')
 	parts.append(
 		'<div class="bc-abs bc-idlabel">Badge</div>'
 		f'<div class="bc-abs bc-id">{_esc(card.get("badge_id"))}</div>'
@@ -166,6 +165,17 @@ def card_html(card: dict) -> str:
 			f'<img class="bc-abs bc-qr" src="{qr}" alt="">'
 			f'<div class="bc-abs bc-qrcap">{_esc(card.get("badge_id"))}</div>'
 		)
+	# The detail band, in the full-width dead space below the photograph and the
+	# QR caption: the reporting line, the branch, and the cabin.
+	if card.get("reports_to_name"):
+		parts.append(
+			f'<div class="bc-abs bc-line bc-reports">Reports to: {_esc(card.get("reports_to_name"))}</div>'
+		)
+	if card.get("branch"):
+		parts.append(f'<div class="bc-abs bc-line bc-branch">{_esc(card.get("branch"))}</div>')
+	if card.get("housing"):
+		parts.append(f'<div class="bc-abs bc-line bc-house">Camp: {_esc(card.get("housing"))}</div>')
+
 	parts.append('<div class="bc-abs bc-foot"></div>')
 	number = card.get("employee_number")
 	parts.append(

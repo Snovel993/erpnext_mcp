@@ -163,14 +163,13 @@ CARD_CSS = """
   .bc-name { left: 26mm; top: 13.2mm; width: 32mm; font-size: 10pt; font-weight: bold;
              line-height: 1.1; color: #111111; }
 
-  /* THE THREE LINES UNDER THE NAME, and they are three fixed slots rather than a
-     stack that closes up. v0.103.0 put the crew and the cabin below the job
-     title, and the tempting build gives each line the next free millimetre so a
-     worker with no cabin gets a tighter card. It was not built that way: the
-     positions are absolute millimetres for the reason the block comment above
-     gives, a conditional stack would need the same arithmetic in Python for the
-     sheet and in Jinja for this format, and those two would drift. A blank slot
-     is whitespace on a card. Two layouts that disagree by 3mm is a badge whose
+  /* WHO THIS PERSON IS, IN FIXED SLOTS RATHER THAN A STACK THAT CLOSES UP. The
+     tempting build gives each line the next free millimetre, so a worker with no
+     cabin gets a tighter card. It was not built that way: the positions are
+     absolute millimetres for the reason the block comment above gives, a
+     conditional stack would need the same arithmetic in Python for the sheet and
+     in Jinja for this format, and those two would drift. A blank slot is
+     whitespace on a card. Two layouts that disagree by 3mm is a badge whose
      photograph moves depending on which button somebody pressed.
 
      EACH CLIPS RATHER THAN WRAPS. A designation like "Equipment Operator (Class
@@ -180,15 +179,33 @@ CARD_CSS = """
   .bc-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bc-role { left: 26mm; top: 23.2mm; width: 32mm; font-size: 6.8pt; color: #5a6672;
              line-height: 1.15; }
-  .bc-crew { left: 26mm; top: 26.2mm; width: 32mm; font-size: 5.8pt; color: #5a6672;
+  .bc-dept { left: 26mm; top: 26.2mm; width: 32mm; font-size: 5.8pt; color: #5a6672;
              line-height: 1.15; }
-  .bc-house { left: 26mm; top: 29mm; width: 32mm; font-size: 5.8pt; color: #5a6672;
-              line-height: 1.15; }
 
   .bc-idlabel { left: 26mm; top: 32.4mm; font-size: 5pt; letter-spacing: .14em;
                 text-transform: uppercase; color: #5a6672; }
   .bc-id { left: 26mm; top: 34.6mm; width: 32mm; font-size: 10.5pt; font-weight: bold;
            font-family: "DejaVu Sans Mono", "Courier New", monospace; color: #111111; }
+
+  /* THE DETAIL BAND, AND IT IS THE DEAD SPACE THAT PAID FOR v0.104.0. The
+     photograph ends at 38.5mm, the QR caption at 38.5mm and the badge ID at
+     39mm; the footer rule is at 47.4mm. That leaves EIGHT MILLIMETRES of full
+     card width that had nothing on it, which is where the reporting line and the
+     cabin go.
+
+     Full width rather than the 32mm column between the photo and the QR, and
+     that is the whole reason these two lines are legible: "Reports to: Rosa
+     Ramirez" is twenty-four characters and does not fit a 32mm column at a size
+     anybody reads across a bin trailer. Two of them do not fit one line either,
+     which is why the branch takes the right half of the first row and the cabin
+     takes the whole of the second — a camp and a cabin number is the longest
+     string on the card. */
+  .bc-reports { left: 3mm; top: 40mm; width: 40mm; font-size: 5.6pt; color: #5a6672;
+                line-height: 1.15; }
+  .bc-branch { left: 44mm; top: 40mm; width: 38.6mm; text-align: right; font-size: 5.6pt;
+               color: #5a6672; line-height: 1.15; }
+  .bc-house { left: 3mm; top: 43.2mm; width: 79.6mm; font-size: 5.6pt; color: #5a6672;
+              line-height: 1.15; }
 
   /* The symbol always sits on white, whatever the card behind it looks like —
      `_print_spec` states that as a requirement and this is it honoured. */
@@ -265,7 +282,7 @@ CARD_MARKUP = """
   {%- set card = {"ok": False, "badge_id": doc.badge_id, "active": doc.active,
                   "employee": doc.employee, "employee_name": doc.employee,
                   "company_name": doc.company, "designation": "", "employee_number": "",
-                  "crew": "", "housing": "",
+                  "department": "", "branch": "", "reports_to_name": "", "housing": "",
                   "photo": "", "logo": "", "initials": "?", "qr": ""} -%}
 {%- endif -%}
 
@@ -290,11 +307,8 @@ CARD_MARKUP = """
   {%- if card.designation %}
   <div class="bc-abs bc-line bc-role">{{ card.designation }}</div>
   {%- endif %}
-  {%- if card.crew %}
-  <div class="bc-abs bc-line bc-crew">Crew: {{ card.crew }}</div>
-  {%- endif %}
-  {%- if card.housing %}
-  <div class="bc-abs bc-line bc-house">Camp: {{ card.housing }}</div>
+  {%- if card.department %}
+  <div class="bc-abs bc-line bc-dept">{{ card.department }}</div>
   {%- endif %}
   <div class="bc-abs bc-idlabel">Badge</div>
   <div class="bc-abs bc-id">{{ card.badge_id or doc.badge_id or "" }}</div>
@@ -302,6 +316,16 @@ CARD_MARKUP = """
   {%- if card.qr %}
   <img class="bc-abs bc-qr" src="{{ card.qr }}" alt="">
   <div class="bc-abs bc-qrcap">{{ card.badge_id or doc.badge_id or "" }}</div>
+  {%- endif %}
+
+  {%- if card.reports_to_name %}
+  <div class="bc-abs bc-line bc-reports">Reports to: {{ card.reports_to_name }}</div>
+  {%- endif %}
+  {%- if card.branch %}
+  <div class="bc-abs bc-line bc-branch">{{ card.branch }}</div>
+  {%- endif %}
+  {%- if card.housing %}
+  <div class="bc-abs bc-line bc-house">Camp: {{ card.housing }}</div>
   {%- endif %}
 
   <div class="bc-abs bc-foot"></div>

@@ -934,21 +934,30 @@ class TheBadgeQRIsBuiltForTheField(BadgeToolTestCase):
 		self.assertEqual(self.issue(error_correction="Q")["error_correction"], "Q")
 
 
-# ── 9. what the card says about where somebody belongs ───────────────────
+# ── 9. where somebody sits, and who they answer to ───────────────────────
 
 
 class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
-	"""v0.103.0. Tim, on the badges the pickers actually carry: job title,
-	assigned crew, and camp and cabin number "would finish off things nicely".
+	"""v0.104.0. Tim, on the badges the pickers carry: the Employee form's
+	**Company Details** section belongs on the card — designation, department,
+	branch and who they report to — alongside the cabin.
 
-	The job title was already on the card. The other two were not, because
-	neither is on the Employee record — a crew is a supervisor or a shift, a
-	cabin is a Housing Assignment against a Housing Unit — so this is as much a
-	test of the two lookups as of the two lines they print.
+	AND IT CORRECTS v0.103.0 RATHER THAN EXTENDING IT. That release read
+	`reports_to`, `department` and `branch` as a FALLBACK CHAIN and printed the
+	first one set as "the crew", so a picker in Harvest at Mill Creek who reports
+	to Ramirez printed one fact and hid two. They are three different facts about
+	one person and the card now carries each of them.
+
+	THE CREW IS A DIFFERENT QUESTION. Tim: a worker "connects with foremen for
+	enforcement (a foreman may not be their direct report-to but aids in
+	oversight)". That is the open shift, it is not the reporting line, and it does
+	not go on a card that outlives the roster.
 	"""
 
 	FOREMAN = "HR-EMP-00007"
 	FOREMAN_NAME = "Rosa Ramirez"
+	MANAGER = "HR-EMP-00008"
+	MANAGER_NAME = "Dale Whitcomb"
 	UNIT = "HU-MC-0007"
 
 	def setUp(self):
@@ -964,7 +973,15 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 					"company": MAIN,
 					"status": "Active",
 					"designation": "Foreman",
-				}
+					"reports_to": self.MANAGER,
+				},
+				{
+					"name": self.MANAGER,
+					"employee_name": self.MANAGER_NAME,
+					"company": MAIN,
+					"status": "Active",
+					"designation": "Orchard Manager",
+				},
 			],
 		)
 		STORE.seed(
@@ -994,8 +1011,8 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 		row.update(overrides)
 		STORE.seed("Housing Assignment", [row])
 
-	def crew_by(self, employee=EMP, **fields):
-		"""Set the crew columns on somebody's Employee record."""
+	def place(self, employee=EMP, **fields):
+		"""Fill in somebody's Company Details section."""
 		for field, value in fields.items():
 			frappe.db.set_value("Employee", employee, field, value)
 
@@ -1017,43 +1034,104 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 			],
 		)
 
-	# ── the crew line ────────────────────────────────────────────────────
+	def placed(self, **fields):
+		"""Somebody fully placed, badged, and the card that came back."""
+		self.place(**fields)
+		return self.issue()
 
-	def test_the_crew_is_who_they_report_to(self):
-		"""THE DURABLE ANSWER WINS. A card is printed once and lives in a back
-		pocket for a season, so the crew line has to be a fact that is still true
-		in September. `reports_to` is that fact."""
-		self.crew_by(reports_to=self.FOREMAN)
-		card = self.issue()
-		self.assertEqual(card["crew"], self.FOREMAN_NAME)
-		self.assertEqual(card["crew_source"], "reports_to")
-		self.assertEqual(card["foreman"], self.FOREMAN)
+	# ── the Company Details section, field by field ──────────────────────
 
-	def test_a_department_answers_when_nobody_is_named(self):
-		self.crew_by(department="Harvest - ETC")
+	def test_all_four_company_details_are_on_the_card_at_once(self):
+		"""THE TEST THAT WOULD HAVE CAUGHT v0.103.0. All four are set, and all
+		four have to come back — the fallback chain this replaces would have
+		returned `reports_to` and dropped the department and the branch on the
+		floor without failing anything."""
 		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest", "company": MAIN}])
-		card = self.issue()
-		self.assertEqual(card["crew"], "Harvest")
-		self.assertEqual(card["crew_source"], "department")
+		card = self.placed(department="Harvest - ETC", branch="Mill Creek Ranch", reports_to=self.FOREMAN)
+		self.assertEqual(card["designation"], "Picker")
+		self.assertEqual(card["department"], "Harvest")
+		self.assertEqual(card["branch"], "Mill Creek Ranch")
+		self.assertEqual(card["reports_to_name"], self.FOREMAN_NAME)
 
 	def test_the_department_prints_its_name_and_not_its_docname(self):
 		"""ERPNext suffixes a Department docname with the company abbreviation.
 		`Harvest - ETC` is correct in a Link field and is not what anybody wants
 		printed on a card."""
-		self.crew_by(department="Harvest - ETC")
 		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest", "company": MAIN}])
-		self.assertNotIn("- ETC", str(self.issue()["crew"]))
+		card = self.placed(department="Harvest - ETC")
+		self.assertEqual(card["department"], "Harvest")
+		self.assertNotIn("- ETC", str(card["department"]))
 
-	def test_a_branch_answers_after_that(self):
-		self.crew_by(branch="Mill Creek Ranch")
+	def test_a_department_with_no_record_behind_it_still_prints_something(self):
+		"""`_label` falls back to the docname. A dangling Link is a data problem
+		and it is not a reason to print a blank where a department goes."""
+		self.assertEqual(self.placed(department="Packing House")["department"], "Packing House")
+
+	def test_the_branch_is_its_own_field_and_not_a_fallback(self):
+		"""A branch is WHERE somebody works out of. Under v0.103.0 it only ever
+		appeared for a worker with no supervisor and no department, which is to
+		say almost never."""
+		card = self.placed(branch="Mill Creek Ranch", reports_to=self.FOREMAN, department="Operations")
+		self.assertEqual(card["branch"], "Mill Creek Ranch")
+
+	def test_reports_to_prints_a_persons_name_and_not_a_docname(self):
+		"""A card that printed `HR-EMP-00007` where a supervisor's name belongs
+		would be a chain of command nobody can read."""
+		card = self.placed(reports_to=self.FOREMAN)
+		self.assertEqual(card["reports_to"], self.FOREMAN)
+		self.assertEqual(card["reports_to_name"], self.FOREMAN_NAME)
+		self.assertNotIn(self.FOREMAN, str(card["reports_to_name"]))
+
+	def test_the_supervisors_own_title_comes_back_too(self):
+		""" "Rosa Ramirez, Foreman" answers "who is that" in a way a bare name
+		does not."""
+		self.assertEqual(self.placed(reports_to=self.FOREMAN)["reports_to_designation"], "Foreman")
+
+	def test_the_chain_above_them_is_walked_and_named(self):
+		"""Tim's ladder: worker → foreman/supervisor → manager → executive. It is
+		`shadow_log.raci_chain` rather than a second walker here, so the two
+		cannot disagree the first time somebody fixes one of them."""
+		chain = self.placed(reports_to=self.FOREMAN)["reports_to_chain"]
+		self.assertEqual([entry["employee"] for entry in chain], [self.FOREMAN, self.MANAGER])
+		self.assertEqual(chain[0]["employee_name"], self.FOREMAN_NAME)
+		self.assertEqual(chain[0]["level_name"], "direct supervisor")
+		self.assertEqual(chain[1]["employee_name"], self.MANAGER_NAME)
+
+	def test_the_chain_is_not_printed_on_the_card(self):
+		"""A CR-80 has room for the person somebody escalates to. The rest of the
+		ladder is a thing a handset shows."""
+		from erpnext_mcp import badge_sheet
+
+		html = badge_sheet.card_html(self.placed(reports_to=self.FOREMAN))
+		self.assertIn(self.FOREMAN_NAME, html)
+		self.assertNotIn(self.MANAGER_NAME, html)
+
+	def test_a_worker_with_nobody_above_them_has_an_empty_chain(self):
 		card = self.issue()
-		self.assertEqual(card["crew"], "Mill Creek Ranch")
-		self.assertEqual(card["crew_source"], "branch")
+		self.assertIsNone(card["reports_to"])
+		self.assertIsNone(card["reports_to_name"])
+		self.assertEqual(card["reports_to_chain"], [])
 
-	def test_an_open_shift_is_the_last_resort_and_says_so(self):
-		"""A Farm Shift is one morning's roster. It answers only where the site
-		records nothing durable, and `crew_source` is what lets a caller tell the
-		stopgap from the standing fact."""
+	def test_grade_and_employment_type_come_back_and_stay_off_the_card(self):
+		"""Tim named them as fields on the section and did not ask for them in the
+		layout. A CR-80 has no room for a fact nobody requested, and the data is
+		free."""
+		from erpnext_mcp import badge_sheet
+
+		STORE.seed("Employee Grade", [{"name": "Band 2"}])
+		card = self.placed(grade="Band 2", employment_type="Seasonal Worker")
+		self.assertEqual(card["grade"], "Band 2")
+		self.assertEqual(card["employment_type"], "Seasonal Worker")
+		html = badge_sheet.card_html(card)
+		self.assertNotIn("Band 2", html)
+		self.assertNotIn("Seasonal Worker", html)
+
+	# ── the crew is the oversight link, and is not the reporting line ────
+
+	def test_the_crew_is_the_shift_foreman_and_nothing_else(self):
+		"""v0.104.0 NARROWED THIS. Tim's model: a foreman aids in oversight and
+		may not be the direct report-to. The formal line is `reports_to`; this is
+		the operational one, and it is a Farm Shift."""
 		self.open_shift([EMP])
 		card = self.issue()
 		self.assertEqual(card["crew"], self.FOREMAN_NAME)
@@ -1061,32 +1139,31 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 		self.assertEqual(card["shift"], "SHIFT-2026-0001")
 		self.assertEqual(card["shift_type"], "Harvest")
 
-	def test_a_standing_crew_beats_the_shift_somebody_happens_to_be_on(self):
-		"""THE NEGATIVE CONTROL FOR THE ORDERING. Both facts are on the site, and
-		the card prints the one that will still be true next week."""
-		self.open_shift([EMP])
-		self.crew_by(reports_to=self.FOREMAN)
-		card = self.issue()
-		self.assertEqual(card["crew_source"], "reports_to")
-		self.assertIsNone(card["shift"])
+	def test_reports_to_no_longer_answers_the_crew_question(self):
+		"""THE NEGATIVE CONTROL FOR THE NARROWING. Under v0.103.0 this returned
+		the supervisor's name as the crew; conflating the two is the bug this
+		release fixes."""
+		card = self.placed(reports_to=self.FOREMAN, department="Operations", branch="Mill Creek Ranch")
+		self.assertIsNone(card["crew"])
+		self.assertIsNone(card["crew_source"])
+		self.assertEqual(card["reports_to_name"], self.FOREMAN_NAME)
 
-	def test_two_open_shifts_print_no_crew_at_all(self):
-		"""AMBIGUITY PRINTS NOTHING. Two open shifts naming one person is a
-		roster somebody has to fix, and a card cannot be corrected once it is
-		laminated."""
+	def test_the_crew_is_not_printed_on_the_card(self):
+		"""A shift is one morning's roster. A card that laminated
+		SHIFT-2026-0114's foreman would be wrong by Wednesday."""
+		from erpnext_mcp import badge_sheet
+
+		self.open_shift([EMP])
+		html = badge_sheet.card_html(self.issue())
+		self.assertNotIn("Crew:", html)
+		self.assertNotIn("SHIFT-2026-0001", html)
+
+	def test_two_open_shifts_answer_nothing(self):
+		"""Two open shifts naming one person is a roster somebody has to fix, and
+		`dispatch._open_shift_for` already refuses to guess between them."""
 		self.open_shift([EMP])
 		self.open_shift([EMP], name="SHIFT-2026-0002")
-		card = self.issue()
-		self.assertIsNone(card["crew"])
-		self.assertIsNone(card["crew_source"])
-
-	def test_a_site_that_records_no_crew_prints_the_card_it_always_printed(self):
-		card = self.issue()
-		self.assertIsNone(card["crew"])
-		self.assertIsNone(card["crew_source"])
-		# And the badge is still issued, which is the whole point of the posture.
-		self.assertTrue(card["created"])
-		self.assertEqual(card["badge_id"], f"{MAIN_ABBR}-0001")
+		self.assertIsNone(self.issue()["crew"])
 
 	# ── the camp and cabin line ──────────────────────────────────────────
 
@@ -1121,11 +1198,6 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 		self.house(status="Ended")
 		self.assertIsNone(self.issue()["housing"])
 
-	def test_a_worker_who_lives_off_the_farm_still_gets_a_badge(self):
-		card = self.issue()
-		self.assertIsNone(card["housing"])
-		self.assertTrue(card["created"])
-
 	def test_the_camp_falls_back_to_the_units_own_parcel(self):
 		"""A Housing Assignment carries its own `parcel` and may not have been
 		given one. The unit always has: `create_housing_unit` requires it."""
@@ -1152,46 +1224,65 @@ class TheCardSaysWhereSomebodyBelongs(BadgeToolTestCase):
 		self.house(name="HA-NEWER", unit="HU-MC-0011", assigned_date="2026-07-01")
 		self.assertEqual(self.issue()["cabin"], "Cabin 11")
 
+	# ── none of it may cost a badge ──────────────────────────────────────
+
+	def test_a_site_that_records_none_of_it_prints_the_card_it_always_printed(self):
+		card = self.issue()
+		for key in ("department", "branch", "reports_to_name", "housing", "crew"):
+			with self.subTest(key=key):
+				self.assertIsNone(card[key])
+		self.assertTrue(card["created"])
+		self.assertEqual(card["badge_id"], f"{MAIN_ABBR}-0001")
+
 	# ── every surface, not just the single card ──────────────────────────
 
-	def test_the_sheet_carries_the_same_three_lines(self):
-		"""A hiring day prints a sheet, not thirty single cards. The two paths
-		build the card through the same `_card`, and this is what holds them to
-		it."""
-		self.crew_by(reports_to=self.FOREMAN)
-		self.house()
-		data = self.tool_data("generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN})
-		card = data["cards"][0]
-		self.assertEqual(card["designation"], "Picker")
-		self.assertEqual(card["crew"], self.FOREMAN_NAME)
-		self.assertEqual(card["housing"], "Mill Creek · Cabin 7")
-
 	def test_the_printed_html_says_them_in_words_a_foreman_reads(self):
-		"""The values are on the card AND they are labelled. `Mill Creek · Cabin
-		7` alone is a place; `Camp: Mill Creek · Cabin 7` is an instruction."""
+		"""The values are on the card AND the two that need one are labelled.
+		`Mill Creek · Cabin 7` alone is a place; `Camp: Mill Creek · Cabin 7` is
+		an instruction."""
 		from erpnext_mcp import badge_sheet
 
-		self.crew_by(reports_to=self.FOREMAN)
+		STORE.seed("Department", [{"name": "Harvest - ETC", "department_name": "Harvest", "company": MAIN}])
 		self.house()
-		html = badge_sheet.card_html(self.issue())
-		self.assertIn("bc-role", html)
-		self.assertIn(f"Crew: {self.FOREMAN_NAME}", html)
+		html = badge_sheet.card_html(
+			self.placed(department="Harvest - ETC", branch="Mill Creek Ranch", reports_to=self.FOREMAN)
+		)
+		self.assertIn(">Picker<", html)
+		self.assertIn(">Harvest<", html)
+		self.assertIn(">Mill Creek Ranch<", html)
+		self.assertIn(f"Reports to: {self.FOREMAN_NAME}", html)
 		self.assertIn("Camp: Mill Creek · Cabin 7", html)
 
-	def test_a_card_with_neither_draws_neither_line(self):
+	def test_a_card_with_none_of_it_draws_none_of_the_lines(self):
 		"""THE NEGATIVE CONTROL FOR THE MARKUP. An empty slot is whitespace; a
 		label with nothing after it is a card that looks like it lost the
 		answer."""
 		from erpnext_mcp import badge_sheet
 
 		html = badge_sheet.card_html(self.issue())
-		self.assertNotIn("bc-crew", html)
-		self.assertNotIn("bc-house", html)
+		for cls in ("bc-dept", "bc-branch", "bc-reports", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertNotIn(cls, html)
 		self.assertIn("bc-name", html)
 
+	def test_the_sheet_carries_the_same_facts(self):
+		"""A hiring day prints a sheet, not thirty single cards. The two paths
+		build the card through the same `_card`, and this is what holds them to
+		it."""
+		self.place(department="Operations", branch="Mill Creek Ranch", reports_to=self.FOREMAN)
+		self.house()
+		data = self.tool_data("generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN})
+		card = data["cards"][0]
+		self.assertEqual(card["designation"], "Picker")
+		self.assertEqual(card["department"], "Operations")
+		self.assertEqual(card["branch"], "Mill Creek Ranch")
+		self.assertEqual(card["reports_to_name"], self.FOREMAN_NAME)
+		self.assertEqual(card["housing"], "Mill Creek · Cabin 7")
+
 	def test_the_id_card_pdf_path_carries_them_too(self):
-		self.crew_by(reports_to=self.FOREMAN)
+		self.place(branch="Mill Creek Ranch", reports_to=self.FOREMAN)
 		self.house()
 		data = self.tool_data("generate_employee_id_card", {"employee": EMP, "company": MAIN})
-		self.assertIn(f"Crew: {self.FOREMAN_NAME}", data["card_html"])
+		self.assertIn(f"Reports to: {self.FOREMAN_NAME}", data["card_html"])
 		self.assertIn("Camp: Mill Creek · Cabin 7", data["card_html"])
+		self.assertIn(">Mill Creek Ranch<", data["card_html"])

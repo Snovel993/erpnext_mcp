@@ -495,6 +495,10 @@ def build_pass_json(card: dict, config: dict) -> dict:
 		back_fields.append(_field("employee_number", "Employee Number", card["employee_number"]))
 	if card.get("issued_on"):
 		back_fields.append(_field("issued_on", "Issued", card["issued_on"]))
+	if card.get("reports_to_name"):
+		back_fields.append(_field("reports_to", "Reports to", card["reports_to_name"]))
+	if card.get("branch"):
+		back_fields.append(_field("branch", "Branch", card["branch"]))
 	back_fields.append(
 		_field(
 			"terms",
@@ -509,17 +513,20 @@ def build_pass_json(card: dict, config: dict) -> dict:
 		)
 	)
 
-	# v0.103.0. The same three facts the printed card gained, in the two slots
-	# Apple gives a generic pass. Role and crew read together and belong side by
-	# side; the camp sits with the company, which is the other thing that answers
-	# "where does this person belong" rather than "what do they do".
-	# Both are omitted when unknown rather than printed empty — a labelled blank
-	# on a phone reads as a system that lost the answer.
+	# v0.104.0. The same facts the printed card gained, laid into the slots Apple
+	# gives a generic pass. Role and department read together on the front; the
+	# camp sits with the company, which is the other answer to "where does this
+	# person belong" rather than "what do they do"; and the reporting line and the
+	# branch go on the BACK, where there is room for a label and a full name and
+	# where somebody who needs the chain of command is already looking.
+	#
+	# Every one is omitted when unknown rather than printed empty — a labelled
+	# blank on a phone reads as a system that lost the answer.
 	secondary = [_field("badge", "Badge", badge_id)]
 	if card.get("designation"):
 		secondary.append(_field("role", "Role", card["designation"]))
-	if card.get("crew"):
-		secondary.append(_field("crew", "Crew", card["crew"]))
+	if card.get("department"):
+		secondary.append(_field("department", "Department", card["department"]))
 
 	auxiliary = [_field("company", "Company", company)]
 	if card.get("housing"):
@@ -833,12 +840,16 @@ def google_pass_object(card: dict, config: dict) -> tuple:
 		obj["textModulesData"].append(
 			{"id": "employee_number", "header": "Employee Number", "body": str(card["employee_number"])}
 		)
-	# v0.103.0, and the same rule the Apple builder above keeps: a fact the site
+	# v0.104.0, and the same rule the Apple builder above keeps: a fact the site
 	# does not record is left off the pass rather than shown as an empty row.
-	if card.get("crew"):
-		obj["textModulesData"].append({"id": "crew", "header": "Crew", "body": str(card["crew"])})
-	if card.get("housing"):
-		obj["textModulesData"].append({"id": "housing", "header": "Camp", "body": str(card["housing"])})
+	for key, header in (
+		("department", "Department"),
+		("branch", "Branch"),
+		("reports_to_name", "Reports to"),
+		("housing", "Camp"),
+	):
+		if card.get(key):
+			obj["textModulesData"].append({"id": key, "header": header, "body": str(card[key])})
 
 	logo_url = str(card.get("public_logo_url") or "")
 	photo_url = str(card.get("public_photo_url") or "")

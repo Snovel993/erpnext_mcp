@@ -119,6 +119,21 @@ class BadgeFormatTestCase(SeededTestCase):
 		environment.globals["erpnext_mcp_badge_card"] = badge_card.erpnext_mcp_badge_card
 		return environment.from_string(html).render(doc=frappe.get_doc(BADGE_DOCTYPE, name))
 
+	def cards(self, name: str = BADGE) -> str:
+		"""The same page WITHOUT its stylesheet, which is what a negative control
+		has to read.
+
+		THE STYLESHEET IS PROSE AS WELL AS RULES. `CARD_CSS` carries the comments
+		that explain the geometry, and those comments quote the very labels the
+		markup prints — so `assertNotIn("Reports to:", self.render())` passes only
+		until somebody documents the line, and then fails for a reason that has
+		nothing to do with the card. Every class name is in there too. A check
+		that a line was NOT drawn must therefore look at the markup and not at the
+		page.
+		"""
+		html = self.render(name)
+		return html.split("</style>", 1)[-1]
+
 
 # ── 1 ─────────────────────────────────────────────────────────────────────────
 class TheSeeder(BadgeFormatTestCase):
@@ -264,55 +279,86 @@ class TheCardGeometry(unittest.TestCase):
 		self.assertLess(badge_print_format.QR_FRONT_MM, badge_print_format.QR_BACK_MM)
 		self.assertIn("dual-side", badge_print_format.__doc__.lower())
 
-	def test_the_three_lines_under_the_name_do_not_overlap_each_other(self):
-		"""v0.103.0 put the crew and the cabin between the designation and the
-		badge ID, and the whole hazard of absolute millimetres is that a line
-		which is 0.4mm too tall prints THROUGH the one below it. The rule is
-		arithmetic rather than eyeballing: a line's top plus its own height has
-		to clear the next line's top.
-
-		The heights are `font-size * line-height`, at 25.4/72 mm to the point.
-		"""
+	def _box(self, cls: str) -> dict:
+		"""One rule's geometry, in millimetres. Height is `font-size * line-height`
+		at 25.4/72 mm to the point."""
 		import re
 
-		css = badge_print_format.CARD_CSS
-		stack = []
-		for cls in ("bc-role", "bc-crew", "bc-house", "bc-idlabel", "bc-id"):
-			block = re.search(rf"\.{cls} \{{(.*?)\}}", css, re.S)
-			self.assertIsNotNone(block, f"{cls} is no longer in the stylesheet")
-			body = block.group(1)
-			top = float(re.search(r"top: ([\d.]+)mm", body).group(1))
-			points = float(re.search(r"font-size: ([\d.]+)pt", body).group(1))
-			leading = re.search(r"line-height: ([\d.]+)", body)
-			height = points * (float(leading.group(1)) if leading else 1.2) * 25.4 / 72
-			stack.append((cls, top, height))
+		block = re.search(rf"\.{cls} \{{(.*?)\}}", badge_print_format.CARD_CSS, re.S)
+		self.assertIsNotNone(block, f"{cls} is no longer in the stylesheet")
+		body = block.group(1)
+		points = float(re.search(r"font-size: ([\d.]+)pt", body).group(1))
+		leading = re.search(r"line-height: ([\d.]+)", body)
+		# `.bc-idlabel` sets no width — it is as wide as the word "Badge" — so a
+		# missing width is 0 rather than a crash.
+		width = re.search(r"width: ([\d.]+)mm", body)
+		return {
+			"top": float(re.search(r"top: ([\d.]+)mm", body).group(1)),
+			"left": float(re.search(r"left: ([\d.]+)mm", body).group(1)),
+			"width": float(width.group(1)) if width else 0.0,
+			"height": points * (float(leading.group(1)) if leading else 1.2) * 25.4 / 72,
+		}
 
-		for (name, top, height), (below, next_top, _) in itertools.pairwise(stack):
+	def test_nothing_on_the_front_prints_through_the_line_below_it(self):
+		"""THE HAZARD OF ABSOLUTE MILLIMETRES: a line 0.4mm too tall prints
+		THROUGH its neighbour, and it looks fine right up until somebody has a
+		two-word department. The rule is arithmetic rather than eyeballing — a
+		line's top plus its own height has to clear the next line's top — and the
+		footer rule is the last thing in the stack, so nothing can be struck
+		through by it either."""
+		stack = [
+			# The column between the photograph and the QR.
+			"bc-role",
+			"bc-dept",
+			"bc-idlabel",
+			"bc-id",
+			# The full-width detail band below both.
+			"bc-reports",
+			"bc-house",
+			"bc-foot",
+		]
+		boxes = [(cls, self._box(cls)) for cls in stack[:-1]]
+		import re
+
+		foot_top = float(
+			re.search(r"\.bc-foot \{.*?top: ([\d.]+)mm", badge_print_format.CARD_CSS, re.S).group(1)
+		)
+		boxes.append(("bc-foot", {"top": foot_top, "height": 0.0}))
+
+		for (name, box), (below, next_box) in itertools.pairwise(boxes):
 			with self.subTest(line=name):
 				self.assertLessEqual(
-					round(top + height, 3),
-					next_top,
+					round(box["top"] + box["height"], 3),
+					next_box["top"],
 					f"{name} is tall enough to print through {below}",
 				)
 
-	def test_the_stack_clears_the_footer_rule(self):
-		"""The bottom of the badge ID has to stay above the footer's own line, or
-		the card's last fact is struck through."""
-		import re
+	def test_the_two_cells_that_share_a_row_do_not_share_any_millimetres(self):
+		"""The reporting line and the branch sit on ONE row, so the arithmetic
+		above cannot see them: they clear each other horizontally or not at
+		all."""
+		left, right = self._box("bc-reports"), self._box("bc-branch")
+		self.assertEqual(left["top"], right["top"], "they are meant to be one row")
+		self.assertLessEqual(left["left"] + left["width"], right["left"])
+		self.assertLessEqual(right["left"] + right["width"], badge_print_format.CARD_WIDTH_MM)
 
-		css = badge_print_format.CARD_CSS
-		body = re.search(r"\.bc-id \{(.*?)\}", css, re.S).group(1)
-		bottom = float(re.search(r"top: ([\d.]+)mm", body).group(1)) + 10.5 * 1.2 * 25.4 / 72
-		foot = float(re.search(r"\.bc-foot \{.*?top: ([\d.]+)mm", css, re.S).group(1))
-		self.assertLess(bottom, foot)
+	def test_the_detail_band_uses_the_full_width_of_the_card(self):
+		"""It is the dead space below the photograph and the QR caption, and it is
+		the whole reason "Reports to: Rosa Ramirez" is legible — twenty-four
+		characters do not fit the 32mm column at a size anybody reads across a bin
+		trailer."""
+		for cls in ("bc-reports", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertLess(self._box(cls)["left"], 26.0, f"{cls} is still inside the column")
+		self.assertGreater(self._box("bc-house")["width"], 60.0)
 
-	def test_the_added_lines_clip_rather_than_wrap(self):
+	def test_every_added_line_clips_rather_than_wraps(self):
 		"""A designation like "Equipment Operator (Class II)" would otherwise take
 		a second line and push into the badge ID — the one thing on the front that
 		has to stay readable. Clipped is legible; overlapped is not."""
 		self.assertIn("white-space: nowrap", badge_print_format.CARD_CSS)
 		self.assertIn("text-overflow: ellipsis", badge_print_format.CARD_CSS)
-		for cls in ("bc-role", "bc-crew", "bc-house"):
+		for cls in ("bc-role", "bc-dept", "bc-reports", "bc-branch", "bc-house"):
 			with self.subTest(cls=cls):
 				self.assertIn(f"bc-line {cls}", badge_print_format.CARD_MARKUP)
 
@@ -348,54 +394,65 @@ class TheJinjaGlobal(BadgeFormatTestCase):
 		self.assertEqual(card["employee_number"], "E-100")
 		self.assertEqual(card["company"], MAIN)
 
-	def test_it_resolves_the_crew_and_the_cabin_the_same_way_the_tool_does(self):
-		"""v0.103.0. ONE DEFINITION, ASKED FROM HERE. A card off the Desk's Print
+	def test_it_resolves_the_company_details_the_same_way_the_tool_does(self):
+		"""v0.104.0. ONE DEFINITION, ASKED FROM HERE. A card off the Desk's Print
 		button and a card off `generate_employee_badge_sheet` have to agree, and
 		they only agree if the Jinja global delegates to `tools/badges` rather
-		than holding a second opinion about what a crew is."""
+		than holding a second opinion about what a department label is."""
 		_house(EMP)
+		frappe.db.set_value("Employee", EMP, "branch", "Mill Creek Ranch")
+		frappe.db.set_value("Employee", EMP, "reports_to", "HR-EMP-00002")
 		card = badge_card.erpnext_mcp_badge_card(BADGE)
-		# The fixture employee is in Operations and has nobody named above them.
-		self.assertEqual(card["crew"], "Operations")
-		self.assertEqual(card["crew_source"], "department")
+		self.assertEqual(card["department"], "Operations")
+		self.assertEqual(card["branch"], "Mill Creek Ranch")
+		self.assertEqual(card["reports_to_name"], "Ben Packhouse")
 		self.assertEqual(card["camp"], "Mill Creek")
 		self.assertEqual(card["cabin"], "Cabin 7")
 		self.assertEqual(card["housing"], "Mill Creek · Cabin 7")
 
-	def test_the_two_lines_are_strings_and_never_None(self):
+	def test_every_placement_key_is_a_string_and_never_None(self):
 		"""The template dereferences them under `StrictUndefined`, and a card for
-		somebody who lives off the farm still has to render."""
+		somebody who lives off the farm and reports to nobody still has to
+		render."""
 		card = badge_card.erpnext_mcp_badge_card(BADGE)
-		for key in ("crew", "crew_source", "housing", "camp", "cabin"):
+		for key in badge_card._PLACEMENT_KEYS:
 			with self.subTest(key=key):
 				self.assertIsInstance(card[key], str)
 		self.assertEqual(card["housing"], "")
+		self.assertEqual(card["reports_to_name"], "")
 
-	def test_the_crew_lookup_failing_does_not_cost_the_photograph(self):
-		"""THE GUARD THAT MATTERS. Two lines on a card are not worth the card:
-		if the lookup raises, the name, the face and the QR still print."""
-		with unittest.mock.patch.object(badges, "_crew", side_effect=RuntimeError("gone")):
-			card = badge_card.erpnext_mcp_badge_card(BADGE)
-		self.assertTrue(card["ok"])
-		self.assertEqual(card["employee_name"], EMP_NAME)
-		self.assertEqual(card["designation"], "Supervisor")
-		self.assertEqual(card["crew"], "")
+	def test_a_failing_lookup_does_not_cost_the_photograph(self):
+		"""THE GUARD THAT MATTERS. Three lines on a card are not worth the card:
+		if a lookup raises, the name, the face and the QR still print."""
+		for name in ("_company_details", "_crew", "_housing"):
+			with (
+				self.subTest(lookup=name),
+				unittest.mock.patch.object(badges, name, side_effect=RuntimeError("gone")),
+			):
+				card = badge_card.erpnext_mcp_badge_card(BADGE)
+				self.assertTrue(card["ok"])
+				self.assertEqual(card["employee_name"], EMP_NAME)
+				self.assertEqual(card["designation"], "Supervisor")
+				self.assertEqual(card["department"], "")
 
-	def test_an_employee_doctype_without_the_crew_columns_still_reads(self):
-		"""`reports_to`, `department` and `branch` are standard ERPNext and are
-		not guaranteed — an HR app that declares its own Employee without them
-		would make `get_value` raise on the whole list, and the caller swallows
-		exceptions. So the meta is asked first, and the card keeps its face."""
+	def test_an_employee_doctype_without_the_company_details_still_reads(self):
+		"""`reports_to`, `department`, `branch`, `grade` and `employment_type` are
+		standard ERPNext and are not guaranteed — an HR app that declares its own
+		Employee without them would make `get_value` raise on the whole list, and
+		the caller swallows exceptions. So the meta is asked first, and the card
+		keeps its face."""
+		absent = {"reports_to", "department", "branch", "grade", "employment_type"}
 		meta = frappe.get_meta("Employee")
 		original = meta.has_field
-		meta.has_field = lambda field: field not in ("reports_to", "department", "branch")
+		meta.has_field = lambda field: field not in absent
 		try:
 			card = badge_card.erpnext_mcp_badge_card(BADGE)
 		finally:
 			meta.has_field = original
 		self.assertEqual(card["employee_name"], EMP_NAME)
 		self.assertEqual(card["designation"], "Supervisor")
-		self.assertEqual(card["crew"], "")
+		self.assertEqual(card["department"], "")
+		self.assertEqual(card["reports_to_name"], "")
 
 	def test_a_badge_nothing_knows_about_is_a_dict_and_not_an_exception(self):
 		"""It is called mid-render from a Print Format. A raise here is a Print
@@ -529,25 +586,32 @@ class TheTemplateRenders(BadgeFormatTestCase):
 			with self.subTest(fact=fact):
 				self.assertIn(fact, html)
 
-	def test_the_crew_and_the_cabin_are_printed_and_labelled(self):
-		"""v0.103.0, and the labels are part of it: `Mill Creek · Cabin 7` alone
-		is a place, and `Camp: Mill Creek · Cabin 7` is an instruction to whoever
-		is walking somebody to their bunk."""
+	def test_the_company_details_and_the_cabin_are_printed(self):
+		"""v0.104.0, and the two labels are part of it: `Mill Creek · Cabin 7`
+		alone is a place, and `Camp: Mill Creek · Cabin 7` is an instruction to
+		whoever is walking somebody to their bunk."""
 		_house(EMP)
-		html = self.render()
-		self.assertIn("Crew: Operations", html)
-		self.assertIn("Camp: Mill Creek · Cabin 7", html)
+		frappe.db.set_value("Employee", EMP, "branch", "Mill Creek Ranch")
+		frappe.db.set_value("Employee", EMP, "reports_to", "HR-EMP-00002")
+		cards = self.cards()
+		self.assertIn(">Operations<", cards)
+		self.assertIn(">Mill Creek Ranch<", cards)
+		self.assertIn("Reports to: Ben Packhouse", cards)
+		self.assertIn("Camp: Mill Creek · Cabin 7", cards)
 
-	def test_neither_line_is_drawn_when_the_site_records_neither(self):
+	def test_no_line_is_drawn_when_the_site_records_none_of_it(self):
 		"""THE NEGATIVE CONTROL. A label with nothing after it is a card that
 		looks like it lost the answer."""
 		frappe.db.set_value("Employee", EMP, "department", "")
-		html = self.render()
-		self.assertNotIn("Crew:", html)
-		self.assertNotIn("Camp:", html)
+		cards = self.cards()
+		self.assertNotIn("Reports to:", cards)
+		self.assertNotIn("Camp:", cards)
+		for cls in ("bc-dept", "bc-branch", "bc-reports", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertNotIn(cls, cards)
 		# And the rest of the card is exactly the card it was before.
-		self.assertIn(EMP_NAME, html)
-		self.assertIn("Supervisor", html)
+		self.assertIn(EMP_NAME, cards)
+		self.assertIn("Supervisor", cards)
 
 	def test_there_are_two_cards_because_the_printer_has_two_sides(self):
 		self.assertEqual(self.render().count('class="badge-card"'), 2)

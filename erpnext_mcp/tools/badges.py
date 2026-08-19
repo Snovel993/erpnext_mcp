@@ -123,11 +123,17 @@ BADGE_LOGO_FIELD = "badge_logo"
 #: What a badge card carries, and the label printed above the QR. Kept here
 #: rather than in the caller so the sheet and the single card agree.
 #:
-#: v0.103.0 adds the three columns `_crew` falls back through. They are read for
-#: the CREW LINE and nothing else — see that function for the order and why the
-#: order is that one — and each is passed through `compat.existing_fields`, so a
-#: site whose HR app spells its Employee differently reads a row without them
-#: rather than failing on a column that is not there.
+#: v0.104.0: the Employee form's own **Company Details** section, whole. Tim
+#: named the section rather than the columns, which is the right way round — it
+#: is the block an HR manager fills in at hire and the block somebody looks at
+#: when they ask where a person sits. `_company_details` turns it into card
+#: fields; `grade` and `employment_type` come back in the data and stay off the
+#: card, because Tim's own layout does not ask for them and a CR-80 has no room
+#: for a fact nobody requested.
+#:
+#: Every one is passed through `compat.existing_fields`, so a site whose HR app
+#: spells its Employee differently reads a row without them rather than failing
+#: on a column that is not there.
 _EMPLOYEE_FIELDS = (
 	"name",
 	"employee_name",
@@ -139,6 +145,8 @@ _EMPLOYEE_FIELDS = (
 	"reports_to",
 	"department",
 	"branch",
+	"grade",
+	"employment_type",
 )
 
 
@@ -174,17 +182,34 @@ def _initials(employee_name: str) -> str:
 	return (words[0][:1] + words[-1][:1]).upper()
 
 
-# ── the three lines under the name ───────────────────────────────────────
+# ── where somebody sits, and who they answer to ──────────────────────────
 #
-# v0.103.0, and it is Tim's sentence: job title, assigned crew, and camp and
-# cabin number "would finish off things nicely". The job title was already on the
-# card. The other two were not, and the reason they were not is that NEITHER IS
-# ON THE EMPLOYEE RECORD — a crew is a Farm Shift or a supervisor, a cabin is a
-# Housing Assignment against a Housing Unit — so a card that carried them had to
-# go and ask two more registers.
+# v0.103.0 put a job title, a crew and a cabin on the card. v0.104.0 is Tim
+# again, with the rest of the picture, and it CORRECTS the middle of those three
+# rather than adding to it.
 #
-# BOTH LOOKUPS ARE BEST-EFFORT AND NEITHER MAY LOSE A BADGE. `_company_logo`
-# above sets the posture and these keep it: a site that has not migrated the camp
+# WHAT v0.103.0 GOT WRONG. It read `reports_to`, `department` and `branch` as a
+# FALLBACK CHAIN — the first one set won, printed on one line as "the crew". That
+# was a reasonable way to fill a single line and it is the wrong model of the
+# farm. Those are three DIFFERENT facts about one person and Tim wants all of
+# them legible: the department is which part of the operation they belong to, the
+# branch is which place they work out of, and `reports_to` is the chain of
+# command. Collapsing them meant a picker in Harvest at Mill Creek who reports to
+# Ramirez printed one of those three and hid the other two.
+#
+# So `_company_details` reads the Employee form's own **Company Details** section
+# whole — the section an HR manager is already looking at — and every field on the
+# card comes back separately.
+#
+# THE CREW IS A DIFFERENT QUESTION AND KEEPS A DIFFERENT ANSWER. Tim: workers
+# "connect with foremen for enforcement (a foreman may not be their direct
+# report-to but aids in oversight)". That is exactly the open Farm Shift, and it
+# is NOT the reporting line — so `_crew` below is now only ever the shift's
+# foreman, it no longer stands in for `reports_to`, and it stays OFF the printed
+# card because a roster changes daily and a laminated card does not.
+#
+# EVERY LOOKUP IS BEST-EFFORT AND NONE MAY LOSE A BADGE. `_company_logo` above
+# sets the posture and these keep it: a site that has not migrated the camp
 # register, a worker who has never been rostered, an HR app that spells its
 # Employee without `reports_to` — each is a card printed WITHOUT that line rather
 # than a badge nobody can issue. What goes wrong at a shed door on a Monday is a
@@ -211,56 +236,113 @@ def _label(doctype: str, name: str, field: str) -> str:
 	return name
 
 
+def _company_details(row: dict) -> dict:
+	"""The Employee form's **Company Details** section, as a card prints it.
+
+	FIVE FIELDS AN HR MANAGER ALREADY MAINTAINS, and that is the argument for
+	reading them rather than inventing anything: `designation`, `department`,
+	`branch`, `reports_to`, `grade` and `employment_type` are on the Employee
+	form under one heading, somebody fills them in at hire, and until v0.104.0 a
+	badge printed exactly one of them.
+
+	EACH COMES BACK SEPARATELY, which is the correction this release is. See the
+	block comment above: three of these were read as a fallback chain and the
+	first one set won, so a picker in Harvest at Mill Creek who reports to Ramirez
+	printed one fact and hid two.
+
+	DOCNAMES ARE NOT LABELS. ERPNext suffixes a Department with the company
+	abbreviation and `_label` unpicks it; `reports_to` is an Employee DOCNAME, and
+	a card that printed `HR-EMP-00007` where a supervisor's name belongs would be
+	a chain of command nobody can read. `reports_to_designation` comes back too,
+	because "Rosa Ramirez, Foreman" answers "who is that" in a way a bare name
+	does not.
+
+	THE CHAIN ABOVE THEM IS `shadow_log.raci_chain`, NOT A SECOND WALK. That
+	function already walks `reports_to` upward, already caps the walk, already
+	survives a cycle by reporting it, and already names the levels — direct
+	supervisor, manager, owner, which is the ladder Tim describes. A second walker
+	here would be a second opinion about the same chain, and the two would
+	disagree the first time somebody fixed one of them. It is returned but NOT
+	printed: a CR-80 card has room for the person somebody escalates to, and the
+	rest of the ladder is a thing a handset shows.
+	"""
+	details = {
+		"department": None,
+		"branch": None,
+		"reports_to": None,
+		"reports_to_name": None,
+		"reports_to_designation": None,
+		"reports_to_chain": [],
+		"grade": None,
+		"employment_type": None,
+	}
+
+	department = str(row.get("department") or "").strip()
+	if department:
+		details["department"] = _label("Department", department, "department_name") or department
+
+	# A Branch's docname IS its branch name — ERPNext gives it no separate title
+	# column and no abbreviation suffix — so there is nothing to unpick.
+	details["branch"] = str(row.get("branch") or "").strip() or None
+	details["grade"] = str(row.get("grade") or "").strip() or None
+	details["employment_type"] = str(row.get("employment_type") or "").strip() or None
+
+	supervisor = str(row.get("reports_to") or "").strip()
+	if not supervisor:
+		return details
+	details["reports_to"] = supervisor
+	try:
+		found = (
+			frappe.db.get_value(
+				EMPLOYEE,
+				supervisor,
+				compat.existing_fields(EMPLOYEE, ("employee_name", "designation")),
+				as_dict=True,
+			)
+			or {}
+		)
+	except Exception:
+		found = {}
+	details["reports_to_name"] = str(found.get("employee_name") or "").strip() or supervisor
+	details["reports_to_designation"] = str(found.get("designation") or "").strip() or None
+
+	try:
+		from .shadow_log import raci_chain
+
+		details["reports_to_chain"] = list(raci_chain(str(row.get("name") or "")).get("chain") or [])
+	except Exception:
+		details["reports_to_chain"] = []
+	return details
+
+
 def _crew(row: dict) -> dict:
-	"""Which crew this badge belongs to, and where that answer came from.
+	"""The crew they are standing on right now — the OVERSIGHT link, not the formal one.
 
-	THE DURABLE ANSWER WINS, AND THAT ORDERING IS THE WHOLE DESIGN. A card is
-	printed once and then lives in a back pocket for a season, so the crew line
-	has to be a fact that is still true in September. `Employee.reports_to` is
-	that fact — a picker who reports to Ramirez is on Ramirez's crew for as long
-	as the record says so — and a Farm Shift is not: it is one morning's roster,
-	and a card that printed `SHIFT-2026-0114`'s foreman would be wrong by
-	Wednesday and unfixable without a reprint.
+	v0.104.0 NARROWED THIS, and the narrowing is the point. It used to fall back
+	through `reports_to`, `department` and `branch`, which conflated two different
+	relationships: Tim's, on the farm's own model — a worker "connects with
+	foremen for enforcement (a foreman may not be their direct report-to but aids
+	in oversight)". The formal line is `reports_to` and it is on the card. THIS is
+	the operational one, and it is a Farm Shift.
 
-	So the order is `reports_to`, then `department`, then `branch`, then — only
-	where the site records none of the three — the ONE open shift they are
-	standing on. That last one is a stopgap and it is reported as one:
-	`crew_source` says which register answered, so a caller that cares about the
-	difference between "this is who they work for" and "this is who they happened
-	to be with when the card was printed" can tell them apart.
+	IT IS NOT PRINTED, deliberately. A shift is one morning's roster, and a card
+	that laminated `SHIFT-2026-0114`'s foreman would be wrong by Wednesday with no
+	way to correct it short of a reprint. It comes back in the data because the
+	handset that asks "who is overseeing this badge right now" is asking a real
+	question with a today-shaped answer.
 
-	AMBIGUITY PRINTS NOTHING. Two open shifts naming one person is a roster
+	AMBIGUITY ANSWERS NOTHING. Two open shifts naming one person is a roster
 	somebody has to fix, and `dispatch._open_shift_for` already refuses to guess
-	between them for a reason that applies twice over here — a card cannot be
-	corrected once it is laminated.
+	between them.
 	"""
 	crew = {"crew": None, "crew_source": None, "shift": None, "shift_type": None, "foreman": None}
 	employee = str(row.get("name") or "").strip()
 	if not employee:
 		return crew
 
-	supervisor = str(row.get("reports_to") or "").strip()
-	if supervisor:
-		crew["crew"] = _label(EMPLOYEE, supervisor, "employee_name") or supervisor
-		crew["crew_source"] = "reports_to"
-		crew["foreman"] = supervisor
-		return crew
-
-	department = str(row.get("department") or "").strip()
-	if department:
-		crew["crew"] = _label("Department", department, "department_name") or department
-		crew["crew_source"] = "department"
-		return crew
-
-	branch = str(row.get("branch") or "").strip()
-	if branch:
-		crew["crew"] = branch
-		crew["crew_source"] = "branch"
-		return crew
-
-	# The stopgap. Imported here rather than at the top of the file because it is
-	# the only reader of the dispatch module in this one, and because a card must
-	# not stop being printable if that chain fails to import.
+	# Imported here rather than at the top of the file because it is the only
+	# reader of the dispatch module in this one, and because a card must not stop
+	# being printable if that chain fails to import.
 	try:
 		from .dispatch import _open_shift_for
 
@@ -651,11 +733,15 @@ def _card(row: dict, badge_id: str, company: str, rendered: dict) -> dict:
 		"designation": row.get("designation") or None,
 		"company": company,
 		"badge_id": badge_id,
-		# v0.103.0. The two lines under the designation, and the workings behind
-		# them. `crew` and `housing` are what a layout prints; `crew_source`,
-		# `shift`, `camp`, `cabin` and the docnames are what a caller checks —
-		# a handset that wants to link to the Housing Assignment should not have
-		# to parse `"Mill Creek · Cabin 3"` back apart to find it.
+		# v0.104.0. Where this person sits and who they answer to, each fact its
+		# own key. `department`, `branch`, `reports_to_name` and `housing` are
+		# what a layout prints; `reports_to`, `reports_to_chain`, `camp`,
+		# `cabin`, `unit` and the docnames are what a caller checks — a handset
+		# linking to the Housing Assignment should not have to parse
+		# `"Mill Creek · Cabin 3"` back apart to find it.
+		#
+		# `crew` is the shift foreman and is NOT printed; see `_crew`.
+		**_company_details(row),
 		**_crew(row),
 		**_housing(row),
 		# The photograph if the Employee record has one, and the initials that
@@ -788,10 +874,15 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 	call, because a replacement that leaves its predecessor resolving is how a
 	found badge keeps earning.
 
-	v0.103.0: the card carries the JOB TITLE, the CREW and the CAMP AND CABIN as
-	well as the name and the number. See `_crew` and `_housing` — both are
-	best-effort, both name where their answer came from, and a site that records
-	neither prints exactly the card it printed before.
+	v0.104.0: the card carries the Employee form's **Company Details** — job
+	title, department, branch and who they report to — alongside the camp and
+	cabin. See `_company_details` and `_housing`; every lookup is best-effort, and
+	a site that records none of them prints exactly the card it printed before.
+
+	`crew` is still returned and is no longer the same question: it is the foreman
+	of the shift they are standing on RIGHT NOW, which is the oversight link
+	rather than the reporting line, and it is not printed on a card that will
+	outlive the roster.
 
 	v0.94.0: `require_hiring_role`, NOT `require_hr_role`. A badge is an
 	IDENTIFIER, not PII — it carries a name and a designation, both of which are
@@ -881,9 +972,9 @@ def generate_employee_badge_qr(args: dict) -> ToolResult:
 
 def generate_employee_badge_sheet(args: dict) -> ToolResult:
 	"""MUTATING (default OFF). A printable sheet of badge cards — name, photo (or
-	initials), designation, crew, camp and cabin, badge ID and QR — for a crew at
-	once. Issues a badge to anybody who has none and reuses the live one where
-	there is one.
+	initials), designation, department, branch, who they report to, camp and
+	cabin, badge ID and QR — for a crew at once. Issues a badge to anybody who has
+	none and reuses the live one where there is one.
 
 	ONE EMPLOYEE'S FAILURE DOES NOT LOSE THE SHEET. A name that resolves to
 	nobody, somebody who has left, an entity this actor cannot reach — each is

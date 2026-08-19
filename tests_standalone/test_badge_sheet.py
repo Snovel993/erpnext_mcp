@@ -175,39 +175,76 @@ class TheCardMarkup(unittest.TestCase):
 		self.assertNotIn("bc-qr", html)
 		self.assertIn(f"{MAIN_ABBR}-0001", html)
 
-	def test_the_crew_and_the_cabin_are_labelled_on_the_card(self):
-		"""v0.103.0. `Mill Creek · Cabin 7` alone is a place; `Camp: Mill Creek ·
-		Cabin 7` is an instruction to whoever is walking somebody to their bunk."""
-		html = badge_sheet.card_html(_card(crew="Rosa Ramirez", housing="Mill Creek · Cabin 7"))
-		self.assertIn("bc-crew", html)
-		self.assertIn("bc-house", html)
-		self.assertIn("Crew: Rosa Ramirez", html)
+	def test_the_company_details_and_the_cabin_are_on_the_card(self):
+		"""v0.104.0. The department sits under the job title; the reporting line,
+		the branch and the cabin go in the full-width band below."""
+		html = badge_sheet.card_html(
+			_card(
+				department="Harvest",
+				branch="Mill Creek Ranch",
+				reports_to_name="Rosa Ramirez",
+				housing="Mill Creek · Cabin 7",
+			)
+		)
+		for cls in ("bc-dept", "bc-branch", "bc-reports", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertIn(cls, html)
+		self.assertIn(">Harvest<", html)
+		self.assertIn(">Mill Creek Ranch<", html)
+		self.assertIn("Reports to: Rosa Ramirez", html)
 		self.assertIn("Camp: Mill Creek · Cabin 7", html)
 
-	def test_neither_line_is_drawn_when_the_site_records_neither(self):
-		"""THE NEGATIVE CONTROL. A label with nothing after it is a card that
-		looks like it lost the answer — and the fixture card has neither."""
-		html = badge_sheet.card_html(_card())
-		self.assertNotIn("bc-crew", html)
-		self.assertNotIn("bc-house", html)
-		self.assertNotIn("Crew:", html)
+	def test_only_the_two_lines_that_need_a_label_get_one(self):
+		"""`Camp:` and `Reports to:` say what the value IS; a department and a
+		branch read as themselves, and a label on each would spend four
+		millimetres saying what nobody was confused about."""
+		html = badge_sheet.card_html(
+			_card(department="Harvest", branch="Mill Creek Ranch", reports_to_name="Rosa Ramirez")
+		)
+		self.assertNotIn("Dept:", html)
+		self.assertNotIn("Branch:", html)
+		self.assertIn("Reports to:", html)
 
-	def test_the_three_lines_under_the_name_carry_the_clipping_class(self):
+	def test_no_line_is_drawn_when_the_site_records_none_of_it(self):
+		"""THE NEGATIVE CONTROL. A label with nothing after it is a card that
+		looks like it lost the answer — and the fixture card records none."""
+		html = badge_sheet.card_html(_card())
+		for cls in ("bc-dept", "bc-branch", "bc-reports", "bc-house"):
+			with self.subTest(cls=cls):
+				self.assertNotIn(cls, html)
+		self.assertNotIn("Reports to:", html)
+
+	def test_every_added_line_carries_the_clipping_class(self):
 		"""`bc-line` is what stops a long designation wrapping into the badge
-		ID, and it has to be on all three or the one without it is the one that
+		ID, and it has to be on all of them or the one without it is the one that
 		overlaps."""
 		html = badge_sheet.card_html(
-			_card(designation="Equipment Operator (Class II)", crew="Rosa Ramirez", housing="Mill Creek")
+			_card(
+				designation="Equipment Operator (Class II)",
+				department="Harvest",
+				branch="Mill Creek Ranch",
+				reports_to_name="Rosa Ramirez",
+				housing="Mill Creek",
+			)
 		)
-		for cls in ("bc-role", "bc-crew", "bc-house"):
+		for cls in ("bc-role", "bc-dept", "bc-reports", "bc-branch", "bc-house"):
 			with self.subTest(cls=cls):
 				self.assertIn(f"bc-line {cls}", html)
 
-	def test_a_crew_name_with_html_in_it_is_escaped(self):
-		"""A crew is a supervisor's name or a department somebody typed."""
-		html = badge_sheet.card_html(_card(crew='<script>alert("x")</script>', housing="<b>x</b>"))
+	def test_a_supervisor_name_with_html_in_it_is_escaped(self):
+		"""Every one of these is a name or a label somebody typed into a form."""
+		html = badge_sheet.card_html(
+			_card(
+				reports_to_name='<script>alert("x")</script>',
+				department="<b>x</b>",
+				branch="<i>y</i>",
+				housing="<u>z</u>",
+			)
+		)
 		self.assertNotIn("<script>", html)
-		self.assertNotIn("<b>x</b>", html)
+		for markup in ("<b>x</b>", "<i>y</i>", "<u>z</u>"):
+			with self.subTest(markup=markup):
+				self.assertNotIn(markup, html)
 		self.assertIn("&lt;script&gt;", html)
 
 	def test_a_name_with_html_in_it_is_escaped(self):

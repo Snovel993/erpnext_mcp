@@ -73,7 +73,8 @@ COMPANY = "Company"
 BADGE_LOGO_FIELD = "badge_logo"
 
 #: Employee columns a card reads. `image` is Frappe's own photo field, and the
-#: last three are what `tools/badges._crew` falls back through for the crew line.
+#: last five are the Employee form's Company Details section, which
+#: `tools/badges._company_details` turns into the card's own fields.
 _EMPLOYEE_FIELDS = (
 	"employee_name",
 	"designation",
@@ -84,6 +85,8 @@ _EMPLOYEE_FIELDS = (
 	"reports_to",
 	"department",
 	"branch",
+	"grade",
+	"employment_type",
 )
 
 #: What an inlined image may weigh. A base64 `data:` URI is a third larger than
@@ -217,12 +220,12 @@ def _qr_data_uri(badge_id: str) -> dict:
 def _employee_row(employee: str) -> dict:
 	"""The Employee columns a card reads, narrowed to the ones this site HAS.
 
-	v0.103.0, and the narrowing is the point. The three crew columns are standard
-	ERPNext and are not guaranteed: an HR app that declares its own Employee
-	without `reports_to` would make `get_value` raise on the whole list, and this
-	function's caller swallows exceptions — so the card would lose its
+	v0.103.0, and the narrowing is the point. The Company Details columns are
+	standard ERPNext and are not guaranteed: an HR app that declares its own
+	Employee without `reports_to` would make `get_value` raise on the whole list,
+	and this function's caller swallows exceptions — so the card would lose its
 	PHOTOGRAPH and its NAME over a column that was only ever going to print a
-	crew line. The meta is asked first, exactly as `_company_logo` asks it about
+	department. The meta is asked first, exactly as `_company_logo` asks it about
 	`badge_logo`, and the answer costs nothing: Frappe caches doctype meta.
 	"""
 	try:
@@ -238,29 +241,50 @@ def _employee_row(employee: str) -> dict:
 		return {}
 
 
-def _crew_and_housing(row: dict) -> dict:
-	"""The crew line and the camp-and-cabin line, or empty strings. Never raises.
+#: What `_placement` answers with, and what the card carries them under. The keys
+#: are spelled once here so the blank card, the filled card and the guard below
+#: cannot disagree about which of them the template may dereference.
+_PLACEMENT_KEYS = (
+	"department",
+	"branch",
+	"reports_to",
+	"reports_to_name",
+	"reports_to_designation",
+	"grade",
+	"employment_type",
+	"crew",
+	"crew_source",
+	"housing",
+	"camp",
+	"cabin",
+)
 
-	ONE DEFINITION, ASKED FROM HERE. `tools/badges._crew` and `._housing` decide
-	what a crew is and which cabin is current, and this module is the Desk's Print
-	button rather than a second opinion about either — a card off the Print button
-	and a card off `generate_employee_badge_sheet` have to agree, and they only
-	agree if there is one implementation.
+
+def _placement(row: dict) -> dict:
+	"""Where this person sits, who they report to, and which cabin. Never raises.
+
+	ONE DEFINITION, ASKED FROM HERE. `tools/badges._company_details`, `._crew` and
+	`._housing` decide what a department label is, what a crew is and which cabin
+	is current; this module is the Desk's Print button rather than a second
+	opinion about any of them — a card off the Print button and a card off
+	`generate_employee_badge_sheet` have to agree, and they only agree if there is
+	one implementation.
 
 	IMPORTED INSIDE THE FUNCTION, which is the rule the module docstring states
 	and the reason `_qr_data_uri` keeps it: a Jinja global is resolved when the
 	environment is BUILT, so an import error anywhere in the tool chain would
-	cost every Desk page rather than two lines on one badge.
+	cost every Desk page rather than three lines on one badge.
 	"""
-	blank = {"crew": "", "crew_source": "", "housing": "", "camp": "", "cabin": ""}
+	blank = dict.fromkeys(_PLACEMENT_KEYS, "")
 	try:
 		from ..tools import badges
 
-		found = dict(badges._crew(row))
+		found = dict(badges._company_details(row))
+		found.update(badges._crew(row))
 		found.update(badges._housing(row))
 	except Exception:
 		return blank
-	return {key: str(found.get(key) or "") for key in blank}
+	return {key: str(found.get(key) or "") for key in _PLACEMENT_KEYS}
 
 
 def erpnext_mcp_badge_card(badge_id) -> dict:
@@ -288,11 +312,7 @@ def erpnext_mcp_badge_card(badge_id) -> dict:
 		"designation": "",
 		"employee_number": "",
 		"status": "",
-		"crew": "",
-		"crew_source": "",
-		"housing": "",
-		"camp": "",
-		"cabin": "",
+		**dict.fromkeys(_PLACEMENT_KEYS, ""),
 		"photo": "",
 		"initials": "?",
 		"logo": "",
@@ -327,9 +347,10 @@ def erpnext_mcp_badge_card(badge_id) -> dict:
 			card["employee_number"] = str(person.get("employee_number") or "")
 			card["status"] = str(person.get("status") or "")
 			card["photo"] = _data_uri(person.get("image"))
-			# v0.103.0. The crew and the cabin, in a guard of their own: they are
-			# two lines on a card and the photograph and the name are the card.
-			card.update(_crew_and_housing(dict(person, name=card["employee"])))
+			# v0.103.0. Where they sit and which cabin, in a guard of their own:
+			# they are three lines on a card, and the photograph and the name
+			# are the card.
+			card.update(_placement(dict(person, name=card["employee"])))
 		card["initials"] = initials(card["employee_name"])
 
 		if card["company"]:

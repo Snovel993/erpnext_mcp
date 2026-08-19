@@ -10963,15 +10963,23 @@ as a base64 PNG (or `format: "matrix"` for the raw grid) alongside the name,
 designation, photograph URL and the initials that go where a photograph is
 missing.
 
-**It also answers where somebody belongs.** `crew` is whoever they report to —
-falling back to their department, their branch, and last of all to the one open
-Farm Shift they are standing on, with `crew_source` naming which register
-answered. `housing` is their current Housing Assignment as `<camp> · <cabin>`,
-with `camp`, `cabin`, `unit` and `housing_assignment` returned separately so a
-caller need not parse the printed line back apart. The durable answer wins over
-the shift on purpose: a card is printed once and has to still be true in
-September. A site that records neither still gets its badge — both lookups are
-best-effort and neither can refuse a card.
+**It also answers where somebody belongs.** The Employee form's **Company
+Details** section comes back with the card: `department` and `branch` as
+printable labels rather than Link docnames, `reports_to_name` for the supervisor
+(with `reports_to` for the docname, `reports_to_designation` for their title and
+`reports_to_chain` for the ladder above them), plus `grade` and
+`employment_type`. `housing` is their current Housing Assignment as
+`<camp> · <cabin>`, with `camp`, `cabin`, `unit` and `housing_assignment`
+returned separately so a caller need not parse the printed line back apart.
+
+**`crew` is a different question and keeps a different answer.** It is the
+foreman of the one open Farm Shift this person is standing on — the oversight
+link, which is not the same relationship as `reports_to` — and it is deliberately
+*not* printed on the card, because a shift is one morning's roster and a card is
+laminated. Two open shifts answer nothing rather than guess.
+
+A site that records none of it still gets its badge: every lookup is best-effort
+and none can refuse a card.
 
 **Idempotent without `regenerate`** — somebody who already holds a live badge
 gets *that* badge's QR back. Reprinting a card that went through a wash cycle is
@@ -10986,8 +10994,8 @@ that is live for somebody else, and a `badge_id` that is not badge-shaped.
 ### `generate_employee_badge_sheet`
 
 **MUTATING (default OFF).** The same thing for a crew — up to 100 cards per call,
-each carrying name, photograph (or initials), designation, crew, camp and cabin,
-badge ID and QR.
+each carrying name, photograph (or initials), designation, department, branch,
+who they report to, camp and cabin, badge ID and QR.
 Issues to anybody with no badge and reuses the live one where there is one.
 **One employee's failure does not lose the sheet**: a name that resolves to
 nobody is reported in `errors` and every other card is still printed.

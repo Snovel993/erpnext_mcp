@@ -3,6 +3,45 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.104.0 — 2026-08-19 — the whole Company Details section, on the card
+
+Tim, expanding the badge brief: the Employee form's **Company Details** section
+is where a farm already records where somebody sits, and the badge should show it
+— designation, department, branch and who they report to — alongside the cabin.
+**This corrects v0.103.0 rather than extending it.**
+
+**The fallback chain was the wrong model.** v0.103.0 read `reports_to`,
+`department` and `branch` as one chain and printed the first one set as "the
+crew". They are three different facts about one person, and collapsing them meant
+a picker in Harvest at Mill Creek who reports to Ramirez printed one of the three
+and hid the other two, silently. Each is now its own field, printed and returned:
+`department` and `branch` as labels rather than Link docnames, `reports_to_name`
+for the supervisor, `reports_to_designation` for their title, and
+`reports_to_chain` for the ladder above them — which is `shadow_log.raci_chain`
+rather than a second walker, so the two cannot disagree.
+
+**The crew is a different question.** Tim: a worker "connects with foremen for
+enforcement (a foreman may not be their direct report-to but aids in oversight)".
+`_crew` is narrowed to exactly that — the open Farm Shift's foreman — and is no
+longer printed, because a roster changes daily and a card is laminated. It stays
+in the data for the handset that asks who is overseeing a badge right now.
+
+**A full-width detail band**, in the eight millimetres between the badge ID and
+the footer rule that the card was already wasting: the reporting line and the
+branch on one row, the cabin on the next. "Reports to: Rosa Ramirez" does not fit
+the 32mm column at a size anybody reads across a bin trailer. Only the two lines
+that need a label get one.
+
+`grade` and `employment_type` come back in the data and stay off the card. The
+Value Chain / Supply Chain distinction is **not** implemented: no field carries
+it, and deriving it would be a guess printed on an ID card.
+
+**A scoping bug in the print-format negative controls was fixed.** They asserted
+against the whole rendered page, including the `<style>` block whose comments
+quote the labels the markup prints — so "this line was not drawn" would have
+passed until somebody documented the line. They now read the markup after
+`</style>`.
+
 ## 0.103.0 — 2026-08-19 — the card says where somebody belongs
 
 Tim, on the badges the pickers carry: "job title, assigned crew, and camp and
