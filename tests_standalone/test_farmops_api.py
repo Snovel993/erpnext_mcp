@@ -1925,9 +1925,7 @@ class TheOnboardingEvidenceActuallyLands(FarmOpsAPITestCase):
 			credential=False,
 		)
 		self.assertEqual(status, 401)
-		self.assertFalse(
-			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
-		)
+		self.assertFalse(frappe.db.get_value("File", finalized["file_token"], "attached_to_name"))
 
 	def test_a_worker_without_a_hiring_role_cannot_file_onboarding_evidence(self):
 		"""These are the photographs an employer is inspected on, and a picker is
@@ -1952,9 +1950,7 @@ class TheOnboardingEvidenceActuallyLands(FarmOpsAPITestCase):
 		)
 		self.assertEqual(status, 400)
 		self.assertIn("may not bring a person onto the farm", parsed["error"])
-		self.assertFalse(
-			frappe.db.get_value("File", finalized["file_token"], "attached_to_name")
-		)
+		self.assertFalse(frappe.db.get_value("File", finalized["file_token"], "attached_to_name"))
 
 	def test_but_a_foreman_files_them_over_the_wire(self):
 		"""THE WIDENING, ON THE TRANSPORT THE PHONE ACTUALLY USES.
@@ -2238,7 +2234,7 @@ class TheFieldRegistrationFlow(FarmOpsAPITestCase):
 		"""An account that can register a tractor into somebody else's entity is
 		not scoped to anything, and an asset is what every later inspection,
 		spray log and insurance line hangs off."""
-		status, body = self.refusal(
+		status, _body = self.refusal(
 			f"{PREFIX}/mobile/register_asset",
 			{"name": "MC-Tractor-08", "asset_type": "Tractor", "company": OTHER},
 		)
@@ -2249,9 +2245,7 @@ class TheFieldRegistrationFlow(FarmOpsAPITestCase):
 			"Asset Register",
 			[{"name": "SEL-Tractor-01", "asset_type": "Tractor", "company": OTHER}],
 		)
-		status, _ = self.refusal(
-			f"{PREFIX}/mobile/generate_asset_qr", {"asset_name": "SEL-Tractor-01"}
-		)
+		status, _ = self.refusal(f"{PREFIX}/mobile/generate_asset_qr", {"asset_name": "SEL-Tractor-01"})
 		self.assertGreaterEqual(status, 400)
 
 	def test_an_attach_against_another_entitys_record_is_refused(self):

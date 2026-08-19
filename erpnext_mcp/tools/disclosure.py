@@ -133,12 +133,26 @@ def _label(row, base: str, language: str, missing: list, where: str) -> str:
 def _describe_template(doc, language: str = "en") -> dict:
 	missing: list = []
 	rows = [
-		{key: cell(row, key) for key in ("section_name", "label_en", "label_es", "sequence", "required", "data_source", "description", "idx")}
+		{
+			key: cell(row, key)
+			for key in (
+				"section_name",
+				"label_en",
+				"label_es",
+				"sequence",
+				"required",
+				"data_source",
+				"description",
+				"idx",
+			)
+		}
 		for row in (doc.get("sections") or [])
 	]
 	sections = []
 	for index, row in enumerate(
-		sorted(rows, key=lambda row: (frappe.utils.cint(row.get("sequence")), frappe.utils.cint(row.get("idx")))),
+		sorted(
+			rows, key=lambda row: (frappe.utils.cint(row.get("sequence")), frappe.utils.cint(row.get("idx")))
+		),
 		start=1,
 	):
 		where = f"sections[{row.get('idx') or index}]"
@@ -225,7 +239,9 @@ def create_reporting_template(args: dict) -> ToolResult:
 	_require(TEMPLATE)
 	company = resolve_company(as_str(args, "company"), required=True)
 	template_name = as_str(args, "template_name", required=True)
-	report_type = as_choice(TEMPLATE, "report_type", as_str(args, "report_type", required=True), "report_type")
+	report_type = as_choice(
+		TEMPLATE, "report_type", as_str(args, "report_type", required=True), "report_type"
+	)
 	sections = _sections_from(args)
 	if not sections:
 		raise ToolError(
@@ -275,7 +291,9 @@ def get_reporting_template(args: dict) -> ToolResult:
 	_require(TEMPLATE)
 	name = as_str(args, "reporting_template", required=True)
 	if not frappe.db.exists(TEMPLATE, name):
-		raise ToolError(f"Reporting Template {name!r} does not exist. list_reporting_templates has the register.")
+		raise ToolError(
+			f"Reporting Template {name!r} does not exist. list_reporting_templates has the register."
+		)
 	doc = frappe.get_doc(TEMPLATE, name)
 	return ToolResult(data=_describe_template(doc, _language(args)), summary=f"reporting template {name}")
 
@@ -380,7 +398,9 @@ def update_reporting_template(args: dict) -> ToolResult:
 			"a stable row key, and the only candidate is the section name, which is the thing "
 			"somebody renaming a section is changing."
 		)
-	return ToolResult(data=data, summary=f"reporting template {name} updated ({', '.join(sorted(set(changed)))})")
+	return ToolResult(
+		data=data, summary=f"reporting template {name} updated ({', '.join(sorted(set(changed)))})"
+	)
 
 
 # ── the numbers ─────────────────────────────────────────────────────────────
@@ -531,7 +551,9 @@ def generate_segment_report(args: dict) -> ToolResult:
 	from_date = as_date(args, "from_date") or str(frappe.utils.add_days(to_date, -365))
 	if from_date > to_date:
 		raise ToolError(f"from_date {from_date} is after to_date {to_date}.")
-	threshold = as_int(args, "threshold_pct", default=int(SEGMENT_THRESHOLD * 100)) or int(SEGMENT_THRESHOLD * 100)
+	threshold = as_int(args, "threshold_pct", default=int(SEGMENT_THRESHOLD * 100)) or int(
+		SEGMENT_THRESHOLD * 100
+	)
 
 	root_types = _account_types(company)
 	fields = compat.existing_fields(
@@ -571,7 +593,9 @@ def generate_segment_report(args: dict) -> ToolResult:
 	# what stops a business that nets to nothing from having no reportable
 	# segments at all.
 	profits = [bucket["revenue"] - bucket["expense"] for bucket in segments.values()]
-	combined_profit = max(sum(value for value in profits if value > 0), abs(sum(value for value in profits if value < 0)))
+	combined_profit = max(
+		sum(value for value in profits if value > 0), abs(sum(value for value in profits if value < 0))
+	)
 
 	out = []
 	for bucket in segments.values():
@@ -779,11 +803,15 @@ def create_disclosure_checklist(args: dict) -> ToolResult:
 	"""Open the checklist for one filing: which disclosures it must make, and who owes each."""
 	_require(CHECKLIST)
 	company = resolve_company(as_str(args, "company"), required=True)
-	filing_type = as_choice(CHECKLIST, "filing_type", as_str(args, "filing_type", required=True), "filing_type")
+	filing_type = as_choice(
+		CHECKLIST, "filing_type", as_str(args, "filing_type", required=True), "filing_type"
+	)
 	period_start = as_date(args, "period_start", required=True)
 	period_end = as_date(args, "period_end", required=True)
 	if period_end < period_start:
-		raise ToolError(f"period_end {period_end} is before period_start {period_start}. Nothing was created.")
+		raise ToolError(
+			f"period_end {period_end} is before period_start {period_start}. Nothing was created."
+		)
 	items = _items_from(args)
 	if not items:
 		raise ToolError(
@@ -935,7 +963,12 @@ def update_disclosure_checklist(args: dict) -> ToolResult:
 	if status:
 		doc.status = new_status
 		changed.append("status")
-	for field, key in (("period_start", "period_start"), ("period_end", "period_end"), ("due_date", "due_date"), ("filed_on", "filed_on")):
+	for field, key in (
+		("period_start", "period_start"),
+		("period_end", "period_end"),
+		("due_date", "due_date"),
+		("filed_on", "filed_on"),
+	):
 		value = as_date(args, key)
 		if value:
 			doc.set(field, value)
@@ -947,7 +980,9 @@ def update_disclosure_checklist(args: dict) -> ToolResult:
 	if args.get("items") is not None:
 		items = _items_from(args)
 		if not items:
-			raise ToolError("`items` was given as an empty list. A checklist with no items is not a checklist.")
+			raise ToolError(
+				"`items` was given as an empty list. A checklist with no items is not a checklist."
+			)
 		doc.set("items", [])
 		for row in items:
 			doc.append("items", row)
@@ -969,7 +1004,9 @@ def update_disclosure_checklist(args: dict) -> ToolResult:
 		company=doc.company,
 		raise_on_enforced=False,
 	)
-	return ToolResult(data=data, summary=f"disclosure checklist {name} updated ({', '.join(sorted(set(changed)))})")
+	return ToolResult(
+		data=data, summary=f"disclosure checklist {name} updated ({', '.join(sorted(set(changed)))})"
+	)
 
 
 def complete_disclosure_item(args: dict) -> ToolResult:
@@ -1133,7 +1170,9 @@ def generate_quarterly_report_skeleton(args: dict) -> ToolResult:
 		"sections": sections,
 		"section_count": len(sections),
 		"sections_with_data": len([row for row in sections if row["data_available"]]),
-		"sections_needing_a_writer": [row["section_name"] for row in sections if row["to_be_written_by_a_person"]],
+		"sections_needing_a_writer": [
+			row["section_name"] for row in sections if row["to_be_written_by_a_person"]
+		],
 		"disclosure_checklist": checklist,
 		"data_feed": {"sources_read": feed.get("sources_read"), "unavailable": feed.get("unavailable")},
 		"gaps": gaps,
@@ -1201,7 +1240,12 @@ SHIPPED_TEMPLATES = (
 		),
 		"sections": (
 			("Business", "Negocio", "", "What the operation does, where, and under what regulation."),
-			("Risk Factors", "Factores de riesgo", "", "Weather, water, labour supply, commodity price, concentration."),
+			(
+				"Risk Factors",
+				"Factores de riesgo",
+				"",
+				"Weather, water, labour supply, commodity price, concentration.",
+			),
 			("Properties", "Propiedades", "list_parcels", "Land, plantings, buildings and equipment."),
 			("Legal Proceedings", "Procedimientos legales", "", "Written by counsel."),
 			(
@@ -1210,8 +1254,18 @@ SHIPPED_TEMPLATES = (
 				"compute_all_kpis",
 				"Results, liquidity and the year's operating story, written from the MD&A feed.",
 			),
-			("Financial Statements", "Estados financieros", "get_cash_flow_summary", "The statements themselves."),
-			("Segment Information", "Información por segmento", "generate_segment_report", "Where the business is run in parts."),
+			(
+				"Financial Statements",
+				"Estados financieros",
+				"get_cash_flow_summary",
+				"The statements themselves.",
+			),
+			(
+				"Segment Information",
+				"Información por segmento",
+				"generate_segment_report",
+				"Where the business is run in parts.",
+			),
 			(
 				"Related Party Transactions",
 				"Transacciones con partes relacionadas",
@@ -1242,8 +1296,18 @@ SHIPPED_TEMPLATES = (
 				"compute_all_kpis",
 				"The quarter against the same quarter last year, and against budget.",
 			),
-			("Budget Variance", "Variación presupuestaria", "get_budget_variance_report", "Where the quarter went differently from the plan."),
-			("Segment Information", "Información por segmento", "generate_segment_report", "The quarter cut by cost centre."),
+			(
+				"Budget Variance",
+				"Variación presupuestaria",
+				"get_budget_variance_report",
+				"Where the quarter went differently from the plan.",
+			),
+			(
+				"Segment Information",
+				"Información por segmento",
+				"generate_segment_report",
+				"The quarter cut by cost centre.",
+			),
 			(
 				"Controls and Procedures",
 				"Controles y procedimientos",
@@ -1274,12 +1338,42 @@ SHIPPED_TEMPLATES = (
 		),
 		"sections": (
 			("Overview", "Resumen", "", "The season in a paragraph."),
-			("Results of Operations", "Resultados de operación", "compute_all_kpis", "Revenue, cost and yield against the prior period."),
-			("Liquidity and Capital Resources", "Liquidez y recursos de capital", "get_cash_flow_summary", "Cash in, cash out, and what is committed."),
-			("Budget to Actual", "Presupuesto contra real", "get_budget_variance_report", "Where the plan and the year parted company."),
-			("Critical Accounting Estimates", "Estimaciones contables críticas", "", "Biological assets, depreciation lives, inventory valuation."),
-			("Known Trends and Uncertainties", "Tendencias e incertidumbres conocidas", "", "Water, labour, and the price of the crop."),
-			("Compliance and Controls", "Cumplimiento y controles", "get_audit_readiness", "What the compliance calendar says as at the period end."),
+			(
+				"Results of Operations",
+				"Resultados de operación",
+				"compute_all_kpis",
+				"Revenue, cost and yield against the prior period.",
+			),
+			(
+				"Liquidity and Capital Resources",
+				"Liquidez y recursos de capital",
+				"get_cash_flow_summary",
+				"Cash in, cash out, and what is committed.",
+			),
+			(
+				"Budget to Actual",
+				"Presupuesto contra real",
+				"get_budget_variance_report",
+				"Where the plan and the year parted company.",
+			),
+			(
+				"Critical Accounting Estimates",
+				"Estimaciones contables críticas",
+				"",
+				"Biological assets, depreciation lives, inventory valuation.",
+			),
+			(
+				"Known Trends and Uncertainties",
+				"Tendencias e incertidumbres conocidas",
+				"",
+				"Water, labour, and the price of the crop.",
+			),
+			(
+				"Compliance and Controls",
+				"Cumplimiento y controles",
+				"get_audit_readiness",
+				"What the compliance calendar says as at the period end.",
+			),
 		),
 	},
 )
@@ -1301,7 +1395,9 @@ def install_reporting_templates(company: str = "") -> dict:
 	if not compat.doctype_exists(TEMPLATE):
 		return report
 	try:
-		companies = [company] if company else [row["name"] for row in frappe.db.get_all("Company", fields=["name"])]
+		companies = (
+			[company] if company else [row["name"] for row in frappe.db.get_all("Company", fields=["name"])]
+		)
 	except Exception as exc:  # pragma: no cover - a site mid-import
 		report["failed"].append({"name": "Company", "reason": f"{type(exc).__name__}: {exc}"})
 		return report

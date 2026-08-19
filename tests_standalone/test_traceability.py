@@ -31,10 +31,10 @@ look identical to anybody skimming, and one of them means the recall cannot be
 executed at all.
 """
 
+from erpnext_mcp import compliance_fields
+
 from .fixtures import MAIN, V12TestCase, seed_masters, seed_stock
 from .harness import STORE
-
-from erpnext_mcp import compliance_fields
 
 ALL_ON = {
 	f"allow_{name}": 1
@@ -226,7 +226,9 @@ class OneLotBackToTheGround(TraceTestCase):
 		self.a_ticket()
 		data = self.tool_data("trace_backward", {"scale_ticket": "ST-2026-0001"})
 		self.assertEqual(data["bucket_count"], 1)
-		self.assertTrue(any("may include fruit that went out on another truck" in note for note in data["notes"]))
+		self.assertTrue(
+			any("may include fruit that went out on another truck" in note for note in data["notes"])
+		)
 
 	def test_a_settlement_reaches_the_ground_through_its_tickets(self):
 		STORE.seed(
@@ -287,9 +289,7 @@ class WhichLotsCarryThis(TraceTestCase):
 		self.assertEqual(data["bins"], ["BIN-17"])
 		shipments = next(hop for hop in data["chain"] if hop["hop"] == "shipments")
 		self.assertEqual(shipments["count"], 1)
-		self.assertEqual(
-			[row["customer"] for row in data["customers_to_notify"]], ["Northwest Packing Co"]
-		)
+		self.assertEqual([row["customer"] for row in data["customers_to_notify"]], ["Northwest Packing Co"])
 
 	def test_the_customer_list_says_which_register_reached_them(self):
 		"""Four registers can name a customer and they can disagree. A recall
@@ -382,9 +382,7 @@ class TheBreaksAreNamed(TraceTestCase):
 		self.assertEqual(data["unlinked_counts"]["bin_id"], 2)
 		self.assertEqual(data["unlinked_counts"]["shipment_id"], 1)
 		self.assertEqual(data["unlinked_counts"]["block_id"], 0)
-		self.assertTrue(
-			any(entry["missing"] == "bin_id" for entry in data["breaks"]), data["breaks"]
-		)
+		self.assertTrue(any(entry["missing"] == "bin_id" for entry in data["breaks"]), data["breaks"])
 
 	def test_a_missing_shipment_id_is_flagged_as_the_hop_that_reaches_a_customer(self):
 		self.a_capture(1, shipment_id="")
@@ -399,9 +397,7 @@ class TheBreaksAreNamed(TraceTestCase):
 		self.a_capture(1, shipment_id="TSHIP-NOT-A-THING")
 		data = self.tool_data("trace_forward", {"block": BLOCK})
 		self.assertEqual(data["unresolved_shipment_ids"], ["TSHIP-NOT-A-THING"])
-		self.assertTrue(
-			any(entry["missing"] == "Trade Shipment records" for entry in data["breaks"])
-		)
+		self.assertTrue(any(entry["missing"] == "Trade Shipment records" for entry in data["breaks"]))
 
 	def test_a_block_id_matching_no_field_is_reported_on_the_way_back(self):
 		"""The spray and water history covers only the blocks that resolved, so
@@ -421,9 +417,7 @@ class TheBreaksAreNamed(TraceTestCase):
 	def test_a_treated_block_with_no_spray_on_file_is_reported(self):
 		self.a_capture(1)
 		data = self.tool_data("trace_backward", {"shipment": "TSHIP-2026-0001"})
-		self.assertTrue(
-			any(entry["missing"] == "spray applications" for entry in data["breaks"])
-		)
+		self.assertTrue(any(entry["missing"] == "spray applications" for entry in data["breaks"]))
 
 	def test_a_capture_with_no_traceability_columns_at_all_is_refused_as_a_start(self):
 		entry = self.a_capture(1, block_id="", bin_id="", shipment_id="")
@@ -460,11 +454,12 @@ class TheseWriteNothing(TraceTestCase):
 		"writes nothing" and "writes nothing operational"."""
 		self.a_capture(1)
 		self.a_shipment()
-		counted = lambda: {
-			doctype: len(STORE.rows(doctype))
-			for doctype in STORE.tables
-			if doctype != "MCP Action Log"
-		}
+
+		def counted():
+			return {
+				doctype: len(STORE.rows(doctype)) for doctype in STORE.tables if doctype != "MCP Action Log"
+			}
+
 		before = counted()
 		self.tool_data("trace_forward", {"block": BLOCK})
 		self.tool_data("trace_backward", {"shipment": "TSHIP-2026-0001"})

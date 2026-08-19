@@ -59,6 +59,7 @@ by its own method, and computes one regular rate across the lot the way 29 CFR
 buckets and two of irrigation is $167, and the minimum wage floor is tested on all
 eight hours.
 """
+
 from __future__ import annotations
 
 from . import payroll_deductions
@@ -157,6 +158,7 @@ def state_min_wage_rates(state_configs: dict, shipped: dict | None = None) -> di
 				rates.setdefault(state, {})[region] = value
 	return rates
 
+
 #: What an overtime hour is worth in total: one and a half times the regular rate.
 OT_MULTIPLIER = 1.5
 
@@ -200,7 +202,10 @@ def calculate_gross_pay(
 		# divide by zero on a day that was all break.
 		effective_rate = (piece_earnings / piece_hours) if piece_hours > 0 else 0.0
 		ot = calculate_overtime(
-			0, overtime_hours, effective_rate, multiplier=OT_PREMIUM_MULTIPLIER,
+			0,
+			overtime_hours,
+			effective_rate,
+			multiplier=OT_PREMIUM_MULTIPLIER,
 		)
 		gross = piece_earnings + bp + ot
 		return {
@@ -357,7 +362,10 @@ def calculate_mixed_gross_pay(
 	regular_rate = (straight_time / total_hours) if total_hours > 0 else 0.0
 	overtime_hours = max(float(overtime_hours or 0.0), 0.0)
 	ot = calculate_overtime(
-		0, overtime_hours, regular_rate, multiplier=OT_PREMIUM_MULTIPLIER,
+		0,
+		overtime_hours,
+		regular_rate,
+		multiplier=OT_PREMIUM_MULTIPLIER,
 	)
 
 	kinds = {row["pay_type"] for row in rows}
@@ -366,7 +374,8 @@ def calculate_mixed_gross_pay(
 		"piece_earnings": round(piece_earnings, 2),
 		"hourly_earnings": round(hourly_earnings, 2),
 		"piece_rate": next(
-			(row["rate"] for row in rows if row["pay_type"] == "Piece Rate"), 0.0,
+			(row["rate"] for row in rows if row["pay_type"] == "Piece Rate"),
+			0.0,
 		),
 		"straight_time_pay": round(straight_time, 2),
 		"break_pay": round(break_pay, 2),
@@ -402,7 +411,8 @@ def minimum_wage_floor(
 	overtime_hours = min(max(float(overtime_hours or 0.0), 0.0), hours)
 	regular_hours = hours - overtime_hours
 	return round(
-		regular_hours * minimum_wage + overtime_hours * minimum_wage * OT_MULTIPLIER, 2,
+		regular_hours * minimum_wage + overtime_hours * minimum_wage * OT_MULTIPLIER,
+		2,
 	)
 
 
@@ -604,7 +614,8 @@ def calculate_full_payroll(
 		ws = shift.get("work_state", "")
 		if ws:
 			entry = state_hours.setdefault(
-				ws, {"hours": 0.0, "overtime_hours": 0.0, "gross": 0.0},
+				ws,
+				{"hours": 0.0, "overtime_hours": 0.0, "gross": 0.0},
 			)
 			entry["hours"] += h
 			entry["overtime_hours"] += ot
@@ -635,7 +646,12 @@ def calculate_full_payroll(
 		gross_result = calculate_mixed_gross_pay(segments, overtime_hours)
 	else:
 		gross_result = calculate_gross_pay(
-			pay_type, base_rate, total_hours, overtime_hours, piece_units, break_hours,
+			pay_type,
+			base_rate,
+			total_hours,
+			overtime_hours,
+			piece_units,
+			break_hours,
 		)
 	earned_gross = gross_result["gross_pay"]
 
@@ -703,9 +719,7 @@ def calculate_full_payroll(
 			# paid. On a Salary structure it is the honest verdict on a figure this
 			# function deliberately did not raise — see above.
 			"meets_minimum_wage": paid >= floor - 0.005,
-			"effective_hourly_rate": (
-				round(paid / info["hours"], 2) if info["hours"] > 0 else 0.0
-			),
+			"effective_hourly_rate": (round(paid / info["hours"], 2) if info["hours"] > 0 else 0.0),
 		}
 
 	total_makeup = round(total_makeup, 2)
@@ -761,8 +775,14 @@ def calculate_full_payroll(
 	ytd_ss_withheld = float(tax_config.get("ytd_ss_withheld", 0))
 
 	federal = calculate_federal_withholding(
-		federal_taxable_gross, pay_frequency, w4_data, ytd_gross, ytd_ss_withheld,
-		fica_config, federal_tax_table, fica_gross=fica_taxable_gross,
+		federal_taxable_gross,
+		pay_frequency,
+		w4_data,
+		ytd_gross,
+		ytd_ss_withheld,
+		fica_config,
+		federal_tax_table,
+		fica_gross=fica_taxable_gross,
 	)
 
 	# ── State taxes — per-state allocation for cross-state workers ────
@@ -805,7 +825,9 @@ def calculate_full_payroll(
 		if primary_state and primary_state in state_configs:
 			state_result = calculate_state_withholding(
 				_state_taxable(primary_state, gross_pay),
-				pay_frequency, primary_state, filing_status,
+				pay_frequency,
+				primary_state,
+				filing_status,
 				state_configs[primary_state],
 				state_tax_tables.get(primary_state),
 				ytd_gross,
@@ -831,7 +853,9 @@ def calculate_full_payroll(
 			if ws in state_configs:
 				state_result = calculate_state_withholding(
 					_state_taxable(ws, state_gross),
-					pay_frequency, ws, filing_status,
+					pay_frequency,
+					ws,
+					filing_status,
 					state_configs[ws],
 					state_tax_tables.get(ws),
 					ytd_gross,
@@ -853,7 +877,8 @@ def calculate_full_payroll(
 	medicare = federal["medicare_employee"] + federal["additional_medicare"]
 
 	statutory_deductions = round(
-		federal_withholding + social_security + medicare + total_state_employee, 2,
+		federal_withholding + social_security + medicare + total_state_employee,
+		2,
 	)
 
 	# ── Garnishments and post-tax deductions ──────────────────────────
@@ -873,9 +898,14 @@ def calculate_full_payroll(
 
 	# Post-tax voluntary deductions take what the orders left, and no more. A
 	# garnishment outranks a union due, so the union due is what goes short.
-	cash_left = round(max(gross_pay - pre_tax["total"] - statutory_deductions - garnishments["total"], 0.0), 2)
+	cash_left = round(
+		max(gross_pay - pre_tax["total"] - statutory_deductions - garnishments["total"], 0.0), 2
+	)
 	post_tax = payroll_deductions.apply_post_tax_deductions(
-		cash_left, deduction_rows, gross_pay, disposable,
+		cash_left,
+		deduction_rows,
+		gross_pay,
+		disposable,
 	)
 
 	deduction_lines = pre_tax["lines"] + garnishments["lines"] + post_tax["lines"]
@@ -905,7 +935,8 @@ def calculate_full_payroll(
 	futa = federal["futa_employer"]
 	state_employer_other = round(total_state_employer - total_state_suta, 2)
 	total_employer_taxes = round(
-		social_security_employer + medicare_employer + futa + total_state_employer, 2,
+		social_security_employer + medicare_employer + futa + total_state_employer,
+		2,
 	)
 
 	return {
@@ -957,9 +988,7 @@ def calculate_full_payroll(
 		# What an order asked for and the pay could not give. NOT carried
 		# forward into the next period — see `payroll_deductions` — so this list
 		# is the only place it is said, and somebody has to read it.
-		"deduction_shortfalls": (
-			pre_tax["shortfalls"] + garnishments["shortfalls"] + post_tax["shortfalls"]
-		),
+		"deduction_shortfalls": (pre_tax["shortfalls"] + garnishments["shortfalls"] + post_tax["shortfalls"]),
 		"total_deductions": total_deductions,
 		"net_pay": net_pay,
 		"social_security_employer": social_security_employer,

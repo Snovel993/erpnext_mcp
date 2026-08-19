@@ -177,7 +177,7 @@ class TradeDocumentTemplate(Document):
 		if where == "Auto-populate Map" and not isinstance(parsed, dict):
 			frappe.throw(
 				_(
-					"Auto-populate Map must be a JSON object of {{\"this document's field\": "
-					"\"the source record's field\"}}, got {0}."
+					'Auto-populate Map must be a JSON object of {{"this document\'s field": '
+					'"the source record\'s field"}}, got {0}.'
 				).format(type(parsed).__name__)
 			)

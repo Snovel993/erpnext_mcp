@@ -17,9 +17,6 @@ TEN CLAIMS.
 9. `PreviewPayroll` — the dry-run preview returns results without creating records.
 10. `EdgeCases` — zero hours, no shifts, salary pay type, deactivation.
 """
-from datetime import date
-
-import frappe
 
 from erpnext_mcp.payroll_calc import (
 	MINIMUM_WAGE_RATES,
@@ -31,10 +28,9 @@ from erpnext_mcp.payroll_calc import (
 	check_minimum_wage,
 	minimum_wage_floor,
 )
-from erpnext_mcp.tools import payroll
 from erpnext_mcp.withholding import ANNUAL_BRACKETS, PERIODS_PER_YEAR
 
-from .fixtures import MAIN, MAIN_ABBR, V12TestCase, install_hrms
+from .fixtures import MAIN, V12TestCase, install_hrms
 from .harness import STORE
 
 PAYROLL_TOOLS_ON = {
@@ -116,16 +112,18 @@ class PayrollTestCase(V12TestCase):
 					floor = bracket["bracket_floor"] / periods
 					ceiling = bracket["bracket_ceiling"] / periods if bracket["bracket_ceiling"] else None
 					base = bracket["base_tax"] / periods
-					brackets.append({
-						"name": f"TTB-{filing_status[:3]}-{period_name[:3]}-{floor:.0f}",
-						"tax_year": 2025,
-						"filing_status": filing_status,
-						"payroll_period": period_name,
-						"bracket_floor": round(floor, 2),
-						"bracket_ceiling": round(ceiling, 2) if ceiling else None,
-						"base_tax": round(base, 2),
-						"marginal_rate": bracket["marginal_rate"],
-					})
+					brackets.append(
+						{
+							"name": f"TTB-{filing_status[:3]}-{period_name[:3]}-{floor:.0f}",
+							"tax_year": 2025,
+							"filing_status": filing_status,
+							"payroll_period": period_name,
+							"bracket_floor": round(floor, 2),
+							"bracket_ceiling": round(ceiling, 2) if ceiling else None,
+							"base_tax": round(base, 2),
+							"marginal_rate": bracket["marginal_rate"],
+						}
+					)
 		STORE.seed("Federal Tax Table", brackets)
 
 	def _seed_employee(self):
@@ -149,8 +147,13 @@ class PayrollTestCase(V12TestCase):
 			],
 		)
 
-	def _submit_w4(self, employee="HR-EMP-00001", filing_status="Single or Married Filing Separately",
-	               tax_year=2025, **kwargs):
+	def _submit_w4(
+		self,
+		employee="HR-EMP-00001",
+		filing_status="Single or Married Filing Separately",
+		tax_year=2025,
+		**kwargs,
+	):
 		args = {
 			"employee": employee,
 			"company": MAIN,
@@ -398,7 +401,8 @@ class MinimumWageCheck(PayrollTestCase):
 	def test_without_overtime_the_floor_is_the_flat_product(self):
 		"""Forty hours is forty hours. The premium only exists past the threshold."""
 		self.assertEqual(
-			minimum_wage_floor(40.0, 0.0, MINIMUM_WAGE_RATES["OR"]["standard"]), 588.00,
+			minimum_wage_floor(40.0, 0.0, MINIMUM_WAGE_RATES["OR"]["standard"]),
+			588.00,
 		)
 
 	def test_overtime_hours_cannot_exceed_the_hours_they_came_out_of(self):
@@ -470,7 +474,8 @@ class MixedPayTypes(PayrollTestCase):
 		"""
 		hourly_single = calculate_gross_pay("Hourly", 20.0, 45, 5, 0)
 		hourly_mixed = calculate_mixed_gross_pay(
-			[{"pay_type": "Hourly", "rate": 20.0, "hours": 45.0}], overtime_hours=5.0,
+			[{"pay_type": "Hourly", "rate": 20.0, "hours": 45.0}],
+			overtime_hours=5.0,
 		)
 		self.assertEqual(hourly_mixed["gross_pay"], hourly_single["gross_pay"])
 
@@ -481,7 +486,8 @@ class MixedPayTypes(PayrollTestCase):
 		)
 		self.assertEqual(piece_mixed["gross_pay"], piece_single["gross_pay"])
 		self.assertEqual(
-			piece_mixed["effective_hourly_rate"], piece_single["effective_hourly_rate"],
+			piece_mixed["effective_hourly_rate"],
+			piece_single["effective_hourly_rate"],
 		)
 
 	def test_a_paid_rest_break_inside_a_piece_segment_is_still_paid(self):
@@ -647,13 +653,16 @@ class SalaryStructureTools(PayrollTestCase):
 
 	def test_create_and_get(self):
 		"""Create a salary structure and retrieve it."""
-		data = self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-06-01",
-		})
+		data = self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-06-01",
+			},
+		)
 		self.assertEqual(data["pay_type"], "Hourly")
 		self.assertEqual(data["base_rate"], 20.0)
 
@@ -662,25 +671,31 @@ class SalaryStructureTools(PayrollTestCase):
 
 	def test_list_structures(self):
 		"""List returns created structures."""
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-06-01",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-06-01",
+			},
+		)
 		data = self.tool_data("list_salary_structures", {"company": MAIN})
 		self.assertGreaterEqual(data["count"], 1)
 
 	def test_deactivate(self):
 		"""Deactivation sets is_active to 0."""
-		created = self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-06-01",
-		})
+		created = self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-06-01",
+			},
+		)
 		data = self.tool_data("deactivate_salary_structure", {"name": created["name"]})
 		self.assertEqual(data["is_active"], 0)
 
@@ -689,22 +704,28 @@ class SalaryStructureTools(PayrollTestCase):
 
 	def test_invalid_pay_type(self):
 		"""Rejects invalid pay type."""
-		error = self.tool_error("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Commission",
-			"base_rate": 20.0,
-		})
+		error = self.tool_error(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Commission",
+				"base_rate": 20.0,
+			},
+		)
 		self.assertIn("Piece Rate", error)
 
 	def test_zero_base_rate(self):
 		"""Rejects zero base rate."""
-		error = self.tool_error("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 0,
-		})
+		error = self.tool_error(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 0,
+			},
+		)
 		self.assertIn("positive", error)
 
 
@@ -717,65 +738,82 @@ class PayrollEntryTools(PayrollTestCase):
 	def _setup_for_payroll(self):
 		"""Seed structures and W-4s for payroll calculation."""
 		self._submit_w4("HR-EMP-00001")
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-01-01",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
 
 	def test_calculate_payroll(self):
 		"""Calculate creates a payroll entry with slips."""
 		self._setup_for_payroll()
-		data = self.tool_data("calculate_payroll", {
-			"company": MAIN,
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Biweekly",
-		})
+		data = self.tool_data(
+			"calculate_payroll",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		self.assertEqual(data["status"], "Calculated")
 		self.assertGreaterEqual(data["employee_count"], 1)
 
 	def test_submit_payroll(self):
 		"""Submit moves from Calculated to Submitted."""
 		self._setup_for_payroll()
-		calc = self.tool_data("calculate_payroll", {
-			"company": MAIN,
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Biweekly",
-		})
+		calc = self.tool_data(
+			"calculate_payroll",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		data = self.tool_data("submit_payroll", {"name": calc["name"]})
 		self.assertEqual(data["status"], "Submitted")
 
 	def test_submit_draft_fails(self):
 		"""Cannot submit a Draft entry (only Calculated)."""
 		# Create a raw Draft entry directly
-		STORE.seed("Farm Payroll Entry", [{
-			"name": "PAY-2025-0099",
-			"company": MAIN,
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Biweekly",
-			"status": "Draft",
-			"total_gross": 0,
-			"total_deductions": 0,
-			"total_net": 0,
-			"employee_count": 0,
-		}])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				{
+					"name": "PAY-2025-0099",
+					"company": MAIN,
+					"pay_period_start": "2025-06-01",
+					"pay_period_end": "2025-06-14",
+					"pay_frequency": "Biweekly",
+					"status": "Draft",
+					"total_gross": 0,
+					"total_deductions": 0,
+					"total_net": 0,
+					"employee_count": 0,
+				}
+			],
+		)
 		error = self.tool_error("submit_payroll", {"name": "PAY-2025-0099"})
 		self.assertIn("Draft", error)
 
 	def test_get_payroll_entry(self):
 		"""Get returns entry with slips."""
 		self._setup_for_payroll()
-		calc = self.tool_data("calculate_payroll", {
-			"company": MAIN,
-			"pay_period_start": "2025-07-01",
-			"pay_period_end": "2025-07-14",
-			"pay_frequency": "Biweekly",
-		})
+		calc = self.tool_data(
+			"calculate_payroll",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-07-01",
+				"pay_period_end": "2025-07-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		data = self.tool_data("get_payroll_entry", {"name": calc["name"]})
 		self.assertEqual(data["name"], calc["name"])
 		self.assertIsInstance(data["slips"], list)
@@ -783,12 +821,15 @@ class PayrollEntryTools(PayrollTestCase):
 	def test_list_payroll_entries(self):
 		"""List returns created entries."""
 		self._setup_for_payroll()
-		self.tool_data("calculate_payroll", {
-			"company": MAIN,
-			"pay_period_start": "2025-08-01",
-			"pay_period_end": "2025-08-14",
-			"pay_frequency": "Biweekly",
-		})
+		self.tool_data(
+			"calculate_payroll",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-08-01",
+				"pay_period_end": "2025-08-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		data = self.tool_data("list_payroll_entries", {"company": MAIN})
 		self.assertGreaterEqual(data["count"], 1)
 
@@ -802,31 +843,40 @@ class PreviewPayroll(PayrollTestCase):
 	def test_preview_returns_calc(self):
 		"""Preview returns gross, deductions, and net."""
 		self._submit_w4("HR-EMP-00001")
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 25.0,
-			"effective_from": "2025-01-01",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 25.0,
+				"effective_from": "2025-01-01",
+			},
+		)
 
-		data = self.tool_data("preview_payroll", {
-			"employee": "HR-EMP-00001",
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Biweekly",
-		})
+		data = self.tool_data(
+			"preview_payroll",
+			{
+				"employee": "HR-EMP-00001",
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		self.assertIn("gross_pay", data)
 		self.assertIn("net_pay", data)
 		self.assertIn("federal_withholding", data)
 
 	def test_preview_no_structure_fails(self):
 		"""Preview fails if no salary structure exists."""
-		error = self.tool_error("preview_payroll", {
-			"employee": "HR-EMP-00002",
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-		})
+		error = self.tool_error(
+			"preview_payroll",
+			{
+				"employee": "HR-EMP-00002",
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+			},
+		)
 		self.assertIn("no active salary structure", error)
 
 
@@ -876,33 +926,45 @@ class EdgeCases(PayrollTestCase):
 
 	def test_deactivate_by_employee(self):
 		"""Deactivate by employee name instead of docname."""
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-01-01",
-		})
-		data = self.tool_data("deactivate_salary_structure", {
-			"employee": "HR-EMP-00001",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
+		data = self.tool_data(
+			"deactivate_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["is_active"], 0)
 
 	def test_no_w4_uses_defaults(self):
 		"""Preview payroll still works when employee has no W-4 — uses defaults."""
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00002",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-01-01",
-		})
-		data = self.tool_data("preview_payroll", {
-			"employee": "HR-EMP-00002",
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Biweekly",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00002",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
+		data = self.tool_data(
+			"preview_payroll",
+			{
+				"employee": "HR-EMP-00002",
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+				"pay_frequency": "Biweekly",
+			},
+		)
 		self.assertIn("gross_pay", data)
 
 	def test_nonexistent_payroll_entry(self):
@@ -913,17 +975,23 @@ class EdgeCases(PayrollTestCase):
 	def test_missing_pay_frequency(self):
 		"""Invalid pay frequency is rejected."""
 		self._submit_w4("HR-EMP-00001")
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2025-01-01",
-		})
-		error = self.tool_error("calculate_payroll", {
-			"company": MAIN,
-			"pay_period_start": "2025-06-01",
-			"pay_period_end": "2025-06-14",
-			"pay_frequency": "Quarterly",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
+		error = self.tool_error(
+			"calculate_payroll",
+			{
+				"company": MAIN,
+				"pay_period_start": "2025-06-01",
+				"pay_period_end": "2025-06-14",
+				"pay_frequency": "Quarterly",
+			},
+		)
 		self.assertIn("pay_frequency", error)

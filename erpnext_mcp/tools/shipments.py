@@ -251,10 +251,13 @@ def _language(args: dict) -> str:
 	explicit = as_str(args, "language")
 	if explicit:
 		return explicit.strip().lower()[:12]
-	return wizards.preferred_language(
-		user=as_str(args, "user") or str(getattr(frappe.session, "user", "") or ""),
-		employee=as_str(args, "employee"),
-	) or "en"
+	return (
+		wizards.preferred_language(
+			user=as_str(args, "user") or str(getattr(frappe.session, "user", "") or ""),
+			employee=as_str(args, "employee"),
+		)
+		or "en"
+	)
 
 
 # ── small shared readers ────────────────────────────────────────────────────
@@ -481,7 +484,7 @@ def create_shipment(args: dict) -> ToolResult:
 	doc.company = company
 	doc.destination_tier = tier
 	doc.destination_country = country
-	doc.status = (normalise_shipment_status(as_str(args, "status")) if as_str(args, "status") else "Draft")
+	doc.status = normalise_shipment_status(as_str(args, "status")) if as_str(args, "status") else "Draft"
 	doc.customer = customer or None
 	doc.sales_order = as_str(args, "sales_order") or None
 	doc.sales_invoice = as_str(args, "sales_invoice") or None
@@ -520,7 +523,9 @@ def create_shipment(args: dict) -> ToolResult:
 
 	enforcement = as_str(args, "enforcement")
 	if enforcement:
-		match = {mode.casefold(): mode for mode in (SITE_DEFAULT, ADVISORY, ENFORCED)}.get(enforcement.casefold())
+		match = {mode.casefold(): mode for mode in (SITE_DEFAULT, ADVISORY, ENFORCED)}.get(
+			enforcement.casefold()
+		)
 		if not match:
 			raise ToolError(
 				f"enforcement must be one of {SITE_DEFAULT}, {ADVISORY} or {ENFORCED}, got "
@@ -644,7 +649,9 @@ def get_shipment(args: dict) -> ToolResult:
 		checklist.append(
 			{
 				"template": entry.get("template"),
-				"label": _resolve_label(template, "label", language, missing, str(entry.get("template") or ""))
+				"label": _resolve_label(
+					template, "label", language, missing, str(entry.get("template") or "")
+				)
 				or entry.get("template"),
 				"document_type": entry.get("document_type"),
 				"required": bool(compat.checked(entry.get("required"))),
@@ -827,9 +834,10 @@ def _document_is_satisfied(document: dict, today: str) -> tuple:
 	expires = document.get("expires_on")
 	if expires and today and str(expires) < today:
 		return False, f"it expired on {expires}"
-	if compat.checked(document.get("requires_external_filing")) and not str(
-		document.get("external_reference") or ""
-	).strip():
+	if (
+		compat.checked(document.get("requires_external_filing"))
+		and not str(document.get("external_reference") or "").strip()
+	):
 		system = str(document.get("external_system") or "the external system")
 		return False, (
 			f"it is approved but has no reference from {system}. This app does not file "
@@ -1297,7 +1305,9 @@ def create_trade_document(args: dict) -> ToolResult:
 		)
 
 	schema = _schema(template, language, missing)
-	unfilled = [field["fieldname"] for field in schema if field["required"] and field["fieldname"] not in populated]
+	unfilled = [
+		field["fieldname"] for field in schema if field["required"] and field["fieldname"] not in populated
+	]
 	data = {
 		"trade_document": doc.name,
 		"shipment": shipment_name,
@@ -1587,9 +1597,7 @@ def approve_trade_document(args: dict) -> ToolResult:
 			f"{row['name']} is already approved; nothing was changed",
 		)
 	if status not in (DOC_DRAFT, PENDING_REVIEW):
-		raise ToolError(
-			f"{row['name']} is {status} and cannot be approved from there. Nothing was changed."
-		)
+		raise ToolError(f"{row['name']} is {status} and cannot be approved from there. Nothing was changed.")
 
 	template = _template_row(row["template"]) if row.get("template") else {}
 	data_fields = parse_data(row.get("document_data"))
@@ -1621,7 +1629,14 @@ def approve_trade_document(args: dict) -> ToolResult:
 		# keeps the approval — and says which.
 		fingerprint = signing_evidence.document_fingerprint(
 			frappe.get_doc(DOCUMENT, row["name"]),
-			exclude=(*_NEVER_SEALED, "approved_by", "approved_on", "approval_notes", "reviewed_by", "reviewed_on"),
+			exclude=(
+				*_NEVER_SEALED,
+				"approved_by",
+				"approved_on",
+				"approval_notes",
+				"reviewed_by",
+				"reviewed_on",
+			),
 		)
 		evidence = signing_evidence.record(
 			document_type=DOCUMENT,
@@ -1667,9 +1682,7 @@ def approve_trade_document(args: dict) -> ToolResult:
 			f"file this and no reference from it has been recorded. get_shipment_readiness "
 			f"counts it as not satisfied until update_trade_document supplies one."
 		)
-	return ToolResult(
-		data, f"approved {doc.document_type} {doc.name} as {actor}", f"{status} → {APPROVED}"
-	)
+	return ToolResult(data, f"approved {doc.document_type} {doc.name} as {actor}", f"{status} → {APPROVED}")
 
 
 # ── the seal ────────────────────────────────────────────────────────────────
@@ -2294,7 +2307,8 @@ def get_destination_requirements(args: dict) -> ToolResult:
 			f"that nothing is needed. set_destination_requirements is where that is fixed."
 		)
 	return ToolResult(
-		data, f"{len(requirements)} document(s) for {destination_label(tier, country)} ({len(required)} required)"
+		data,
+		f"{len(requirements)} document(s) for {destination_label(tier, country)} ({len(required)} required)",
 	)
 
 
@@ -2454,8 +2468,7 @@ def set_destination_requirements(args: dict) -> ToolResult:
 			f"answer why it was needed."
 		)
 	summary = (
-		f"{destination_label(tier, country)}: {len(created)} requirement(s) added, "
-		f"{len(updated)} updated"
+		f"{destination_label(tier, country)}: {len(created)} requirement(s) added, {len(updated)} updated"
 	)
 	if removed:
 		summary += f", {len(removed)} disabled"
@@ -2548,9 +2561,7 @@ def install_trade_documents(overwrite: bool = False) -> dict:
 			label = f"{tier}{' — ' + country if country else ''} / {template}"
 			try:
 				if not frappe.db.exists(TEMPLATE, template):
-					report["failed"].append(
-						{"requirement": label, "reason": "its template was not seeded"}
-					)
+					report["failed"].append({"requirement": label, "reason": "its template was not seeded"})
 					continue
 				# ENABLED IS NOT IN THE FILTER. A rule an operator disabled is a
 				# decision, and a seeder that re-created it would overrule them

@@ -121,6 +121,38 @@ ignore = [
   "RUF003", # ambiguous unicode character in a comment
 ]
 
+# UP031 wants `%`-formatting rewritten to a format specifier. In these seven
+# modules the `%`-string is not a string being formatted at the point it is
+# written — it is a CSS/JS TEMPLATE CONSTANT held at module level and filled in
+# much later with a `% {...}` mapping. Two things follow. The substitution is
+# deferred, so an f-string cannot express it at all; and the template body is
+# dense with the literal `{` and `}` of CSS rules and JS blocks, so `.format()`
+# would require doubling every brace in a stylesheet — dozens per file — which
+# turns readable CSS into something nobody will edit correctly twice.
+# `pdf_signing` is the same judgement for a different reason: its `%.5f` runs
+# are PDF content-stream operators, and the PDF spec itself is written that way.
+# The rule is right about ordinary strings and stays on everywhere else.
+[tool.ruff.lint.per-file-ignores]
+"erpnext_mcp/asset_tag_form_action.py" = ["UP031"]
+"erpnext_mcp/asset_tag_list_action.py" = ["UP031"]
+"erpnext_mcp/asset_tag_sheet.py" = ["UP031"]
+"erpnext_mcp/badge_form_action.py" = ["UP031"]
+"erpnext_mcp/badge_list_action.py" = ["UP031"]
+"erpnext_mcp/badge_sheet.py" = ["UP031"]
+"erpnext_mcp/pdf_signing.py" = ["UP031"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "tab"
+# The formatter reaches into ```python blocks inside Markdown, and every
+# Markdown file here that holds one is a RECORD OF CODE THAT USED TO EXIST:
+# RELEASES/v0.35.0.md quotes a dict with a duplicated key and an arrow comment
+# pointing at the entry the duplicate silently ate, and
+# docs/reviews/cross_system_review_2026_08_07.md column-aligns trailing
+# `# hr.py:286` references so they read down the page as a list of sites.
+# Formatting either one rewrites a quotation to match a style the quoted code
+# never had — it moved the arrow off the line it points at and collapsed the
+# alignment — which is worse than useless in a document whose whole job is to
+# say what was there. Prose is excluded from the FORMATTER only; `ruff check`
+# still reads these files.
+exclude = ["*.md"]

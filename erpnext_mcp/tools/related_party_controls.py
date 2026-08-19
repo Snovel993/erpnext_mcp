@@ -464,7 +464,9 @@ def get_related_party_transactions(args: dict) -> ToolResult:
 	undocumented_only = as_bool(args, "undocumented_only", default=False)
 	limit = as_limit(args)
 
-	register = _register(company, disclosable_only=not as_bool(args, "include_arms_length_vendors", default=False))
+	register = _register(
+		company, disclosable_only=not as_bool(args, "include_arms_length_vendors", default=False)
+	)
 	if only_party:
 		register = [row for row in register if row["name"] == only_party]
 		if not register:
@@ -625,7 +627,9 @@ def _voucher_rows(company: str, voucher_type: str, voucher_no: str, register: li
 	by_name = _by_name(register)
 	folded: dict = {}
 	for row in rows:
-		matched, how = _resolve_party(str(row.get("party") or ""), row.get("party_type"), by_supplier, by_name)
+		matched, how = _resolve_party(
+			str(row.get("party") or ""), row.get("party_type"), by_supplier, by_name
+		)
 		if not matched:
 			continue
 		entry = folded.setdefault(
@@ -717,7 +721,9 @@ def list_related_party_disclosures(args: dict) -> ToolResult:
 				"by anything but a name match"
 			)
 		if figures["undocumented"]:
-			gaps.append(f"{figures['undocumented']:,.2f} of transactions with no transfer pricing documentation")
+			gaps.append(
+				f"{figures['undocumented']:,.2f} of transactions with no transfer pricing documentation"
+			)
 		if party_memos and not any(memo.get("status") == COMPLETE for memo in party_memos):
 			gaps.append("every transfer pricing memo for this party is a draft")
 
@@ -761,8 +767,7 @@ def list_related_party_disclosures(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=(
-			f"{len(disclosures)} disclosable relationship(s) for {company}, "
-			f"{data['with_gaps']} with gaps"
+			f"{len(disclosures)} disclosable relationship(s) for {company}, {data['with_gaps']} with gaps"
 		),
 	)
 
@@ -811,7 +816,9 @@ def generate_related_party_disclosure(args: dict) -> ToolResult:
 
 	schedule = []
 	for bucket in by_party.values():
-		party_memos = [_describe_memo(memo) for memo in memos if memo["name"] in bucket["transfer_pricing_docs"]]
+		party_memos = [
+			_describe_memo(memo) for memo in memos if memo["name"] in bucket["transfer_pricing_docs"]
+		]
 		schedule.append(
 			{
 				**bucket,
@@ -819,7 +826,9 @@ def generate_related_party_disclosure(args: dict) -> ToolResult:
 				"documented_total": round(bucket["documented_total"], 2),
 				"undocumented_total": round(bucket["undocumented_total"], 2),
 				"documentation": party_memos,
-				"pricing_methods": sorted({memo["pricing_method"] for memo in party_memos if memo["pricing_method"]}),
+				"pricing_methods": sorted(
+					{memo["pricing_method"] for memo in party_memos if memo["pricing_method"]}
+				),
 			}
 		)
 	schedule.sort(key=lambda row: -row["total"])
@@ -877,9 +886,7 @@ def create_transfer_pricing_doc(args: dict) -> ToolResult:
 	_require()
 	company = resolve_company(as_str(args, "company"), required=True)
 	related_party = as_str(args, "related_party", required=True)
-	party = frappe.db.get_value(
-		RELATED_PARTY, related_party, ["name", "company", "party_name"], as_dict=True
-	)
+	party = frappe.db.get_value(RELATED_PARTY, related_party, ["name", "company", "party_name"], as_dict=True)
 	if not party:
 		raise ToolError(
 			f"{related_party!r} is not a Related Party. Register the relationship first with "
@@ -1022,7 +1029,9 @@ def list_transfer_pricing_docs(args: dict) -> ToolResult:
 		"complete": len([memo for memo in memos if memo["status"] == COMPLETE]),
 		"draft": len([memo for memo in memos if memo["status"] == DRAFT]),
 		"not_independently_reviewed": [
-			memo["name"] for memo in memos if memo["status"] == COMPLETE and not memo["independently_reviewed"]
+			memo["name"]
+			for memo in memos
+			if memo["status"] == COMPLETE and not memo["independently_reviewed"]
 		],
 	}
 	return ToolResult(data=data, summary=f"{len(memos)} transfer pricing memo(s) for {company}")

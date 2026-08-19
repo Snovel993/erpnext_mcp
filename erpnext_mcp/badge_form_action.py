@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-""""ID Card" on the Employee form, as a record and not as a hook. v0.56.1.
+""" "ID Card" on the Employee form, as a record and not as a hook. v0.56.1.
 
 `badge_list_action.py` puts "Print Badge Sheet" on the Employee LIST, for thirty
 people at once. This is the other half and the one the complaint was actually

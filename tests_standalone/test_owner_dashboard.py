@@ -135,9 +135,7 @@ class OneCallInsteadOfSeven(DashboardTestCase):
 		data = self.board()
 		self.assertIn("sop_coverage", data["sections_reporting"])
 		self.assertTrue(data["sop_coverage"]["categories_with_no_policy"])
-		self.assertTrue(
-			[row for row in data["attention"] if "SOP category" in row["headline"]]
-		)
+		self.assertTrue([row for row in data["attention"] if "SOP category" in row["headline"]])
 
 
 # ── the ranking ─────────────────────────────────────────────────────────────
@@ -183,9 +181,7 @@ class AnUnavailableSourceIsNotACleanOne(DashboardTestCase):
 		data = self.board()
 		self.assertIn("compliance", data["sections_unavailable"])
 		self.assertNotIn("compliance", data["sections_reporting"])
-		self.assertTrue(
-			[entry for entry in data["unavailable"] if entry["section"] == "compliance"]
-		)
+		self.assertTrue([entry for entry in data["unavailable"] if entry["section"] == "compliance"])
 
 	def test_one_source_failing_does_not_empty_the_rest(self):
 		INSTALLED_DOCTYPES.discard("Compliance Alert")
@@ -198,9 +194,7 @@ class AnUnavailableSourceIsNotACleanOne(DashboardTestCase):
 	def test_the_failure_carries_the_reason_the_source_gave(self):
 		INSTALLED_DOCTYPES.discard("Compliance Alert")
 		self.addCleanup(INSTALLED_DOCTYPES.add, "Compliance Alert")
-		entry = next(
-			row for row in self.board()["unavailable"] if row["section"] == "compliance"
-		)
+		entry = next(row for row in self.board()["unavailable"] if row["section"] == "compliance")
 		self.assertIn(entry["kind"], ("refused", "error"))
 		self.assertTrue(entry["reason"])
 
@@ -226,11 +220,12 @@ class ItWritesNothing(DashboardTestCase):
 		recording that somebody read it, which is itself evidence."""
 		self.a_camp_backlog()
 		self.an_alert()
-		counted = lambda: {
-			doctype: len(STORE.rows(doctype))
-			for doctype in STORE.tables
-			if doctype != "MCP Action Log"
-		}
+
+		def counted():
+			return {
+				doctype: len(STORE.rows(doctype)) for doctype in STORE.tables if doctype != "MCP Action Log"
+			}
+
 		before = counted()
 		self.board()
 		self.assertEqual(before, counted())

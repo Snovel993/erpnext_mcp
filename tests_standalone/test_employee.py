@@ -834,9 +834,7 @@ class TheGuards(EmployeeTestCase):
 		created = self.create()["employee"]
 		set_roles("Administrator", ["Foreman"])
 		result = employee_tool.reactivate_employee({"employee": created})
-		self.assertEqual(
-			frappe.db.get_value("Employee", created, "status"), "Active"
-		)
+		self.assertEqual(frappe.db.get_value("Employee", created, "status"), "Active")
 		self.assertTrue(result.data["changed"] or result.data["unchanged"])
 
 	def test_the_rehire_door_carries_no_other_field(self):
@@ -850,9 +848,7 @@ class TheGuards(EmployeeTestCase):
 		with self.assertRaises(ToolError) as caught:
 			employee_tool.reactivate_employee({"employee": created, "department": "Harvest"})
 		self.assertIn("department", str(caught.exception))
-		self.assertEqual(
-			frappe.db.get_value("Employee", created, "department"), None
-		)
+		self.assertEqual(frappe.db.get_value("Employee", created, "department"), None)
 
 	def test_the_refusal_names_the_account_so_the_fix_is_one_line(self):
 		"""Permission denied on a principal the operator chose themselves is a

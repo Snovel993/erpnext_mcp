@@ -92,8 +92,7 @@ class EmployeeBadgeTestCase(SeededTestCase):
 		return [
 			row
 			for row in STORE.rows("File")
-			if row.get("attached_to_doctype") == "Employee"
-			and row.get("attached_to_name") == employee
+			if row.get("attached_to_doctype") == "Employee" and row.get("attached_to_name") == employee
 		]
 
 	def issue(self, **overrides) -> dict:
@@ -222,9 +221,7 @@ class TheIDCard(EmployeeBadgeTestCase):
 			data = self.card()
 		self.assertTrue(data["card_attachment"]["attached"])
 		names = sorted(row["file_name"] for row in self.attachments())
-		self.assertEqual(
-			names, [f"badge-{data['badge_id']}-card.pdf", f"badge-{data['badge_id']}-qr.png"]
-		)
+		self.assertEqual(names, [f"badge-{data['badge_id']}-card.pdf", f"badge-{data['badge_id']}-qr.png"])
 
 	def test_a_renderer_that_raises_is_reported_not_propagated(self):
 		with unittest.mock.patch.object(
@@ -322,9 +319,7 @@ class TheClientScripts(EmployeeBadgeTestCase):
 		reappears at every migrate is one nobody can decline."""
 		badge_form_action.seed_badge_form_action()
 		badge_form_action.remove_badge_form_action()
-		self.assertEqual(
-			[row for row in STORE.rows("Client Script") if row.get("view") == "Form"], []
-		)
+		self.assertEqual([row for row in STORE.rows("Client Script") if row.get("view") == "Form"], [])
 		# Seeding again DOES recreate it — that is `after_migrate`'s job and the
 		# uninstall path is what removes it for good. What must not happen is a
 		# second row beside the first.
@@ -421,9 +416,7 @@ class TheRevisionUpgrade(EmployeeBadgeTestCase):
 	def test_the_text_v0_56_0_shipped_is_recognised_as_this_apps_own(self):
 		"""THE ONE CHECK THAT CANNOT PASS WHILE THE UPGRADE IS BROKEN ON A REAL
 		BENCH: the fingerprint is of a text this module keeps no copy of."""
-		self.assertIn(
-			badge_form_action._fingerprint(FORM_SCRIPT_R1), badge_form_action.PRIOR_REVISIONS
-		)
+		self.assertIn(badge_form_action._fingerprint(FORM_SCRIPT_R1), badge_form_action.PRIOR_REVISIONS)
 
 	def test_a_site_still_on_the_previous_revision_is_brought_up_to_date(self):
 		name = self._seed_at(FORM_SCRIPT_R1)

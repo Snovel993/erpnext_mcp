@@ -36,8 +36,8 @@ from erpnext_mcp.erpnext_mcp.doctype.farm_task.farm_task import (
 )
 from erpnext_mcp.tools.dispatch import FIELD_REPORT_LIMIT
 
-from .fixtures import MAIN, V12TestCase
-from .harness import INSTALLED_DOCTYPES, META, STORE
+from .fixtures import V12TestCase
+from .harness import STORE
 
 ALL_ON = {
 	f"allow_{name}": 1

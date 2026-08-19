@@ -48,8 +48,8 @@ from __future__ import annotations
 import frappe
 
 from .. import compat, locations, task_templates, timezones
-from ..args import select_options
 from .. import roles as role_lib
+from ..args import select_options
 from . import rectify
 
 ALERT = "Compliance Alert"
@@ -249,9 +249,7 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 	# repeating three keys on each of forty tasks is forty copies of it — the
 	# caller puts `clock.block()` at the top level once. `tasks()` below threads
 	# one renderer through the whole list so the site's zone is read once too.
-	(clock or timezones.Renderer()).add(
-		out, "claimed_at", "started_at", "completed_at", "paused_at"
-	)
+	(clock or timezones.Renderer()).add(out, "claimed_at", "started_at", "completed_at", "paused_at")
 
 	source = alert_row(row.get("source_alert"))
 	explanation = str(source.get("alert_message") or "").strip()
@@ -282,9 +280,7 @@ def tasks(rows: list, assignments: dict | None = None, clock=None) -> list:
 	by_task = assignments or {}
 	clock = clock or timezones.Renderer()
 	return [
-		task(row, by_task.get(str(row.get("name"))), clock)
-		for row in rows or []
-		if isinstance(row, dict)
+		task(row, by_task.get(str(row.get("name"))), clock) for row in rows or [] if isinstance(row, dict)
 	]
 
 

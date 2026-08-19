@@ -98,49 +98,59 @@ import json
 
 import frappe
 
-from .. import bucket_bridge, compat, datetimes, locations, timezones
-from .. import pay_stub_pdf
+from .. import bucket_bridge, compat, datetimes, locations, pay_stub_pdf, timezones
 from .. import shifts as shift_records
 from .. import training as training_register
 from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
 from ..errors import ToolError
-from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import accidents as accident_tools
+from ..tools import ach as ach_tools
+from ..tools import (
+	asset_tags,
+	badges,
+	bucket_log,
+	dispatch,
+	docvalidation,
+	fieldwork,
+	i9,
+	shifts,
+	signatures,
+	signed_documents,
+	signers,
+	w4,
+)
 from ..tools import binseals as bin_seal_tools
-from ..tools import tasktemplates as template_tools
-from ..tools import signed_documents
-from ..tools import evidence as evidence_tools
-from ..tools import files as file_tools
 from ..tools import calendar as compliance_calendar
 from ..tools import dimensions as dimension_tools
-from ..tools import docvalidation
+from ..tools import discipline as discipline_tools
 from ..tools import employee as personnel
+from ..tools import evidence as evidence_tools
 from ..tools import expenses as expense_tools
 from ..tools import farm as farm_tools
+from ..tools import files as file_tools
 from ..tools import housing as housing_tools
 from ..tools import masters as master_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
-from ..tools import realestate as realestate_tools
-from ..tools import receipts as receipt_tools
-from ..tools import training as training_tools
-from ..tools import training_sessions as training_session_tools
-from ..tools import accidents as accident_tools
-from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
 from ..tools import payroll as payroll_tools
 from ..tools import payroll_deductions as payroll_deduction_tools
 from ..tools import push as push_tools
+from ..tools import realestate as realestate_tools
+from ..tools import receipts as receipt_tools
 from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
+from ..tools import shipments as shipment_tools
+from ..tools import spray as spray_tools
 from ..tools import stock_inventory as stock_tools
+from ..tools import tasktemplates as template_tools
 from ..tools import tax_remittance as remittance_tools
+from ..tools import training as training_tools
+from ..tools import training_sessions as training_session_tools
 from ..tools import universal_scan as universal_scan_tool
 from ..tools import valves as valve_tools
-from ..tools import shipments as shipment_tools
-from ..tools import wizards as wizard_tools
 from ..tools import wallet as wallet_tools
-from ..tools import spray as spray_tools
-from ..tools import ach as ach_tools
+from ..tools import wizards as wizard_tools
 from . import fallback_auth, guard, rectify, shape
 
 ALERT = "Compliance Alert"
@@ -464,11 +474,13 @@ def _bucket_entries(raw, company: str) -> list:
 	through — the app has a boolean and the register has words.
 	"""
 	if raw in (None, ""):
-		raise ToolError('entries is required — a sync with nothing in it is not a sync.')
+		raise ToolError("entries is required — a sync with nothing in it is not a sync.")
 	if isinstance(raw, dict):
 		raw = [raw]
 	if not isinstance(raw, list):
-		raise ToolError('entries must be a list of objects like {"entry_uuid": "...", "verdict": "Accepted"}.')
+		raise ToolError(
+			'entries must be a list of objects like {"entry_uuid": "...", "verdict": "Accepted"}.'
+		)
 	if not raw:
 		raise ToolError("entries is required — a sync with nothing in it is not a sync.")
 	if len(raw) > BUCKET_BATCH_CAP:
@@ -1366,12 +1378,14 @@ def scan_asset(user: str, asset_name=None, gps_lat=None, gps_lon=None) -> dict:
 	if not asset_name:
 		frappe.throw("asset_name is required.", frappe.ValidationError)
 
-	result = asset_tags.scan_asset({
-		"asset_name": asset_name,
-		"scanned_by": user,
-		"gps_lat": gps_lat,
-		"gps_lon": gps_lon,
-	})
+	result = asset_tags.scan_asset(
+		{
+			"asset_name": asset_name,
+			"scanned_by": user,
+			"gps_lat": gps_lat,
+			"gps_lon": gps_lon,
+		}
+	)
 	return result.data
 
 
@@ -1410,15 +1424,17 @@ def log_asset_state_change(
 	if not action_str:
 		frappe.throw("action is required.", frappe.ValidationError)
 
-	result = asset_tags.log_asset_state_change({
-		"asset_name": asset_name,
-		"action": action_str,
-		"performed_by": user,
-		"notes": str(notes or "").strip() or None,
-		"photo_file_token": str(photo_file_token or "").strip() or None,
-		"gps_lat": gps_lat,
-		"gps_lon": gps_lon,
-	})
+	result = asset_tags.log_asset_state_change(
+		{
+			"asset_name": asset_name,
+			"action": action_str,
+			"performed_by": user,
+			"notes": str(notes or "").strip() or None,
+			"photo_file_token": str(photo_file_token or "").strip() or None,
+			"gps_lat": gps_lat,
+			"gps_lon": gps_lon,
+		}
+	)
 	return result.data
 
 
@@ -1809,11 +1825,13 @@ def create_i9_form(user: str, employee=None, company=None, hire_date=None) -> di
 	"""
 	allowed = guard.require_scope(user)
 	person = _employee_argument(employee, allowed)
-	result = i9.create_i9_form({
-		"employee": person,
-		"company": _company(user, company, allowed),
-		"hire_date": hire_date,
-	})
+	result = i9.create_i9_form(
+		{
+			"employee": person,
+			"company": _company(user, company, allowed),
+			"hire_date": hire_date,
+		}
+	)
 	return result.data
 
 
@@ -2111,8 +2129,12 @@ def reverify_i9(
 	allowed = guard.require_scope(user)
 	person = _employee_argument(employee, allowed)
 
-	inner = {"employee": person, "reason": reason, "document_title": document_title,
-	         "verifier_name": verifier_name}
+	inner = {
+		"employee": person,
+		"reason": reason,
+		"document_title": document_title,
+		"verifier_name": verifier_name,
+	}
 	for key, value in (
 		("document_number", document_number),
 		("issuing_authority", issuing_authority),
@@ -2267,7 +2289,9 @@ def resolve_badge(user: str, badge_id=None, company=None, shift=None) -> dict:
 # ── 27c. generate_employee_badge_qr ─────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("generate_employee_badge_qr", mutating=True, limit=guard.WRITE_LIMIT)
-def generate_employee_badge_qr(user: str, employee=None, docname=None, company=None, regenerate=None, notes=None) -> dict:
+def generate_employee_badge_qr(
+	user: str, employee=None, docname=None, company=None, regenerate=None, notes=None
+) -> dict:
 	"""Issue (or reprint) this hire's badge and hand back the QR to show them.
 
 	THE TOOL HAS EXISTED SINCE v0.50.0 AND THE PHONE COULD NOT REACH IT. That is
@@ -2329,8 +2353,9 @@ def generate_employee_badge_qr(user: str, employee=None, docname=None, company=N
 # ── 27d. get_employee_badge_pass ────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("get_employee_badge_pass", mutating=True, limit=guard.WRITE_LIMIT)
-def get_employee_badge_pass(user: str, employee=None, docname=None, company=None, platform=None,
-                            regenerate=None) -> dict:
+def get_employee_badge_pass(
+	user: str, employee=None, docname=None, company=None, platform=None, regenerate=None
+) -> dict:
 	"""The badge as a file the foreman AirDrops into the worker's own wallet.
 
 	THE DELIVERY THIS SURFACE WAS MISSING. `generate_employee_badge_qr` hands
@@ -2573,9 +2598,7 @@ def start_shift(
 # ── 30. add_worker_to_shift ─────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("add_worker_to_shift", mutating=True, limit=guard.WRITE_LIMIT)
-def add_worker_to_shift(
-	user: str, shift=None, employee=None, role=None, joined_at=None, notes=None
-) -> dict:
+def add_worker_to_shift(user: str, shift=None, employee=None, role=None, joined_at=None, notes=None) -> dict:
 	"""Roster a late arrival onto a shift that is already running.
 
 	`joined_at` DEFAULTS TO NOW IN THE TOOL and is forwarded when sent, because a
@@ -2700,8 +2723,9 @@ def get_i9_form(user: str, employee=None, docname=None) -> dict:
 # ── 33. generate_i9_pdf ─────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("generate_i9_pdf", mutating=True, limit=guard.WRITE_LIMIT)
-def generate_i9_pdf(user: str, employee=None, docname=None, overwrite=None,
-                    additional_information=None) -> dict:
+def generate_i9_pdf(
+	user: str, employee=None, docname=None, overwrite=None, additional_information=None
+) -> dict:
 	"""Fill the federal form from the record and hand the phone a URL for it.
 
 	THE END OF THE ONBOARDING FLOW, and the step that was missing from it. The
@@ -2858,8 +2882,9 @@ def list_authorized_signers(user: str, include_inactive=None, form_type=None) ->
 # ── 36. add_authorized_signer ───────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("add_authorized_signer", mutating=True, limit=guard.WRITE_LIMIT)
-def add_authorized_signer(user: str, signer_user=None, full_name=None, title=None,
-                          can_sign_i9=None, can_sign_w4=None) -> dict:
+def add_authorized_signer(
+	user: str, signer_user=None, full_name=None, title=None, can_sign_i9=None, can_sign_w4=None
+) -> dict:
 	"""Put one account on the roster from the app.
 
 	`signer_user` RATHER THAN `user`, and the rename is not cosmetic.
@@ -2900,8 +2925,9 @@ def add_authorized_signer(user: str, signer_user=None, full_name=None, title=Non
 # ── 37. update_authorized_signer ────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("update_authorized_signer", mutating=True, limit=guard.WRITE_LIMIT)
-def update_authorized_signer(user: str, signer_user=None, full_name=None, title=None,
-                             can_sign_i9=None, can_sign_w4=None, active=None) -> dict:
+def update_authorized_signer(
+	user: str, signer_user=None, full_name=None, title=None, can_sign_i9=None, can_sign_w4=None, active=None
+) -> dict:
 	"""Change one signer's printed name, title, or what they may sign.
 
 	`signer_user` for the same reason as above. `active` IS accepted here, and
@@ -3013,7 +3039,9 @@ def generate_w4_pdf(user: str, employee=None, docname=None, tax_year=None, overw
 # ── 40. attach_onboarding_document ──────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("attach_onboarding_document", mutating=True, limit=guard.UPLOAD_LIMIT)
-def attach_onboarding_document(user: str, employee=None, docname=None, file_token=None, document_kind=None) -> dict:
+def attach_onboarding_document(
+	user: str, employee=None, docname=None, file_token=None, document_kind=None
+) -> dict:
 	"""File an uploaded photograph or signature against the Employee record.
 
 	v0.48.3. THE CALL WHOSE ABSENCE LOST EVERY PIECE OF ONBOARDING EVIDENCE.
@@ -3249,9 +3277,7 @@ def _onboarding_reference_data(user: str, company) -> dict:
 	# parcels under a company they cannot see reports only the ones they can — the
 	# same rule every other read on this surface follows, applied to the join
 	# rather than only to the rows.
-	mapping = housing_tools.branch_parcel_map(
-		[row["name"] for row in out["branches"]], wanted or entities
-	)
+	mapping = housing_tools.branch_parcel_map([row["name"] for row in out["branches"]], wanted or entities)
 	for row in out["branches"]:
 		parcels = mapping.get(row["name"], [])
 		row["parcels"] = parcels
@@ -3264,9 +3290,7 @@ def _onboarding_reference_data(user: str, company) -> dict:
 
 	out["counts"] = {key: len(out[key]) for key, _doctype, _label in REFERENCE_MASTERS}
 	out["masters_absent"] = absent
-	out["branches_without_parcels"] = [
-		row["name"] for row in out["branches"] if not row["parcels"]
-	]
+	out["branches_without_parcels"] = [row["name"] for row in out["branches"] if not row["parcels"]]
 	return out
 
 
@@ -3811,7 +3835,8 @@ def _house_one_person(
 	# to an entity this caller cannot reach is not found, the same refusal as a
 	# docname that does not exist.
 	unit_row = (
-		frappe.db.get_value(HOUSING_UNIT, unit, ["owning_entity", "capacity", "unit_name"], as_dict=True) or {}
+		frappe.db.get_value(HOUSING_UNIT, unit, ["owning_entity", "capacity", "unit_name"], as_dict=True)
+		or {}
 	)
 	owner = str(unit_row.get("owning_entity") or "")
 	if owner and owner not in set(allowed):
@@ -3964,8 +3989,7 @@ def collect_signature(
 		)
 	if not str(docname or "").strip():
 		frappe.throw(
-			"docname is required — the form being signed. The task carries it in "
-			"subject_docname.",
+			"docname is required — the form being signed. The task carries it in subject_docname.",
 			frappe.ValidationError,
 		)
 	if not (str(signature_base64 or "").strip() or str(file_token or "").strip()):
@@ -5201,9 +5225,7 @@ def set_employee_contact_fields(
 		**{spoken: current.get(column) for spoken, column in CONTACT_FIELDS.items()},
 		"changed": data.get("changed") or [],
 		"unchanged": data.get("unchanged") or [],
-		"skipped": sorted(
-			spoken for spoken, column in CONTACT_FIELDS.items() if column in absent
-		),
+		"skipped": sorted(spoken for spoken, column in CONTACT_FIELDS.items() if column in absent),
 	}
 
 
@@ -5517,8 +5539,7 @@ def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> d
 	docname = str(file or name or "").strip()
 	if not docname:
 		frappe.throw(
-			"file is required — it is the File docname, which list_attachments gives. "
-			"Nothing was read.",
+			"file is required — it is the File docname, which list_attachments gives. Nothing was read.",
 			frappe.ValidationError,
 		)
 	docname = guard.require_docname("File", docname, "file")
@@ -5587,8 +5608,9 @@ def get_attachment_content(user: str, file=None, name=None, max_bytes=None) -> d
 # ── 52. get_document_preview ────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("get_document_preview", mutating=True, limit=guard.UPLOAD_LIMIT)
-def get_document_preview(user: str, document_type=None, document_name=None, docname=None,
-                         employee=None, refresh=None) -> dict:
+def get_document_preview(
+	user: str, document_type=None, document_name=None, docname=None, employee=None, refresh=None
+) -> dict:
 	"""The unsigned page, as bytes, for the step that has to come before the pad.
 
 	v0.63.0, AND `API_CONTRACT.md` §17.5 IS THE WHOLE ARGUMENT FOR IT. Step 1 of
@@ -5717,8 +5739,9 @@ def get_document_preview(user: str, document_type=None, document_name=None, docn
 # ── 53. seal_signed_document ────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("seal_signed_document", mutating=True, limit=guard.UPLOAD_LIMIT)
-def seal_signed_document(user: str, document_type=None, document_name=None, docname=None,
-                         employee=None, include_pdf=None) -> dict:
+def seal_signed_document(
+	user: str, document_type=None, document_name=None, docname=None, employee=None, include_pdf=None
+) -> dict:
 	"""Produce the tamper-evident copy of a form that has already been signed.
 
 	v0.63.0. STEP 5 OF THE CHAIN, published here so a handset can take it — and
@@ -5831,8 +5854,18 @@ def _sealed_bytes(url) -> dict:
 # ── 54. universal_scan ──────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("universal_scan", mutating=True, limit=guard.READ_LIMIT)
-def universal_scan(user: str, content=None, scan=None, raw=None, code=None, company=None,
-                   shift=None, gps_lat=None, gps_lon=None, history_limit=None) -> dict:
+def universal_scan(
+	user: str,
+	content=None,
+	scan=None,
+	raw=None,
+	code=None,
+	company=None,
+	shift=None,
+	gps_lat=None,
+	gps_lon=None,
+	history_limit=None,
+) -> dict:
 	"""One camera, four registers, one call. v0.65.0.
 
 	THE SCANNER SCREEN HAD TO KNOW THE ANSWER BEFORE IT COULD ASK THE QUESTION.
@@ -5871,9 +5904,7 @@ def universal_scan(user: str, content=None, scan=None, raw=None, code=None, comp
 	allowed = guard.require_scope(user)
 	scanned = str(content or scan or raw or code or "").strip()
 	if not scanned:
-		frappe.throw(
-			"content is required — the string the scanner read.", frappe.ValidationError
-		)
+		frappe.throw("content is required — the string the scanner read.", frappe.ValidationError)
 
 	inner = {
 		"content": scanned,
@@ -7474,9 +7505,7 @@ def _create_one_location(user: str, register: str, arguments: dict) -> dict:
 			frappe.ValidationError,
 		)
 
-	entity = guard.require_company(user, arguments.get("company"), allowed) or (
-		allowed[0] if allowed else ""
-	)
+	entity = guard.require_company(user, arguments.get("company"), allowed) or (allowed[0] if allowed else "")
 	inner = {spec["name_argument"]: given}
 	if entity:
 		inner["company"] = entity
@@ -7506,9 +7535,7 @@ def _create_one_location(user: str, register: str, arguments: dict) -> dict:
 				"list_farm_locations has the register. Nothing was created.",
 				frappe.ValidationError,
 			)
-		inner[parent_argument] = _scoped_location(
-			spec["parent_doctype"], parent, parent_argument, allowed
-		)
+		inner[parent_argument] = _scoped_location(spec["parent_doctype"], parent, parent_argument, allowed)
 
 	acres = arguments.get("acres")
 	if acres in (None, ""):
@@ -8516,7 +8543,6 @@ def list_task_notes(user: str, doctype=None, name=None, task=None, limit=None) -
 	return narrative_tools.list_task_notes(inner).data
 
 
-
 def _require_self_or_hr(user: str, record: str) -> None:
 	"""The subject of this incident record may act on it; anybody else needs HR.
 
@@ -8738,9 +8764,7 @@ def create_dispute(
 	# `description` IS THE APP'S SPELLING and `incident_description` is the
 	# tool's; the tool reads either, and both are declared here because `bind`
 	# delivers only what a signature names.
-	account, _ = _one_spelling(
-		description, incident_description, "description", "incident_description"
-	)
+	account, _ = _one_spelling(description, incident_description, "description", "incident_description")
 	if account:
 		inner["incident_description"] = account
 	for key, value in (
@@ -8861,9 +8885,9 @@ def get_discipline_report(user: str, employee=None) -> dict:
 	"""
 	personnel.require_hr_role()
 	allowed = guard.require_scope(user)
-	return discipline_tools.get_incident_report({
-		"employee": _employee_argument(employee, allowed, "employee")
-	}).data
+	return discipline_tools.get_incident_report(
+		{"employee": _employee_argument(employee, allowed, "employee")}
+	).data
 
 
 # ── 86. create_accident_report ───────────────────────────────────────────────
@@ -9035,9 +9059,9 @@ def close_accident_investigation(
 def get_accident_report(user: str, report=None) -> dict:
 	"""One investigation in full: witnesses, narrative, steps, what is outstanding."""
 	allowed = guard.require_scope(user)
-	return accident_tools.get_accident_report({
-		"report": guard.require_scoped_doc(ACCIDENT_REPORT, report, "report", allowed)
-	}).data
+	return accident_tools.get_accident_report(
+		{"report": guard.require_scoped_doc(ACCIDENT_REPORT, report, "report", allowed)}
+	).data
 
 
 # ── 90. list_accident_reports ────────────────────────────────────────────────
@@ -9340,16 +9364,14 @@ def _wizard_answers(raw) -> dict:
 			raise ToolError(
 				"answers is not valid JSON. Send an object keyed by the wizard's field keys, like "
 				'{"occurred_at": "2026-08-17", "severity": "First Aid"}. Nothing was written.'
-			)
+			) from None
 	if not isinstance(raw, dict):
 		raise ToolError(
 			"answers must be an object keyed by the wizard's field keys — the `key` each field "
 			"carries in its spec. Nothing was written."
 		)
 	return {
-		str(name): value
-		for name, value in raw.items()
-		if str(name) not in ("user", fallback_auth.BODY_KEY)
+		str(name): value for name, value in raw.items() if str(name) not in ("user", fallback_auth.BODY_KEY)
 	}
 
 
@@ -9704,7 +9726,12 @@ def confirm_shipment_movement(user: str, shipment=None, movement=None, occurred_
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc("Trade Shipment", shipment, "shipment", allowed)
 
-	moves = {"departed": "In Transit", "in transit": "In Transit", "delivered": "Delivered", "arrived": "Delivered"}
+	moves = {
+		"departed": "In Transit",
+		"in transit": "In Transit",
+		"delivered": "Delivered",
+		"arrived": "Delivered",
+	}
 	wanted = moves.get(str(movement or "").strip().casefold())
 	if not wanted:
 		raise ToolError(
@@ -10943,7 +10970,8 @@ def update_my_bank_account(
 	owner = frappe.db.get_value("Employee Bank Account", docname, "employee")
 	if not owner or str(owner) != person:
 		frappe.throw(
-			f"No bank account called {docname} belongs to you.", frappe.DoesNotExistError,
+			f"No bank account called {docname} belongs to you.",
+			frappe.DoesNotExistError,
 		)
 
 	inner: dict = {"name": docname}
@@ -11056,7 +11084,10 @@ def get_payroll_deduction(user: str, deduction=None) -> dict:
 	allowed = guard.require_scope(user)
 	personnel.require_hr_role()
 	docname = guard.require_scoped_doc(
-		PAYROLL_DEDUCTION, deduction, "deduction", allowed,
+		PAYROLL_DEDUCTION,
+		deduction,
+		"deduction",
+		allowed,
 	)
 	return payroll_deduction_tools.get_payroll_deduction({"deduction": docname}).data
 
@@ -11229,7 +11260,10 @@ def update_payroll_deduction(
 	"""
 	allowed = guard.require_scope(user)
 	docname = guard.require_scoped_doc(
-		PAYROLL_DEDUCTION, deduction, "deduction", allowed,
+		PAYROLL_DEDUCTION,
+		deduction,
+		"deduction",
+		allowed,
 	)
 
 	inner: dict = {"deduction": docname}
@@ -11816,16 +11850,19 @@ def _attached_stub_urls(wanted: dict) -> dict:
 	"""
 	if not wanted:
 		return {}
-	rows = frappe.db.get_all(
-		"File",
-		filters={
-			"attached_to_doctype": payroll_tools.PAYROLL_ENTRY,
-			"attached_to_name": ("in", sorted(wanted)),
-			"file_name": ("in", sorted(set(wanted.values()))),
-		},
-		fields=["attached_to_name", "file_name", "file_url"],
-		limit_page_length=0,
-	) or []
+	rows = (
+		frappe.db.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": payroll_tools.PAYROLL_ENTRY,
+				"attached_to_name": ("in", sorted(wanted)),
+				"file_name": ("in", sorted(set(wanted.values()))),
+			},
+			fields=["attached_to_name", "file_name", "file_url"],
+			limit_page_length=0,
+		)
+		or []
+	)
 	found: dict = {}
 	for row in rows:
 		entry = str(row.get("attached_to_name") or "")
@@ -11934,13 +11971,16 @@ def list_my_pay_stubs(user: str, year=None) -> dict:
 			)
 		filters["pay_period_end"] = ("between", [f"{wanted_year}-01-01", f"{wanted_year}-12-31"])
 
-	runs = frappe.db.get_all(
-		payroll_tools.PAYROLL_ENTRY,
-		filters=filters,
-		fields=["name"],
-		order_by="pay_period_end desc",
-		limit_page_length=MY_STUB_SCAN_CAP + 1,
-	) or []
+	runs = (
+		frappe.db.get_all(
+			payroll_tools.PAYROLL_ENTRY,
+			filters=filters,
+			fields=["name"],
+			order_by="pay_period_end desc",
+			limit_page_length=MY_STUB_SCAN_CAP + 1,
+		)
+		or []
+	)
 	truncated = len(runs) > MY_STUB_SCAN_CAP
 	runs = runs[:MY_STUB_SCAN_CAP]
 
@@ -12046,7 +12086,10 @@ def get_my_pay_stub_pdf(user: str, payroll_entry=None) -> dict:
 	allowed = guard.require_scope(user)
 	person = _employee(user)
 	run = guard.require_scoped_doc(
-		payroll_tools.PAYROLL_ENTRY, payroll_entry, "payroll_entry", allowed,
+		payroll_tools.PAYROLL_ENTRY,
+		payroll_entry,
+		"payroll_entry",
+		allowed,
 	)
 
 	entry = payroll_tools.get_payroll_entry({"name": run}).data
@@ -12126,9 +12169,7 @@ def _stub_bytes(run: str, file_name: str) -> dict:
 	if not run or not file_name:
 		return dict(_NO_BYTES)
 	try:
-		content = file_tools.read_attached_bytes_unchecked(
-			payroll_tools.PAYROLL_ENTRY, run, file_name
-		)
+		content = file_tools.read_attached_bytes_unchecked(payroll_tools.PAYROLL_ENTRY, run, file_name)
 	except Exception:  # pragma: no cover - see the docstring
 		return dict(_NO_BYTES)
 	if not content:
@@ -12266,9 +12307,7 @@ def get_tax_remittance_summary(user: str, company=None, fiscal_year=None, quarte
 	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
 	personnel.require_hr_role()
 
-	data = remittance_tools.get_tax_remittance_summary(
-		_remittance_args(entity, fiscal_year, quarter)
-	).data
+	data = remittance_tools.get_tax_remittance_summary(_remittance_args(entity, fiscal_year, quarter)).data
 	return {
 		"company": data.get("company"),
 		"tax_year": data.get("tax_year"),

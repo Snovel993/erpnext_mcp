@@ -52,14 +52,14 @@ SIX CLAIMS, in the order the wave was worked.
 """
 
 import inspect
+from typing import ClassVar
 
 import frappe
 
 from erpnext_mcp import breaks as breaks_mod
 from erpnext_mcp import locations, roles, shifts, task_templates
-from erpnext_mcp.api import guard
+from erpnext_mcp.api import guard, shape
 from erpnext_mcp.api import mobile as mobile_api
-from erpnext_mcp.api import shape
 from erpnext_mcp.farmops_api import routes as farmops_routes
 from erpnext_mcp.tools import discipline as discipline_tools
 from erpnext_mcp.tools import shifts as shift_tools
@@ -161,9 +161,7 @@ class Wave2TestCase(V12TestCase):
 		tool's own name-or-docname resolution rather than on the pair the picker
 		actually sends. Everything here uses the docname.
 		"""
-		existing = [
-			row["name"] for row in STORE.rows("Parcel") if row.get("parcel_name") == parcel_name
-		]
+		existing = [row["name"] for row in STORE.rows("Parcel") if row.get("parcel_name") == parcel_name]
 		if existing:
 			return existing[0]
 		return self.tool_data(
@@ -286,7 +284,9 @@ class TheTemplateCarriesItsProcedure(Wave2TestCase):
 		exactly the filename a convention-reader would have mislabelled.
 		"""
 		name = self.a_template()
-		frappe.db.set_value("Farm Task Template", name, "sop_document_en", "/private/files/procedimiento_es.pdf")
+		frappe.db.set_value(
+			"Farm Task Template", name, "sop_document_en", "/private/files/procedimiento_es.pdf"
+		)
 		described = task_templates.describe(name)
 		self.assertEqual(described["sop_document_en"], "/private/files/procedimiento_es.pdf")
 		self.assertIsNone(described["sop_document_es"])
@@ -353,9 +353,7 @@ class TheNoteHasARouteNow(Wave2TestCase):
 
 	def test_the_older_spelling_keeps_its_route(self):
 		"""A handset already in an orchard is not asked to change to get an answer."""
-		self.assertIn(
-			"/mobile/add_task_note_via_mobile", {route.path for route in farmops_routes.ROUTES}
-		)
+		self.assertIn("/mobile/add_task_note_via_mobile", {route.path for route in farmops_routes.ROUTES})
 
 	def test_the_route_declares_the_four_arguments_the_app_sends(self):
 		"""`bind` delivers only what a signature names — see item 12's own ask.
@@ -375,9 +373,7 @@ class TheNoteHasARouteNow(Wave2TestCase):
 		task = self.a_task()
 		typed = mobile_api.add_task_note(doctype="Farm Task", name=task, note="Line is split at the riser.")
 		self.assertEqual(typed["narrative"], "Line is split at the riser.")
-		older = mobile_api.add_task_note(
-			doctype="Farm Task", name=task, narrative="Second look, same split."
-		)
+		older = mobile_api.add_task_note(doctype="Farm Task", name=task, narrative="Second look, same split.")
 		self.assertEqual(older["narrative"], "Second look, same split.")
 
 	def test_a_file_token_turns_the_same_call_into_a_voice_note(self):
@@ -543,9 +539,7 @@ class AGrievanceIsNotAWarning(Wave2TestCase):
 
 	def test_the_handsets_two_words_map_onto_the_column_and_nothing_else_does(self):
 		self.assertEqual(mobile_api.REPORT_DIRECTIONS["grievance"], discipline_tools.WORKER_REPORT)
-		self.assertEqual(
-			mobile_api.REPORT_DIRECTIONS["disciplinary"], discipline_tools.SUPERVISOR_REPORT
-		)
+		self.assertEqual(mobile_api.REPORT_DIRECTIONS["disciplinary"], discipline_tools.SUPERVISOR_REPORT)
 		self.assertEqual(mobile_api._report_direction("Worker Report"), discipline_tools.WORKER_REPORT)
 		self.assertEqual(mobile_api._report_direction("GRIEVANCE"), discipline_tools.WORKER_REPORT)
 		self.assertEqual(mobile_api._report_direction(""), "")
@@ -620,7 +614,11 @@ class TheTaskCarriesItsFacts(Wave2TestCase):
 		self.assertIn("Spray", published["task_types"])
 		self.assertEqual(
 			published["task_types"],
-			[line.strip() for line in frappe.get_meta("Farm Task").get_field("task_type").options.split("\n") if line.strip()],
+			[
+				line.strip()
+				for line in frappe.get_meta("Farm Task").get_field("task_type").options.split("\n")
+				if line.strip()
+			],
 		)
 
 	def test_a_site_that_customises_the_select_gets_its_own_options(self):
@@ -760,7 +758,9 @@ class TheTaskCarriesItsFacts(Wave2TestCase):
 			'"reported_at": (">=", cutoff)',
 			inspect.getsource(__import__("erpnext_mcp.tools.dispatch", fromlist=["x"])._field_report_count),
 		)
-		source = inspect.getsource(__import__("erpnext_mcp.tools.dispatch", fromlist=["x"])._structured_report)
+		source = inspect.getsource(
+			__import__("erpnext_mcp.tools.dispatch", fromlist=["x"])._structured_report
+		)
 		self.assertIn("doc.observed_at", source)
 		self.assertNotIn("doc.reported_at", source)
 		self.assertNotIn("reported_at", self.accepts(mobile_api.report_field_task))
@@ -779,9 +779,7 @@ class TheTaskCarriesItsFacts(Wave2TestCase):
 	def test_a_field_report_still_stamps_its_reporter_from_the_session(self):
 		STORE.seed("File", [{"name": "FILE-PHOTO-2", "file_name": "riser.jpg", "is_private": 1}])
 		self.be(WORKER)
-		data = mobile_api.report_field_task(
-			description="Riser split.", photo_file_token="FILE-PHOTO-2"
-		)
+		data = mobile_api.report_field_task(description="Riser split.", photo_file_token="FILE-PHOTO-2")
 		self.assertEqual(STORE.get_raw("Farm Task", data["name"])["reported_by"], WORKER_EMPLOYEE)
 
 
@@ -798,7 +796,7 @@ class TheCrewCountsDownTogether(Wave2TestCase):
 	phone counting down to the same second.
 	"""
 
-	POLICY = {
+	POLICY: ClassVar[dict] = {
 		"policy": "LBP-OR-2026",
 		"rest_schedule": [
 			{"hours_from": 6, "hours_to": 10, "periods_owed": 2, "minutes_each": 10, "paid": 1}
@@ -829,12 +827,8 @@ class TheCrewCountsDownTogether(Wave2TestCase):
 
 	def test_it_answers_with_instants_so_a_late_reader_sees_the_same_clock(self):
 		"""The whole point. A duration would have to be re-based on a device clock."""
-		early = breaks_mod.schedule(
-			"2026-08-18 06:00:00", self.POLICY, hours=8.0, now="2026-08-18 06:01:00"
-		)
-		late = breaks_mod.schedule(
-			"2026-08-18 06:00:00", self.POLICY, hours=8.0, now="2026-08-18 09:30:00"
-		)
+		early = breaks_mod.schedule("2026-08-18 06:00:00", self.POLICY, hours=8.0, now="2026-08-18 06:01:00")
+		late = breaks_mod.schedule("2026-08-18 06:00:00", self.POLICY, hours=8.0, now="2026-08-18 09:30:00")
 		self.assertEqual([row["due_at"] for row in early], [row["due_at"] for row in late])
 		# Only the advisory half moves.
 		self.assertEqual(early[0]["status"], "upcoming")
@@ -1166,9 +1160,7 @@ class ThePickerHasSomethingToShow(Wave2TestCase):
 		parcel = self.a_parcel()
 		self.be(MANAGER)
 		named = mobile_api.create_field(name="Ridge Top", parcel=parcel, acres=4.0)
-		poly = mobile_api.create_farm_location(
-			name="Lower Bench", doctype="Field", parcel=parcel, acres=4.0
-		)
+		poly = mobile_api.create_farm_location(name="Lower Bench", doctype="Field", parcel=parcel, acres=4.0)
 		self.assertEqual(named["doctype"], poly["doctype"])
 		self.assertEqual(
 			STORE.get_raw("Field", named["name"])["parcel"],
@@ -1255,10 +1247,20 @@ class ThePickerHasSomethingToShow(Wave2TestCase):
 		financial statement and are settled at a desk with the paperwork open.
 		"""
 		accepted = self.accepts(mobile_api.create_parcel)
-		for argument in ("title_holder", "appraised_value", "appraiser", "appraisal_document", "related_asset"):
+		for argument in (
+			"title_holder",
+			"appraised_value",
+			"appraiser",
+			"appraisal_document",
+			"related_asset",
+		):
 			self.assertNotIn(argument, accepted)
 		unit = self.accepts(mobile_api.create_housing_unit)
-		for argument in ("or_housing_law_compliant", "smoke_detector_last_test", "last_habitability_inspection"):
+		for argument in (
+			"or_housing_law_compliant",
+			"smoke_detector_last_test",
+			"last_habitability_inspection",
+		):
 			self.assertNotIn(argument, unit)
 
 	def test_all_five_writes_run_the_one_gate(self):
@@ -1272,9 +1274,7 @@ class ThePickerHasSomethingToShow(Wave2TestCase):
 			mobile_api.create_housing_unit,
 		):
 			self.assertIn("_create_one_location", inspect.getsource(handler))
-		self.assertIn(
-			"guard.require_location_role", inspect.getsource(mobile_api._create_one_location)
-		)
+		self.assertIn("guard.require_location_role", inspect.getsource(mobile_api._create_one_location))
 
 	def test_every_write_is_declared_mutating_so_the_route_table_agrees(self):
 		by_path = {route.path: route for route in farmops_routes.ROUTES}

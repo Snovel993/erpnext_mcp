@@ -71,8 +71,8 @@ class TrainingSession(Document):
 
 		self._inherit_from_the_curriculum()
 		self._check_the_clock()
-		self.conducted_by_name = (
-			str(self.conducted_by_name or "").strip() or self._employee_name(self.conducted_by)
+		self.conducted_by_name = str(self.conducted_by_name or "").strip() or self._employee_name(
+			self.conducted_by
 		)
 		self._check_the_attendees()
 

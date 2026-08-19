@@ -261,7 +261,9 @@ class ConfigNotCode(TradeTestCase):
 
 	def test_a_destination_with_nothing_configured_says_so_loudly(self):
 		"""An empty checklist means nothing is TRACKED, not that nothing is needed."""
-		for row in frappe.db.get_all("Destination Document Requirement", filters={"destination_tier": "Local"}):
+		for row in frappe.db.get_all(
+			"Destination Document Requirement", filters={"destination_tier": "Local"}
+		):
 			frappe.db.set_value("Destination Document Requirement", row["name"], "enabled", 0)
 		answer = self.tools.get_destination_requirements({"destination_tier": "Local"}).data
 		self.assertEqual(answer["count"], 0)
@@ -322,9 +324,7 @@ class AdvisoryUnlessTurnedOn(TradeTestCase):
 	def test_one_shipment_can_be_advisory_on_an_otherwise_enforced_site(self):
 		self.configure(enabled=1, trade_document_enforcement=1, **ALL_ON)
 		shipment = self.a_shipment("Local", enforcement="Advisory")["shipment"]
-		result = self.tools.update_shipment_status(
-			{"shipment": shipment, "status": "Ready to Ship"}
-		).data
+		result = self.tools.update_shipment_status({"shipment": shipment, "status": "Ready to Ship"}).data
 		self.assertEqual(result["status"], "Ready to Ship")
 
 	def test_an_override_is_written_to_the_shipment_because_a_bypass_nobody_recorded_cannot_be_reviewed(self):
@@ -356,9 +356,7 @@ class AdvisoryUnlessTurnedOn(TradeTestCase):
 		shipment = self.a_shipment("Local")["shipment"]
 		for line in self.tools.get_shipment_readiness({"shipment": shipment}).data["blocking"]:
 			self.approved(shipment, line["template"])
-		result = self.tools.update_shipment_status(
-			{"shipment": shipment, "status": "Ready to Ship"}
-		).data
+		result = self.tools.update_shipment_status({"shipment": shipment, "status": "Ready to Ship"}).data
 		self.assertEqual(result["status"], "Ready to Ship")
 		self.assertFalse(result["overridden"])
 		self.assertNotIn("warning", result)
@@ -455,9 +453,7 @@ class LooksDoneIsNotDone(TradeTestCase):
 class TheSealMeansSomething(TradeTestCase):
 	def _sealed(self):
 		shipment = self.a_shipment("Local")["shipment"]
-		document = self.approved(
-			shipment, "Commercial Invoice", document_data={"invoice_number": "INV-0007"}
-		)
+		document = self.approved(shipment, "Commercial Invoice", document_data={"invoice_number": "INV-0007"})
 		self.tools.seal_trade_document({"trade_document": document})
 		return shipment, document
 
@@ -528,9 +524,7 @@ class TheSealMeansSomething(TradeTestCase):
 		paperwork than it has."""
 		shipment = self.a_shipment("Local")["shipment"]
 		self.approved(shipment, "Commercial Invoice")
-		packet = self.tools.generate_shipment_packet(
-			{"shipment": shipment, "allow_unsealed": True}
-		).data
+		packet = self.tools.generate_shipment_packet({"shipment": shipment, "allow_unsealed": True}).data
 		self.assertEqual(packet["document_count"], 1)
 		self.assertEqual(len(packet["unsealed"]), 1)
 		self.assertIn("UNSEALED", packet["disclosure"])
@@ -589,9 +583,7 @@ class DriftIsReportedNotApplied(TradeTestCase):
 		self.tools.set_destination_requirements(
 			{"destination_tier": "Local", "requirements": ["Packing List"]}
 		)
-		result = self.tools.update_shipment_status(
-			{"shipment": shipment, "status": "Ready to Ship"}
-		).data
+		result = self.tools.update_shipment_status({"shipment": shipment, "status": "Ready to Ship"}).data
 		self.assertEqual(result["status"], "Ready to Ship")
 
 	def test_a_deleted_template_on_a_rule_is_named_rather_than_dropped(self):
@@ -682,9 +674,9 @@ class TheDocumentItself(TradeTestCase):
 
 	def test_replace_is_available_for_the_caller_who_means_it(self):
 		shipment = self.a_shipment("Local")["shipment"]
-		document = self.a_document(
-			shipment, "Commercial Invoice", document_data={"invoice_number": "A"}
-		)["trade_document"]
+		document = self.a_document(shipment, "Commercial Invoice", document_data={"invoice_number": "A"})[
+			"trade_document"
+		]
 		self.tools.update_trade_document(
 			{"trade_document": document, "document_data": {"seller": "OML"}, "replace": True}
 		)
@@ -702,9 +694,7 @@ class TheDocumentItself(TradeTestCase):
 		with self.assertRaises(Exception) as caught:
 			self.a_document(shipment, "Phytosanitary Certificate (ePhyto)")
 		self.assertIn("allow_off_tier", str(caught.exception))
-		allowed = self.a_document(
-			shipment, "Phytosanitary Certificate (ePhyto)", allow_off_tier=True
-		)
+		allowed = self.a_document(shipment, "Phytosanitary Certificate (ePhyto)", allow_off_tier=True)
 		self.assertTrue(allowed["trade_document"])
 
 	def test_a_document_off_the_checklist_says_the_rule_might_be_missing(self):
@@ -740,7 +730,9 @@ class TheDocumentItself(TradeTestCase):
 		by_name = {row["template"]: row for row in register["templates"]}
 		self.assertEqual(by_name["Phytosanitary Certificate (ePhyto)"]["standard_reference"], "IPPC ISPM-12")
 		self.assertEqual(by_name["AES Export Declaration"]["standard_reference"], "AES/EEI 15 CFR 30")
-		self.assertEqual(by_name["Electronic Bill of Lading (eBL)"]["standard_reference"], "DCSA eBL data model")
+		self.assertEqual(
+			by_name["Electronic Bill of Lading (eBL)"]["standard_reference"], "DCSA eBL data model"
+		)
 
 	def test_labels_resolve_into_spanish_and_a_gap_is_reported_not_hidden(self):
 		self.tools.create_trade_document_template(

@@ -52,7 +52,9 @@ class ITGCTestCase(SeededTestCase):
 		self.a_user(BOOKKEEPER, ["Accounts Manager"], full_name="Bea Bookkeeper")
 		self.a_user(MANAGER, ["System Manager"], full_name="Mo Manager")
 
-	def a_user(self, email: str, roles=(), enabled: int = 1, full_name: str = "", last_login: str = "") -> str:
+	def a_user(
+		self, email: str, roles=(), enabled: int = 1, full_name: str = "", last_login: str = ""
+	) -> str:
 		"""A login with its roles as Has Role rows — which is where the report reads them.
 
 		`set_roles` alone would not do: it feeds `frappe.get_roles`, while
@@ -339,7 +341,11 @@ class NotTestedIsNotAFailureAndAGreenJobIsNotAVerification(ITGCTestCase):
 		backup = self.a_backup()
 		data = self.tool_data(
 			"record_backup_test",
-			{"backup_record": backup["name"], "test_restore_result": "Partial", "test_restore_on": "2026-07-20"},
+			{
+				"backup_record": backup["name"],
+				"test_restore_result": "Partial",
+				"test_restore_on": "2026-07-20",
+			},
 		)
 		self.assertFalse(data["verified"])
 		self.assertIn("not a verification", data["note"])
@@ -415,7 +421,11 @@ class NotTestedIsNotAFailureAndAGreenJobIsNotAVerification(ITGCTestCase):
 		verified = self.a_backup()
 		self.tool_data(
 			"record_backup_test",
-			{"backup_record": verified["name"], "test_restore_result": "Pass", "test_restore_on": "2026-07-20"},
+			{
+				"backup_record": verified["name"],
+				"test_restore_result": "Pass",
+				"test_restore_on": "2026-07-20",
+			},
 		)
 		self.a_backup(status="Failed", completed_at="2026-07-20 02:05:00")
 		data = self.tool_data("list_backup_records", {"company": MAIN, "status": "Failed"})
@@ -426,7 +436,9 @@ class TheBackupControlShipsAdvisory(ITGCTestCase):
 	def test_all_three_itgc_controls_ship_advisory(self):
 		for control_point in ("access_review", "change_approval", "backup_verification"):
 			with self.subTest(control_point=control_point):
-				mode = frappe.db.get_value("Compliance Rule", self.rule_for(control_point), "enforcement_mode")
+				mode = frappe.db.get_value(
+					"Compliance Rule", self.rule_for(control_point), "enforcement_mode"
+				)
 				self.assertEqual(mode, "Advisory")
 
 	def test_every_itgc_control_has_a_seeded_rule_that_is_enabled(self):

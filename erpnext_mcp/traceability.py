@@ -261,12 +261,15 @@ def sprays_on(blocks: list, before: str = "", after: str = "") -> list:
 	if not wanted or not compat.doctype_exists(SPRAY_BLOCK):
 		return []
 	parents: dict = {}
-	for row in frappe.db.get_all(
-		SPRAY_BLOCK,
-		filters={"block": ("in", wanted)},
-		fields=["parent", "block", "acres"],
-		limit=HOP_CAP,
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			SPRAY_BLOCK,
+			filters={"block": ("in", wanted)},
+			fields=["parent", "block", "acres"],
+			limit=HOP_CAP,
+		)
+		or []
+	):
 		entry = dict(row)
 		parents.setdefault(str(entry.get("parent") or ""), []).append(entry.get("block"))
 	if not parents:
@@ -473,8 +476,7 @@ _SHIPMENT_FIELDS = (
 def invoices_for(settlements: list, shipments: list) -> list:
 	"""Sales Invoices reachable from either downstream register."""
 	wanted = distinct(
-		[row.get("sales_invoice") for row in settlements]
-		+ [row.get("sales_invoice") for row in shipments]
+		[row.get("sales_invoice") for row in settlements] + [row.get("sales_invoice") for row in shipments]
 	)
 	if not wanted:
 		return []

@@ -3,4 +3,4 @@ from frappe.model.document import Document
 
 
 class FICAConfiguration(Document):
-    pass
+	pass

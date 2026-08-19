@@ -413,7 +413,9 @@ class ReadingOneCrop(AgronomyTestCase):
 
 	def test_it_reports_the_pollination_groups_actually_planted(self):
 		self.a_crop()
-		self.assertEqual(self.tool_data("get_crop", {"crop": "Sweet Cherry"})["pollination_groups"], ["S1S4", "S3S4"])
+		self.assertEqual(
+			self.tool_data("get_crop", {"crop": "Sweet Cherry"})["pollination_groups"], ["S1S4", "S3S4"]
+		)
 
 	def test_one_pollination_group_across_every_variety_is_reported_not_refused(self):
 		"""The pollinizer may be in a neighbouring block or simply unrecorded —
@@ -617,9 +619,7 @@ class ReadingTheMarketRegister(AgronomyTestCase):
 
 	def test_a_retired_market_is_not_reported_as_a_gap(self):
 		"""Only markets somebody might plan against are worth chasing."""
-		self.tool_data(
-			"create_market", {"market_name": "Spot", "market_type": "Fresh", "is_active": False}
-		)
+		self.tool_data("create_market", {"market_name": "Spot", "market_type": "Fresh", "is_active": False})
 		self.assertEqual(self.tool_data("list_markets")["active_without_grade_standards"], [])
 
 	def test_the_market_type_filter_narrows_it(self):
@@ -786,9 +786,7 @@ class ConversionResolution(AgronomyTestCase):
 		self.a_conversion(crop="Apple", factor=900.0)
 		self.a_crop("Apple", crop_type="Tree Fruit", varieties=[])
 		payload = self.tool_data("get_uom_conversions", {"from_uom": "Bin", "to_uom": "Pound"})
-		self.assertEqual(
-			sorted(row["factor"] for row in payload["rows_for_this_pair"]), [800.0, 900.0]
-		)
+		self.assertEqual(sorted(row["factor"] for row in payload["rows_for_this_pair"]), [800.0, 900.0])
 
 	def test_a_nominal_factor_says_what_it_is_not_good_enough_for(self):
 		self.a_conversion()

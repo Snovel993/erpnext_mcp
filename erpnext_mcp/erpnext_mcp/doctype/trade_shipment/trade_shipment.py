@@ -112,9 +112,7 @@ class TradeShipment(Document):
 			)
 
 		if self.enforcement and self.enforcement not in ENFORCEMENT_MODES:
-			frappe.throw(
-				_("Enforcement is one of {0}.").format(", ".join(ENFORCEMENT_MODES))
-			)
+			frappe.throw(_("Enforcement is one of {0}.").format(", ".join(ENFORCEMENT_MODES)))
 		if not self.enforcement:
 			self.enforcement = SITE_DEFAULT
 

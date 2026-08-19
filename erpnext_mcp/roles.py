@@ -548,8 +548,7 @@ ROLE_SPECS = (
 			"read the SOP library (Compliance Policy) — a task's instructions belong in its notes",
 			"read the compliance calendar",
 			"raise, assign or cancel work",
-			"move the container fill threshold — a checker enforces the band, a Foreman or "
-			"above sets it",
+			"move the container fill threshold — a checker enforces the band, a Foreman or above sets it",
 			"read the bucket log — a bucket count is somebody's piece-rate pay, and a User "
 			"Permission scopes by company rather than by person, so a read here would be a "
 			"read of the whole crew's day",
@@ -929,9 +928,7 @@ def job_titles() -> list:
 		row = dict(entry)
 		row["role_installed"] = bool(_role_installed(entry["mobile_role"]))
 		try:
-			row["designation_exists"] = bool(
-				frappe.db.exists("Designation", entry["designation"])
-			)
+			row["designation_exists"] = bool(frappe.db.exists("Designation", entry["designation"]))
 		except Exception:  # pragma: no cover - a site without Frappe HR
 			row["designation_exists"] = False
 		out.append(row)

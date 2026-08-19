@@ -429,7 +429,9 @@ def ordinary_garnishment_ceiling(
 		"by_minimum_wage_floor": above_floor,
 		"exempt_floor": floor,
 		"binding_rule": (
-			"30x federal minimum wage floor" if above_floor <= by_rate else f"{rate:.0%} of disposable earnings"
+			"30x federal minimum wage floor"
+			if above_floor <= by_rate
+			else f"{rate:.0%} of disposable earnings"
 		),
 	}
 
@@ -454,9 +456,7 @@ def child_support_ceiling(disposable: float, rows: list[dict]) -> dict:
 			arrears = True
 
 	rate = (
-		CHILD_SUPPORT_RATE_SUPPORTING_OTHERS
-		if supports_others
-		else CHILD_SUPPORT_RATE_NOT_SUPPORTING_OTHERS
+		CHILD_SUPPORT_RATE_SUPPORTING_OTHERS if supports_others else CHILD_SUPPORT_RATE_NOT_SUPPORTING_OTHERS
 	)
 	if arrears:
 		rate += CHILD_SUPPORT_ARREARS_INCREMENT
@@ -803,8 +803,7 @@ def apply_garnishments(
 				line["shortfall"] = round(requested - taken, 2)
 				line["shortfall_reason"] = (
 					f"child support ceiling of {support['rate']:.0%} of disposable earnings "
-					f"(${ceiling:,.2f})"
-					+ (" shared pro rata across the orders on file" if prorated else "")
+					f"(${ceiling:,.2f})" + (" shared pro rata across the orders on file" if prorated else "")
 				)
 				shortfalls.append(dict(line))
 			lines.append(line)
@@ -885,8 +884,7 @@ def apply_garnishments(
 				f"CCPA ordinary garnishment ceiling: {ordinary['binding_rule']} "
 				f"(${ordinary['ceiling']:,.2f})"
 				+ (
-					f", of which ${support_taken:,.2f} was taken by support orders "
-					"(29 CFR 870.11(b)(1))"
+					f", of which ${support_taken:,.2f} was taken by support orders (29 CFR 870.11(b)(1))"
 					if support_taken > 0
 					else ""
 				)
@@ -921,7 +919,9 @@ def _limit_of(row: dict) -> str:
 	return "ordinary" if limit == "none" else limit
 
 
-def apply_post_tax_deductions(available: float, rows: list[dict], gross_pay: float, disposable: float) -> dict:
+def apply_post_tax_deductions(
+	available: float, rows: list[dict], gross_pay: float, disposable: float
+) -> dict:
 	"""Voluntary after-tax elections, out of whatever cash the orders left.
 
 	LAST, and that ordering is the point of the function: a garnishment outranks

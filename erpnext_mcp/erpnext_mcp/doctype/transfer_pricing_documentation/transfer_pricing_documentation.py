@@ -46,9 +46,9 @@ class TransferPricingDocumentation(Document):
 
 		if self.period_start and self.period_end and self.period_end < self.period_start:
 			frappe.throw(
-				_("Period End ({0}) is before Period Start ({1}). A period that runs backwards covers nothing.").format(
-					self.period_end, self.period_start
-				)
+				_(
+					"Period End ({0}) is before Period Start ({1}). A period that runs backwards covers nothing."
+				).format(self.period_end, self.period_start)
 			)
 
 		if self.superseded_by and self.superseded_by == self.name:
@@ -56,9 +56,9 @@ class TransferPricingDocumentation(Document):
 
 		if frappe.utils.flt(self.amount) < 0:
 			frappe.throw(
-				_("Documented Amount is negative ({0}). Record the direction with Transaction Type, not with the sign.").format(
-					self.amount
-				)
+				_(
+					"Documented Amount is negative ({0}). Record the direction with Transaction Type, not with the sign."
+				).format(self.amount)
 			)
 
 		self._check_the_party_belongs_to_this_company()

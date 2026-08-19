@@ -709,5 +709,3 @@ def fill_determination(entry: dict, threshold: dict | None) -> dict:
 	result["result"] = verdict
 	result["explanation"] = explanation
 	return result
-
-	return errors

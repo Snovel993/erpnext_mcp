@@ -547,11 +547,7 @@ def _policies(spec: AuditPacketType, company: str, start: str, end: str) -> dict
 	expected = list(spec.policy_categories)
 	section["categories_expected"] = expected
 	if expected:
-		in_force = {
-			row["category"]
-			for row in rows
-			if row["in_force_at_period_end"] and row["category"]
-		}
+		in_force = {row["category"] for row in rows if row["in_force_at_period_end"] and row["category"]}
 		gaps = [category for category in expected if category not in in_force]
 		section["categories_without_a_policy"] = gaps
 		if gaps:
@@ -587,12 +583,15 @@ def _files_attached_to(doctype: str, names: list) -> dict:
 	if not names or not compat.doctype_exists("File"):  # pragma: no cover - every site has File
 		return {}
 	found: dict = {}
-	for row in frappe.db.get_all(
-		"File",
-		filters={"attached_to_doctype": doctype, "attached_to_name": ("in", names)},
-		fields=["name", "attached_to_name", "file_name", "file_url"],
-		limit=SECTION_CAP * 4,
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			"File",
+			filters={"attached_to_doctype": doctype, "attached_to_name": ("in", names)},
+			fields=["name", "attached_to_name", "file_name", "file_url"],
+			limit=SECTION_CAP * 4,
+		)
+		or []
+	):
 		entry = dict(row)
 		found.setdefault(str(entry.get("attached_to_name") or ""), []).append(entry)
 	return found
@@ -1102,9 +1101,7 @@ def _spray_application_rows(company: str, start: str, end: str) -> tuple:
 				"spray": row["name"],
 				"date": str(row.get("completed_at") or row.get("started_at") or "")[:10] or None,
 				"block": _joined(blocks.get(row["name"], ())),
-				"product": _joined(
-					line.get("item_name") or line.get("item") for line in products
-				),
+				"product": _joined(line.get("item_name") or line.get("item") for line in products),
 				"applicator_name": names.get(applicator) or applicator or UNRECORDED,
 				"applicator_license": row.get("applicator_license") or UNRECORDED,
 				"epa_reg_number": _joined(line.get("epa_reg_number") for line in products),
@@ -1190,17 +1187,20 @@ def _spray_blocks(names) -> dict:
 	if not names or not compat.doctype_exists(SPRAY_APPLICATION_BLOCK):
 		return {}
 	found: dict = {}
-	for row in frappe.db.get_all(
-		SPRAY_APPLICATION_BLOCK,
-		filters={"parent": ("in", names)},
-		# `parent` is asked for by name and NOT through `compat.existing_fields`.
-		# It is a framework column rather than one of the DocType's own fields,
-		# so `existing_fields` drops it — and a batched child read that loses
-		# `parent` files every row under one empty key, which reads here as a
-		# packet full of applications over nowhere.
-		fields=["parent", "block", "acres"],
-		limit=SECTION_CAP * 8,
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			SPRAY_APPLICATION_BLOCK,
+			filters={"parent": ("in", names)},
+			# `parent` is asked for by name and NOT through `compat.existing_fields`.
+			# It is a framework column rather than one of the DocType's own fields,
+			# so `existing_fields` drops it — and a batched child read that loses
+			# `parent` files every row under one empty key, which reads here as a
+			# packet full of applications over nowhere.
+			fields=["parent", "block", "acres"],
+			limit=SECTION_CAP * 8,
+		)
+		or []
+	):
 		entry = dict(row)
 		block = entry.get("block")
 		if block:
@@ -1227,12 +1227,15 @@ def _user_full_names(users) -> dict:
 	if not wanted or not compat.doctype_exists("User"):
 		return {}
 	found = {}
-	for row in frappe.db.get_all(
-		"User",
-		filters={"name": ("in", wanted)},
-		fields=compat.existing_fields("User", ("name", "full_name")),
-		limit=len(wanted),
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			"User",
+			filters={"name": ("in", wanted)},
+			fields=compat.existing_fields("User", ("name", "full_name")),
+			limit=len(wanted),
+		)
+		or []
+	):
 		entry = dict(row)
 		if entry.get("full_name"):
 			found[str(entry.get("name"))] = entry["full_name"]

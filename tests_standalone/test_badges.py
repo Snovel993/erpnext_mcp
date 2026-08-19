@@ -922,9 +922,7 @@ class TheBadgeQRIsBuiltForTheField(BadgeToolTestCase):
 	def test_the_printed_sheet_gets_the_same_treatment_as_the_single_card(self):
 		"""The sheet is what a hiring day actually prints, and it used to take
 		`_render`'s default while the single card took an argument."""
-		data = self.tool_data(
-			"generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN}
-		)
+		data = self.tool_data("generate_employee_badge_sheet", {"employees": [EMP], "company": MAIN})
 		card = data["cards"][0]
 		self.assertEqual(card["error_correction"], "H")
 		self.assertGreaterEqual(card["print"]["dpi_at_min_width"], 300.0)

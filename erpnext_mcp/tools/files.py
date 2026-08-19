@@ -478,16 +478,19 @@ def read_attached_bytes_unchecked(doctype: str, name: str, file_name: str) -> by
 	it and no route binds to it; it is a library function for a caller in this repo
 	that has done the check itself.
 	"""
-	rows = frappe.db.get_all(
-		"File",
-		filters={
-			"attached_to_doctype": doctype,
-			"attached_to_name": name,
-			"file_name": file_name,
-		},
-		fields=["name"],
-		limit_page_length=2,
-	) or []
+	rows = (
+		frappe.db.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": doctype,
+				"attached_to_name": name,
+				"file_name": file_name,
+			},
+			fields=["name"],
+			limit_page_length=2,
+		)
+		or []
+	)
 	if len(rows) != 1:
 		raise ToolError(
 			f"{file_name!r} is not a file on {doctype} {name} — "

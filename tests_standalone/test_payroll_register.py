@@ -80,9 +80,7 @@ def slip(
 		"futa": round(gross * 0.006, 2),
 		"state_unemployment": round(gross * 0.02, 2),
 		"state_employer_other": 5.0,
-		"total_employer_taxes": round(
-			social_security + medicare + gross * 0.006 + gross * 0.02 + 5.0, 2
-		),
+		"total_employer_taxes": round(social_security + medicare + gross * 0.006 + gross * 0.02 + 5.0, 2),
 	}
 	row.update(overrides)
 	return row
@@ -116,13 +114,23 @@ class RegisterTestCase(V12TestCase):
 	def two_runs(self):
 		"""Two biweekly runs in June, two people on each."""
 		self.seed(
-			entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
-				slip("HR-EMP-00001", name="Maria Garcia"),
-				slip("HR-EMP-00002", name="Ana Ruiz", gross=2000.0, federal=200.0, state=120.0),
-			]),
-			entry("PAY-2026-0002", "2026-06-15", "2026-06-28", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=1500.0, other=50.0),
-			]),
+			entry(
+				"PAY-2026-0001",
+				"2026-06-01",
+				"2026-06-14",
+				[
+					slip("HR-EMP-00001", name="Maria Garcia"),
+					slip("HR-EMP-00002", name="Ana Ruiz", gross=2000.0, federal=200.0, state=120.0),
+				],
+			),
+			entry(
+				"PAY-2026-0002",
+				"2026-06-15",
+				"2026-06-28",
+				[
+					slip("HR-EMP-00001", name="Maria Garcia", gross=1500.0, other=50.0),
+				],
+			),
 		)
 
 	def register(self, **arguments):
@@ -137,16 +145,31 @@ class RegisterColumns(RegisterTestCase):
 
 	def setUp(self):
 		super().setUp()
-		self.seed(entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
-			slip("HR-EMP-00001", name="Maria Garcia", other=75.0, units=42.0),
-		]))
+		self.seed(
+			entry(
+				"PAY-2026-0001",
+				"2026-06-01",
+				"2026-06-14",
+				[
+					slip("HR-EMP-00001", name="Maria Garcia", other=75.0, units=42.0),
+				],
+			)
+		)
 		self.row = self.register(date_from="2026-06-01", date_to="2026-06-30")["employees"][0]
 
 	def test_the_row_carries_every_column_the_tool_promises(self):
 		for column in (
-			"employee_id", "employee_name", "gross_pay", "federal_tax", "state_tax",
-			"ss_employee", "medicare_employee", "other_deductions", "net_pay",
-			"hours_worked", "piece_units",
+			"employee_id",
+			"employee_name",
+			"gross_pay",
+			"federal_tax",
+			"state_tax",
+			"ss_employee",
+			"medicare_employee",
+			"other_deductions",
+			"net_pay",
+			"hours_worked",
+			"piece_units",
 		):
 			with self.subTest(column=column):
 				self.assertIn(column, self.row)
@@ -169,8 +192,10 @@ class RegisterColumns(RegisterTestCase):
 		self.assertEqual(self.row["other_deductions"], 75.0)
 		self.assertEqual(
 			self.row["total_deductions"],
-			self.row["federal_tax"] + self.row["state_tax"]
-			+ self.row["ss_employee"] + self.row["medicare_employee"]
+			self.row["federal_tax"]
+			+ self.row["state_tax"]
+			+ self.row["ss_employee"]
+			+ self.row["medicare_employee"]
 			+ self.row["other_deductions"],
 		)
 
@@ -198,8 +223,16 @@ class RegisterTotals(RegisterTestCase):
 
 	def test_every_employee_column_totals_the_rows_above_it(self):
 		for column in (
-			"gross_pay", "federal_tax", "state_tax", "ss_employee", "medicare_employee",
-			"other_deductions", "total_deductions", "net_pay", "hours_worked", "piece_units",
+			"gross_pay",
+			"federal_tax",
+			"state_tax",
+			"ss_employee",
+			"medicare_employee",
+			"other_deductions",
+			"total_deductions",
+			"net_pay",
+			"hours_worked",
+			"piece_units",
 		):
 			with self.subTest(column=column):
 				self.assertAlmostEqual(
@@ -229,7 +262,9 @@ class RegisterTotals(RegisterTestCase):
 		"""6.2 and 1.45 either side, which is what makes a transposed column
 		here visible rather than plausible."""
 		self.assertAlmostEqual(
-			self.data["employer_costs"]["ss_employer"], self.data["totals"]["ss_employee"], places=2,
+			self.data["employer_costs"]["ss_employer"],
+			self.data["totals"]["ss_employee"],
+			places=2,
 		)
 		self.assertAlmostEqual(
 			self.data["employer_costs"]["medicare_employer"],
@@ -259,8 +294,7 @@ class RegisterCostTotals(RegisterTestCase):
 		self.assertAlmostEqual(
 			self.data["grand_total_labor_cost"],
 			round(
-				self.data["totals"]["net_pay"]
-				+ self.data["employer_costs"]["total_employer_taxes"],
+				self.data["totals"]["net_pay"] + self.data["employer_costs"]["total_employer_taxes"],
 				2,
 			),
 			places=2,
@@ -272,8 +306,7 @@ class RegisterCostTotals(RegisterTestCase):
 		self.assertAlmostEqual(
 			self.data["total_cost_of_employment"],
 			round(
-				self.data["totals"]["gross_pay"]
-				+ self.data["employer_costs"]["total_employer_taxes"],
+				self.data["totals"]["gross_pay"] + self.data["employer_costs"]["total_employer_taxes"],
 				2,
 			),
 			places=2,
@@ -297,7 +330,8 @@ class RegisterCostTotals(RegisterTestCase):
 		"""Stated as its own claim because getting these the wrong way round
 		would understate the cost of the crew by every dollar withheld."""
 		self.assertGreater(
-			self.data["total_cost_of_employment"], self.data["grand_total_labor_cost"],
+			self.data["total_cost_of_employment"],
+			self.data["grand_total_labor_cost"],
 		)
 
 
@@ -367,12 +401,21 @@ class RegisterWindow(RegisterTestCase):
 		self.assertEqual(by_alias["totals"], by_name["totals"])
 
 	def test_a_run_in_another_company_is_not_in_this_company_register(self):
-		self.seed(entry("PAY-2026-0090", "2026-06-01", "2026-06-14", [
-			slip("HR-EMP-00009", name="Someone Else", company=None),
-		], company=OTHER))
+		self.seed(
+			entry(
+				"PAY-2026-0090",
+				"2026-06-01",
+				"2026-06-14",
+				[
+					slip("HR-EMP-00009", name="Someone Else", company=None),
+				],
+				company=OTHER,
+			)
+		)
 		data = self.register(date_from="2026-06-01", date_to="2026-06-30")
 		self.assertNotIn(
-			"HR-EMP-00009", [row["employee_id"] for row in data["employees"]],
+			"HR-EMP-00009",
+			[row["employee_id"] for row in data["employees"]],
 		)
 
 
@@ -406,7 +449,9 @@ class RegisterStatuses(RegisterTestCase):
 		default = self.register(date_from="2026-06-01", date_to="2026-06-30")
 		self.assertEqual(default["statuses_counted"], list(payroll.REGISTER_STATUSES))
 		with_drafts = self.register(
-			date_from="2026-06-01", date_to="2026-06-30", include_drafts=True,
+			date_from="2026-06-01",
+			date_to="2026-06-30",
+			include_drafts=True,
 		)
 		self.assertIn("Draft", with_drafts["statuses_counted"])
 
@@ -427,9 +472,14 @@ class RegisterRefusals(RegisterTestCase):
 
 	def test_the_switch_refuses_with_the_field_to_tick(self):
 		self.configure(enabled=1, allow_get_payroll_register=0)
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "date_from": "2026-06-01", "date_to": "2026-06-30",
-		})
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"date_from": "2026-06-01",
+				"date_to": "2026-06-30",
+			},
+		)
 		self.assertIn("allow_get_payroll_register", message)
 
 	def test_no_window_at_all_is_refused_rather_than_read_as_everything(self):
@@ -438,43 +488,67 @@ class RegisterRefusals(RegisterTestCase):
 		self.assertIn("date_from", message)
 
 	def test_one_date_without_the_other_is_refused(self):
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "date_from": "2026-06-01",
-		})
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"date_from": "2026-06-01",
+			},
+		)
 		self.assertIn("date_to", message)
 
 	def test_reversed_dates_are_refused_rather_than_read_as_an_empty_period(self):
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "date_from": "2026-06-30", "date_to": "2026-06-01",
-		})
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"date_from": "2026-06-30",
+				"date_to": "2026-06-01",
+			},
+		)
 		self.assertIn("after", message)
 
 	def test_an_unknown_pay_period_names_the_tool_that_lists_them(self):
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "pay_period": "PAY-NOPE",
-		})
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"pay_period": "PAY-NOPE",
+			},
+		)
 		self.assertIn("list_payroll_entries", message)
 
 	def test_a_run_belonging_to_another_company_is_refused_by_name(self):
 		"""Not silently returned as an empty register — the caller named a
 		docname that exists, and 'no rows' would read as 'nobody was paid'."""
 		self.seed(entry("PAY-2026-0090", "2026-06-01", "2026-06-14", [slip()], company=OTHER))
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "pay_period": "PAY-2026-0090",
-		})
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"pay_period": "PAY-2026-0090",
+			},
+		)
 		self.assertIn(OTHER, message)
 
 	def test_a_window_over_the_entry_cap_is_refused_and_not_truncated(self):
 		"""A register that quietly stopped short would look like it had covered
 		the period, and its totals would be wrong in the direction nobody
 		checks."""
-		self.seed(*[
-			entry(f"PAY-2026-{index:04d}", "2026-01-01", "2026-01-14", [slip()])
-			for index in range(1, payroll.REGISTER_ENTRY_CAP + 2)
-		])
-		message = self.tool_error("get_payroll_register", {
-			"company": MAIN, "date_from": "2026-01-01", "date_to": "2026-01-31",
-		})
+		self.seed(
+			*[
+				entry(f"PAY-2026-{index:04d}", "2026-01-01", "2026-01-14", [slip()])
+				for index in range(1, payroll.REGISTER_ENTRY_CAP + 2)
+			]
+		)
+		message = self.tool_error(
+			"get_payroll_register",
+			{
+				"company": MAIN,
+				"date_from": "2026-01-01",
+				"date_to": "2026-01-31",
+			},
+		)
 		self.assertIn(str(payroll.REGISTER_ENTRY_CAP), message)
 		self.assertIn("Narrow the dates", message)
 

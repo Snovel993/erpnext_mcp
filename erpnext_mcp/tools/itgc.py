@@ -187,7 +187,18 @@ def _permissions_by_role() -> dict:
 			continue
 		fields = compat.existing_fields(
 			doctype,
-			("parent", "role", "permlevel", "read", "write", "create", "delete", "submit", "cancel", "if_owner"),
+			(
+				"parent",
+				"role",
+				"permlevel",
+				"read",
+				"write",
+				"create",
+				"delete",
+				"submit",
+				"cancel",
+				"if_owner",
+			),
 		)
 		rows = frappe.db.get_all(doctype, fields=fields, limit=20000)
 		for row in rows:
@@ -220,7 +231,9 @@ def _last_access_review(company: str) -> dict:
 	rows = frappe.db.get_all(
 		CHANGE_LOG,
 		filters={"company": company, "change_type": "Permission"},
-		fields=compat.existing_fields(CHANGE_LOG, ("name", "title", "change_date", "changed_by", "approval_status")),
+		fields=compat.existing_fields(
+			CHANGE_LOG, ("name", "title", "change_date", "changed_by", "approval_status")
+		),
 		order_by="change_date desc",
 		limit=1,
 	)
@@ -340,7 +353,9 @@ def generate_access_control_report(args: dict) -> ToolResult:
 		"privileged_count": len([row for row in report if row["privileged"]]),
 		"disabled_included": include_disabled,
 		"flagged": [
-			{"user": row["user"], "flags": row["flags"]} for row in report if row["flags"] and row["flags"] != ["privileged"]
+			{"user": row["user"], "flags": row["flags"]}
+			for row in report
+			if row["flags"] and row["flags"] != ["privileged"]
 		],
 		"roles_in_use": sorted({role for row in report for role in row["roles"]}),
 		"last_access_review": (
@@ -411,14 +426,19 @@ def create_change_management_log(args: dict) -> ToolResult:
 	"""Record one system change — what, who, approved by whom, and how to undo it."""
 	_require(CHANGE_LOG)
 	company = resolve_company(as_str(args, "company"), required=True)
-	change_type = as_choice(CHANGE_LOG, "change_type", as_str(args, "change_type", required=True), "change_type")
+	change_type = as_choice(
+		CHANGE_LOG, "change_type", as_str(args, "change_type", required=True), "change_type"
+	)
 	title = as_str(args, "title", required=True)
 	description = as_str(args, "description", required=True)
 	changed_by = as_str(args, "changed_by") or frappe.session.user
 	change_date = as_str(args, "change_date") or frappe.utils.now()
 	approved_by = as_str(args, "approved_by")
 	approval_status = as_choice(
-		CHANGE_LOG, "approval_status", as_str(args, "approval_status") or (APPROVED if approved_by else PENDING), "approval_status"
+		CHANGE_LOG,
+		"approval_status",
+		as_str(args, "approval_status") or (APPROVED if approved_by else PENDING),
+		"approval_status",
 	)
 
 	if approved_by and approved_by == changed_by:
@@ -478,7 +498,9 @@ def create_change_management_log(args: dict) -> ToolResult:
 		doc.tested = 1
 	doc.insert()
 
-	row = frappe.db.get_value(CHANGE_LOG, doc.name, compat.existing_fields(CHANGE_LOG, _CHANGE_FIELDS), as_dict=True)
+	row = frappe.db.get_value(
+		CHANGE_LOG, doc.name, compat.existing_fields(CHANGE_LOG, _CHANGE_FIELDS), as_dict=True
+	)
 	data = _describe_change(dict(row))
 	data["control"] = control
 	if not doc.rollback_plan:
@@ -497,7 +519,9 @@ def get_change_management_log(args: dict) -> ToolResult:
 	"""One recorded change in full."""
 	_require(CHANGE_LOG)
 	name = as_str(args, "change_management_log", required=True)
-	row = frappe.db.get_value(CHANGE_LOG, name, compat.existing_fields(CHANGE_LOG, _CHANGE_FIELDS), as_dict=True)
+	row = frappe.db.get_value(
+		CHANGE_LOG, name, compat.existing_fields(CHANGE_LOG, _CHANGE_FIELDS), as_dict=True
+	)
 	if not row:
 		raise ToolError(f"Change Management Log {name!r} does not exist.")
 	return ToolResult(data=_describe_change(dict(row)), summary=f"change log {name}")
@@ -830,7 +854,9 @@ def list_backup_records(args: dict) -> ToolResult:
 	)
 	backups = [_describe_backup(dict(row)) for row in rows[:limit]]
 	verified = [backup for backup in backups if backup["verified"]]
-	window = as_int(args, "verification_window_days", default=BACKUP_VERIFICATION_DAYS) or BACKUP_VERIFICATION_DAYS
+	window = (
+		as_int(args, "verification_window_days", default=BACKUP_VERIFICATION_DAYS) or BACKUP_VERIFICATION_DAYS
+	)
 	# THE WINDOW IS ASKED OF THE WHOLE COMPANY, not of the page returned. A
 	# filtered list showing ten failed jobs must not report the verification
 	# control as clear merely because the passing restore is on another page.
@@ -849,11 +875,15 @@ def list_backup_records(args: dict) -> ToolResult:
 		"failed_count": len([backup for backup in backups if backup["status"] == "Failed"]),
 		"offsite_count": len([backup for backup in backups if backup["offsite"]]),
 		"never_tested": [backup["name"] for backup in backups if backup["test_restore_result"] == NOT_TESTED],
-		"last_verified_on": max((backup["test_restore_on"] for backup in verified if backup["test_restore_on"]), default=None),
+		"last_verified_on": max(
+			(backup["test_restore_on"] for backup in verified if backup["test_restore_on"]), default=None
+		),
 		"verification_window_days": window,
 		"control": control,
 	}
-	return ToolResult(data=data, summary=f"{len(backups)} backup record(s) for {company}, {len(verified)} verified")
+	return ToolResult(
+		data=data, summary=f"{len(backups)} backup record(s) for {company}, {len(verified)} verified"
+	)
 
 
 def record_backup_test(args: dict) -> ToolResult:
@@ -863,7 +893,10 @@ def record_backup_test(args: dict) -> ToolResult:
 	if not frappe.db.exists(BACKUP, name):
 		raise ToolError(f"Backup Record {name!r} does not exist. Nothing was recorded.")
 	result = as_choice(
-		BACKUP, "test_restore_result", as_str(args, "test_restore_result", required=True), "test_restore_result"
+		BACKUP,
+		"test_restore_result",
+		as_str(args, "test_restore_result", required=True),
+		"test_restore_result",
 	)
 	if result == NOT_TESTED:
 		raise ToolError(

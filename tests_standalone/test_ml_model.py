@@ -105,12 +105,22 @@ MANIFEST = {
 }
 
 
+#: A FIXED stamp, because these bytes get COMPARED — `zipfile` writes the local
+#: clock into every entry header at two-second resolution, so a bundle built
+#: twice either side of a boundary is two different byte strings.
+#: `test_the_pulled_bundle_is_what_get_model_file_chunk_serves` builds one to
+#: serve and another to compare against, and failed whenever the two landed in
+#: different buckets — perhaps one run in thirty, on the clock rather than on
+#: anything the code did.
+_ZIP_STAMP = (2026, 1, 1, 0, 0, 0)
+
+
 def bundle_bytes(manifest=MANIFEST, model_payload=b"\x00\x01coreml-weights\x02\x03"):
 	buffer = io.BytesIO()
 	with zipfile.ZipFile(buffer, "w") as archive:
 		if manifest is not None:
-			archive.writestr("manifest.json", json.dumps(manifest))
-		archive.writestr("model.mlmodel", model_payload)
+			archive.writestr(zipfile.ZipInfo("manifest.json", _ZIP_STAMP), json.dumps(manifest))
+		archive.writestr(zipfile.ZipInfo("model.mlmodel", _ZIP_STAMP), model_payload)
 	return buffer.getvalue()
 
 
@@ -155,7 +165,11 @@ class AttachingAModelFile(MLModelToolTestCase):
 		content = b"\x00\x01coreml-bytes\x02\x03"
 		result = self.tool_data(
 			"attach_model_file",
-			{"model": model, "file_content": base64.b64encode(content).decode(), "file_name": "cherry.mlmodelc.zip"},
+			{
+				"model": model,
+				"file_content": base64.b64encode(content).decode(),
+				"file_name": "cherry.mlmodelc.zip",
+			},
 		)
 		self.assertEqual(result["file_size_bytes"], len(content))
 		described = result["model"]
@@ -170,9 +184,7 @@ class AttachingAModelFile(MLModelToolTestCase):
 		result = self.tool_data("attach_model_file", {"model": model, "file_token": token})
 		self.assertEqual(result["file"], token)
 
-		row = frappe.db.get_value(
-			"File", token, ["attached_to_doctype", "attached_to_name"], as_dict=True
-		)
+		row = frappe.db.get_value("File", token, ["attached_to_doctype", "attached_to_name"], as_dict=True)
 		self.assertEqual(row["attached_to_doctype"], DOCTYPE)
 		self.assertEqual(row["attached_to_name"], model)
 
@@ -268,14 +280,18 @@ class DownloadingAModelFile(MLModelToolTestCase):
 	def test_the_manifest_reports_downloadable_only_once_a_file_is_attached(self):
 		model = self.register(piecework_activity="bucket_fill_detection")
 		self.tool_data("activate_model", {"model": model})
-		before = self.tool_data("get_active_model", {"company": MAIN, "piecework_activity": "bucket_fill_detection"})
+		before = self.tool_data(
+			"get_active_model", {"company": MAIN, "piecework_activity": "bucket_fill_detection"}
+		)
 		self.assertFalse(before["manifest"]["metadata"]["downloadable"])
 
 		self.tool_data(
 			"attach_model_file",
 			{"model": model, "file_content": base64.b64encode(b"abc").decode(), "file_name": "m.mlmodelc"},
 		)
-		after = self.tool_data("get_active_model", {"company": MAIN, "piecework_activity": "bucket_fill_detection"})
+		after = self.tool_data(
+			"get_active_model", {"company": MAIN, "piecework_activity": "bucket_fill_detection"}
+		)
 		self.assertTrue(after["manifest"]["metadata"]["downloadable"])
 
 
@@ -291,20 +307,26 @@ class ServedOverTheMobileSurface(MobileAPITestCase):
 		super().setUp()
 		self.configure(enabled=1, public_url="https://umbrel.tail4a2b.ts.net", **ON)
 		frappe.local.session.user = "Administrator"
-		self.model = ml_model_tools.register_model(_model(piecework_activity=self.ACTIVITY)).data["model"]["name"]
+		self.model = ml_model_tools.register_model(_model(piecework_activity=self.ACTIVITY)).data["model"][
+			"name"
+		]
 		ml_model_tools.activate_model({"model": self.model})
 		content = b"model bytes for the mobile surface"
 		token = self.staged_file(content)
 		ml_model_tools.attach_model_file({"model": self.model, "file_token": token})
 
 	def staged_file(self, content):
-		doc = frappe.get_doc({"doctype": "File", "file_name": "m.mlmodelc.zip", "is_private": 1, "content": content})
+		doc = frappe.get_doc(
+			{"doctype": "File", "file_name": "m.mlmodelc.zip", "is_private": 1, "content": content}
+		)
 		doc.insert(ignore_permissions=True)
 		return doc.name
 
 	def test_the_worker_reads_the_active_model_for_their_own_company(self):
 		self.be()
-		result = mobile_api.get_active_model(user="ana@example.test", company=MAIN, piecework_activity=self.ACTIVITY)
+		result = mobile_api.get_active_model(
+			user="ana@example.test", company=MAIN, piecework_activity=self.ACTIVITY
+		)
 		self.assertTrue(result["active"])
 		self.assertTrue(result["manifest"]["metadata"]["downloadable"])
 
@@ -629,9 +651,7 @@ class PullingFromVolumeVision(MLModelToolTestCase):
 			status_code=200, content=bundle_bytes(), headers={}, text=""
 		)
 		result = self.tool_data("pull_model_from_vv", {"model": self.model})
-		self.assertEqual(
-			frappe.db.get_value("File", result["file"], "file_name"), f"{UUID}.bundle.zip"
-		)
+		self.assertEqual(frappe.db.get_value("File", result["file"], "file_name"), f"{UUID}.bundle.zip")
 
 	def test_the_pulled_bundle_is_what_get_model_file_chunk_serves(self):
 		self.tool_data("pull_model_from_vv", {"model": self.model})
@@ -701,7 +721,11 @@ class MigratingAModelFormat(MigrationTestCase):
 		model = self.legacy()
 		self.tool_data(
 			"attach_model_file",
-			{"model": model, "file_content": base64.b64encode(b"\x00raw-weights").decode(), "file_name": "c.mlmodel"},
+			{
+				"model": model,
+				"file_content": base64.b64encode(b"\x00raw-weights").decode(),
+				"file_name": "c.mlmodel",
+			},
 		)
 		result = self.tool_data("migrate_model_format", {"model": model})
 		self.assertFalse(result["model"]["is_bundle"])
@@ -801,9 +825,7 @@ class MigratingAModelFormat(MigrationTestCase):
 class ValidatingAModelBundle(MigrationTestCase):
 	def codes(self, result, severity=None):
 		return [
-			issue["code"]
-			for issue in result["issues"]
-			if severity is None or issue["severity"] == severity
+			issue["code"] for issue in result["issues"] if severity is None or issue["severity"] == severity
 		]
 
 	def test_a_record_whose_bundle_came_in_through_this_release_passes(self):
@@ -938,9 +960,7 @@ class ListingModelsNeedingMigration(MigrationTestCase):
 	def test_include_current_returns_everything_and_the_counts_still_split(self):
 		self.legacy()
 		self.current(version="4")
-		result = self.tool_data(
-			"list_models_needing_migration", {"company": MAIN, "include_current": True}
-		)
+		result = self.tool_data("list_models_needing_migration", {"company": MAIN, "include_current": True})
 		self.assertEqual(len(result["models"]), 2)
 		self.assertEqual(result["count"], 1)
 		self.assertEqual(result["already_current"], 1)
@@ -948,13 +968,13 @@ class ListingModelsNeedingMigration(MigrationTestCase):
 	def test_it_filters_by_company_and_by_status(self):
 		mine = self.legacy()
 		self.legacy(company=OTHER, piecework_activity="theirs", version="2")
-		self.assertEqual(self.names(self.tool_data("list_models_needing_migration", {"company": MAIN})), {mine})
+		self.assertEqual(
+			self.names(self.tool_data("list_models_needing_migration", {"company": MAIN})), {mine}
+		)
 
 		self.tool_data("activate_model", {"model": mine})
 		self.assertEqual(
-			self.names(
-				self.tool_data("list_models_needing_migration", {"company": MAIN, "status": "Draft"})
-			),
+			self.names(self.tool_data("list_models_needing_migration", {"company": MAIN, "status": "Draft"})),
 			set(),
 		)
 		self.assertEqual(

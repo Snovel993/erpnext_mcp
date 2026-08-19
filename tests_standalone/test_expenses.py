@@ -1081,7 +1081,8 @@ class UpdateExpenseReceipt(EnhancementTestCase):
 	def test_switched_off_by_default(self):
 		name = self.capture()["name"]
 		self.configure(
-			enabled=1, **{**EXPENSE_TOOLS_ON, **RECEIPT_ENHANCEMENT_TOOLS_ON, "allow_update_expense_receipt": 0}
+			enabled=1,
+			**{**EXPENSE_TOOLS_ON, **RECEIPT_ENHANCEMENT_TOOLS_ON, "allow_update_expense_receipt": 0},
 		)
 		error = self.tool_error("update_expense_receipt", {"name": name, "category": "Feed"})
 		self.assertIn("switched off", error)
@@ -1120,14 +1121,18 @@ class ExpenseSummary(EnhancementTestCase):
 	def test_rejected_receipts_are_excluded_by_default_and_the_count_is_reported(self):
 		self.capture(category="Fuel", amount=100)
 		rejected = self.capture(category="Fuel", amount=999)["name"]
-		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"})
+		self.tool_data(
+			"reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"}
+		)
 		data = self.tool_data("get_expense_summary", {"company": MAIN})
 		self.assertEqual(data["total_amount"], 100.0)
 		self.assertIn("1 Rejected receipt", data["note"])
 
 	def test_explicit_status_includes_rejected(self):
 		rejected = self.capture(category="Fuel", amount=999)["name"]
-		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"})
+		self.tool_data(
+			"reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "duplicate"}
+		)
 		data = self.tool_data("get_expense_summary", {"company": MAIN, "status": "Rejected"})
 		self.assertEqual(data["total_amount"], 999.0)
 
@@ -1145,7 +1150,9 @@ class ExpenseSummary(EnhancementTestCase):
 
 	def test_date_range_narrows_the_totals(self):
 		self._seed_three_receipts()
-		data = self.tool_data("get_expense_summary", {"company": MAIN, "from_date": "2026-07-01", "to_date": "2026-07-31"})
+		data = self.tool_data(
+			"get_expense_summary", {"company": MAIN, "from_date": "2026-07-01", "to_date": "2026-07-31"}
+		)
 		self.assertEqual(data["total_amount"], 75.0)
 
 
@@ -1153,7 +1160,9 @@ class ExpenseReport(EnhancementTestCase):
 	def test_lists_every_status_by_default(self):
 		self.capture(category="Fuel", amount=100)
 		rejected = self.capture(category="Fuel", amount=50)["name"]
-		self.tool_data("reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "no"})
+		self.tool_data(
+			"reject_expense_receipt", {"name": rejected, "rejected_by": "HR-EMP-00001", "reason": "no"}
+		)
 		data = self.tool_data("get_expense_report", {"company": MAIN})
 		self.assertEqual(data["count"], 2)
 		self.assertEqual(data["total_amount"], 150.0)

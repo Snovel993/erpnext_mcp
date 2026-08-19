@@ -280,7 +280,11 @@ def get_fill_thresholds(args: dict) -> ToolResult:
 		)
 	data = {"configured": True, **_describe_threshold(row)}
 	upper = row.get("upper_bound_pct")
-	band = f"{row.get('lower_bound_pct'):g}%–{upper:g}%" if upper not in (None, "") else f"≥{row.get('lower_bound_pct'):g}%"
+	band = (
+		f"{row.get('lower_bound_pct'):g}%–{upper:g}%"
+		if upper not in (None, "")
+		else f"≥{row.get('lower_bound_pct'):g}%"
+	)
 	return ToolResult(data=data, summary=f"{container_type} at {company}: {band} (v{row.get('version')})")
 
 
@@ -311,7 +315,9 @@ def update_fill_threshold(args: dict) -> ToolResult:
 	try:
 		lower = float(lower_raw)
 	except (TypeError, ValueError):
-		raise ToolError(f"lower_bound_pct must be a number, got {lower_raw!r}. Nothing was changed.") from None
+		raise ToolError(
+			f"lower_bound_pct must be a number, got {lower_raw!r}. Nothing was changed."
+		) from None
 	if lower < 0:
 		raise ToolError(f"lower_bound_pct must not be negative, got {lower!r}. Nothing was changed.")
 
@@ -321,7 +327,9 @@ def update_fill_threshold(args: dict) -> ToolResult:
 		try:
 			upper = float(upper_raw)
 		except (TypeError, ValueError):
-			raise ToolError(f"upper_bound_pct must be a number, got {upper_raw!r}. Nothing was changed.") from None
+			raise ToolError(
+				f"upper_bound_pct must be a number, got {upper_raw!r}. Nothing was changed."
+			) from None
 		if upper <= lower:
 			raise ToolError(
 				f"upper_bound_pct ({upper!r}) must be greater than lower_bound_pct ({lower!r}). "
@@ -375,7 +383,9 @@ def update_fill_threshold(args: dict) -> ToolResult:
 			+ (f", upper {old_upper!r} → {upper!r}" if upper != old_upper else "")
 			+ f" (v{new_version}, by {actor})"
 		),
-		docstatus_delta=("none → 0 (created)" if not existing else f"v{existing.get('version')} → v{new_version}"),
+		docstatus_delta=(
+			"none → 0 (created)" if not existing else f"v{existing.get('version')} → v{new_version}"
+		),
 	)
 
 

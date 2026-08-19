@@ -58,7 +58,8 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, dashboard, shifts as shift_engine
+from .. import compat, dashboard
+from .. import shifts as shift_engine
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -189,7 +190,9 @@ def _crews(company: str, as_of: str, preview: int, sections, attention, unavaila
 		"shifts_today": len(rows),
 		"open_shifts": len(open_rows),
 		"people_on_the_clock": on_the_clock,
-		"foremen": sorted({str(row.get("foreman_name") or row.get("foreman") or "") for row in open_rows} - {""}),
+		"foremen": sorted(
+			{str(row.get("foreman_name") or row.get("foreman") or "") for row in open_rows} - {""}
+		),
 		"shifts": [
 			{
 				"shift": row.get("name"),
@@ -475,7 +478,8 @@ def _weather(sections, attention) -> None:
 			}
 		)
 	silent = [
-		row.get("shift") for row in crews.get("shifts") or []
+		row.get("shift")
+		for row in crews.get("shifts") or []
 		if row.get("shift") not in {entry["shift"] for entry in readings}
 	]
 	sections["weather"] = {

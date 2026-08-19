@@ -142,7 +142,13 @@ class TrainingSessionTestCase(V12TestCase):
 			BADGE_DOCTYPE,
 			[
 				{"name": BEN_BADGE, "badge_id": BEN_BADGE, "company": MAIN, "employee": TRAINEE, "active": 1},
-				{"name": THIRD_BADGE, "badge_id": THIRD_BADGE, "company": MAIN, "employee": SECOND, "active": 1},
+				{
+					"name": THIRD_BADGE,
+					"badge_id": THIRD_BADGE,
+					"company": MAIN,
+					"employee": SECOND,
+					"active": 1,
+				},
 				{
 					"name": RETIRED_BADGE,
 					"badge_id": RETIRED_BADGE,
@@ -161,13 +167,18 @@ class TrainingSessionTestCase(V12TestCase):
 
 	def a_full_session(self, **overrides) -> str:
 		"""One session, two attendees scanned in and both signed. The happy path."""
-		session = self.open_session(
-			content_topics_covered=TOPICS, expires_date=days_out(365), **overrides
-		)["name"]
+		session = self.open_session(content_topics_covered=TOPICS, expires_date=days_out(365), **overrides)[
+			"name"
+		]
 		for badge in (BEN_BADGE, THIRD_BADGE):
 			self.tool_data(
 				"add_session_attendee",
-				{"session": session, "badge_scan": badge, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
+				{
+					"session": session,
+					"badge_scan": badge,
+					"scan_latitude": 45.5152,
+					"scan_longitude": -122.6784,
+				},
 			)
 		for person in (TRAINEE, SECOND):
 			self.tool_data(
@@ -265,9 +276,7 @@ class TheCurriculumCarriesItsContent(TrainingSessionTestCase):
 
 	def test_a_call_that_changes_nothing_writes_nothing_and_says_so(self):
 		self.tool_data("update_training_type", {"training_type": CURRICULUM, "duration_minutes": 60})
-		data = self.tool_data(
-			"update_training_type", {"training_type": CURRICULUM, "duration_minutes": 60}
-		)
+		data = self.tool_data("update_training_type", {"training_type": CURRICULUM, "duration_minutes": 60})
 		self.assertEqual(data["changed"], {})
 		self.assertIn("nothing was written", data["note"])
 
@@ -310,9 +319,7 @@ class TheCurriculumReadsBackForAScreen(TrainingSessionTestCase):
 		self.assertIn("update_training_type", data["content_note"])
 
 	def test_a_curriculum_marked_as_video_with_nothing_to_play_is_a_named_gap(self):
-		self.tool_data(
-			"update_training_type", {"training_type": CURRICULUM, "delivery_method": "video"}
-		)
+		self.tool_data("update_training_type", {"training_type": CURRICULUM, "delivery_method": "video"})
 		data = self.tool_data("get_training_curriculum", {"training_type": CURRICULUM})
 		self.assertTrue(any("nothing to play" in gap for gap in data["content_gaps"]))
 
@@ -424,7 +431,12 @@ class TheBadgeIsTheIdentification(TrainingSessionTestCase):
 		session = self.open_session()["name"]
 		data = self.tool_data(
 			"add_session_attendee",
-			{"session": session, "badge_scan": BEN_BADGE, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
+			{
+				"session": session,
+				"badge_scan": BEN_BADGE,
+				"scan_latitude": 45.5152,
+				"scan_longitude": -122.6784,
+			},
 		)
 		row = data["attendee"]
 		self.assertEqual(row["employee"], TRAINEE)
@@ -439,9 +451,7 @@ class TheBadgeIsTheIdentification(TrainingSessionTestCase):
 
 	def test_a_retired_card_is_refused_at_the_door(self):
 		session = self.open_session()["name"]
-		error = self.tool_error(
-			"add_session_attendee", {"session": session, "badge_scan": RETIRED_BADGE}
-		)
+		error = self.tool_error("add_session_attendee", {"session": session, "badge_scan": RETIRED_BADGE})
 		self.assertIn("retired", error)
 
 	def test_a_badge_that_disagrees_with_the_name_beside_it_is_refused(self):
@@ -456,9 +466,7 @@ class TheBadgeIsTheIdentification(TrainingSessionTestCase):
 	def test_one_person_cannot_be_on_the_sheet_twice(self):
 		session = self.open_session()["name"]
 		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
-		error = self.tool_error(
-			"add_session_attendee", {"session": session, "badge_scan": BEN_BADGE}
-		)
+		error = self.tool_error("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
 		self.assertIn("already on", error)
 		self.assertIn("sign_session_attendance", error)
 
@@ -479,17 +487,13 @@ class TheBadgeIsTheIdentification(TrainingSessionTestCase):
 	def test_an_attendee_from_another_entity_is_refused(self):
 		outsider = self.an_employee_at(OTHER, "Rosa Field", "HR-EMP-00051")
 		session = self.open_session()["name"]
-		error = self.tool_error(
-			"add_session_attendee", {"session": session, "employee": outsider}
-		)
+		error = self.tool_error("add_session_attendee", {"session": session, "employee": outsider})
 		self.assertIn("another company", error.replace("a different company", "another company"))
 
 	def test_a_completed_session_does_not_take_a_thirteenth_person(self):
 		session = self.a_full_session()
 		self.tool_data("complete_training_session", {"session": session})
-		error = self.tool_error(
-			"add_session_attendee", {"session": session, "employee": SUPERVISOR}
-		)
+		error = self.tool_error("add_session_attendee", {"session": session, "employee": SUPERVISOR})
 		self.assertIn("Completed", error)
 		self.assertIn("Nothing was changed", error)
 
@@ -500,7 +504,12 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 		session = self.open_session()["name"]
 		self.tool_data(
 			"add_session_attendee",
-			{"session": session, "badge_scan": BEN_BADGE, "scan_latitude": 45.5152, "scan_longitude": -122.6784},
+			{
+				"session": session,
+				"badge_scan": BEN_BADGE,
+				"scan_latitude": 45.5152,
+				"scan_longitude": -122.6784,
+			},
 		)
 		# THE CARD IS RESCANNED AT THE PAD, which is what makes the evidence row
 		# say Badge QR. A door scan an hour earlier proves who ATTENDED; a scan at
@@ -575,10 +584,10 @@ class TheSignatureIsASeparateAct(TrainingSessionTestCase):
 	def test_replacing_a_signature_is_a_decision_rather_than_a_retry(self):
 		session = self.open_session()["name"]
 		self.tool_data("add_session_attendee", {"session": session, "badge_scan": BEN_BADGE})
-		first = self.tool_data(
+		self.tool_data(
 			"sign_session_attendance",
 			{"session": session, "employee": TRAINEE, "signature": SIGNATURE},
-		)["attendee"]["signature"]
+		)
 		error = self.tool_error(
 			"sign_session_attendance",
 			{"session": session, "employee": TRAINEE, "signature": SECOND_SIGNATURE},
@@ -676,13 +685,9 @@ class CompletionWritesOneRecordPerProvableAttendance(TrainingSessionTestCase):
 	def test_skip_incomplete_files_the_ready_rows_and_names_the_rest(self):
 		session = self.a_full_session()
 		self.tool_data("add_session_attendee", {"session": session, "employee": SUPERVISOR})
-		data = self.tool_data(
-			"complete_training_session", {"session": session, "skip_incomplete": True}
-		)
+		data = self.tool_data("complete_training_session", {"session": session, "skip_incomplete": True})
 		self.assertEqual(data["filed_count"], 2)
-		self.assertEqual(
-			[row["employee"] for row in data["skipped_incomplete"]], [SUPERVISOR]
-		)
+		self.assertEqual([row["employee"] for row in data["skipped_incomplete"]], [SUPERVISOR])
 		self.assertIn("were expected", data["skip_note"])
 
 	def test_somebody_who_did_not_come_neither_blocks_nor_is_filed(self):
@@ -834,9 +839,7 @@ class ReadingTheRegister(TrainingSessionTestCase):
 	def test_the_period_filter_is_on_the_day_it_ran(self):
 		self.open_session(session_date=days_out(-30))
 		recent = self.open_session(session_date=days_out(-2))["name"]
-		data = self.tool_data(
-			"list_training_sessions", {"company": MAIN, "from_date": days_out(-7)}
-		)
+		data = self.tool_data("list_training_sessions", {"company": MAIN, "from_date": days_out(-7)})
 		self.assertEqual([row["name"] for row in data["sessions"]], [recent])
 
 	def test_the_supervisor_who_held_the_session_may_read_it_back(self):
@@ -886,9 +889,7 @@ class ReadingTheRegister(TrainingSessionTestCase):
 					"create_training_session", {"company": MAIN, "training_type": CURRICULUM}
 				)
 				self.assertTrue(opened["name"])
-				self.tool_data(
-					"add_session_attendee", {"session": opened["name"], "employee": SUPERVISOR}
-				)
+				self.tool_data("add_session_attendee", {"session": opened["name"], "employee": SUPERVISOR})
 		set_roles("Administrator", ["Foreman"])
 		self.assertTrue(self.tool_data("complete_training_session", {"session": session}))
 
@@ -1061,7 +1062,9 @@ class TheSignInSheetIsAPageAndThenASealedOne(TrainingSessionTestCase):
 		error = self.tool_error("render_training_sign_in_sheet", {"session": session})
 		self.assertIn("overwrite=true", error)
 		self.assertTrue(
-			self.tool_data("render_training_sign_in_sheet", {"session": session, "overwrite": True})["replaced"]
+			self.tool_data("render_training_sign_in_sheet", {"session": session, "overwrite": True})[
+				"replaced"
+			]
 		)
 
 	def test_the_preview_reads_the_same_page(self):
@@ -1077,7 +1080,9 @@ class TheSignInSheetIsAPageAndThenASealedOne(TrainingSessionTestCase):
 	def test_the_sheet_seals_like_any_other_signed_document(self):
 		"""The half of the pattern that needed a renderer to exist at all."""
 		session = self.a_full_session()
-		data = self.tool_data("seal_signed_document", {"document_type": "Training Session", "document_name": session})
+		data = self.tool_data(
+			"seal_signed_document", {"document_type": "Training Session", "document_name": session}
+		)
 
 		self.assertTrue(data["sealed"])
 		self.assertTrue(data["file_url"].endswith(".pdf"))

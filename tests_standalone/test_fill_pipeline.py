@@ -29,8 +29,6 @@ SIX CLAIMS.
    CURRENT version, and shrinks as they do.
 """
 
-import frappe
-
 from erpnext_mcp import bucket_bridge
 
 from .fixtures import MAIN, SeededTestCase
@@ -109,12 +107,18 @@ class FillPipelineTestCase(SeededTestCase):
 			],
 		)
 		self.an_entry(
-			"BLE-TEST-S1", entry_uuid="BLE-TEST-S1", session_uuid=session_uuid,
-			mask_area_px=45000.0, container_area_px=48000.0,
+			"BLE-TEST-S1",
+			entry_uuid="BLE-TEST-S1",
+			session_uuid=session_uuid,
+			mask_area_px=45000.0,
+			container_area_px=48000.0,
 		)
 		self.an_entry(
-			"BLE-TEST-S2", entry_uuid="BLE-TEST-S2", session_uuid=session_uuid,
-			mask_area_px=30000.0, container_area_px=48000.0,
+			"BLE-TEST-S2",
+			entry_uuid="BLE-TEST-S2",
+			session_uuid=session_uuid,
+			mask_area_px=30000.0,
+			container_area_px=48000.0,
 		)
 		return session_uuid
 
@@ -134,11 +138,21 @@ class SettingAThreshold(FillPipelineTestCase):
 	def test_a_second_call_bumps_the_version_and_logs_the_change(self):
 		self.tool_data(
 			"update_fill_threshold",
-			{"container_type": "pear_bin", "company": MAIN, "lower_bound_pct": 80.0, "upper_bound_pct": 110.0},
+			{
+				"container_type": "pear_bin",
+				"company": MAIN,
+				"lower_bound_pct": 80.0,
+				"upper_bound_pct": 110.0,
+			},
 		)
 		data = self.tool_data(
 			"update_fill_threshold",
-			{"container_type": "pear_bin", "company": MAIN, "lower_bound_pct": 82.0, "upper_bound_pct": 115.0},
+			{
+				"container_type": "pear_bin",
+				"company": MAIN,
+				"lower_bound_pct": 82.0,
+				"upper_bound_pct": 115.0,
+			},
 		)
 		self.assertEqual(data["version"], 2)
 		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "pear_bin"})["changes"]
@@ -155,7 +169,12 @@ class SettingAThreshold(FillPipelineTestCase):
 		stay unable to overfill: nobody ever sends an upper bound for one."""
 		self.tool_data(
 			"update_fill_threshold",
-			{"container_type": "pear_bin", "company": MAIN, "lower_bound_pct": 80.0, "upper_bound_pct": 110.0},
+			{
+				"container_type": "pear_bin",
+				"company": MAIN,
+				"lower_bound_pct": 80.0,
+				"upper_bound_pct": 110.0,
+			},
 		)
 		data = self.tool_data(
 			"update_fill_threshold",
@@ -178,21 +197,24 @@ class SettingAThreshold(FillPipelineTestCase):
 
 	def test_a_negative_lower_bound_is_refused(self):
 		message = self.tool_error(
-			"update_fill_threshold", {"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": -1}
+			"update_fill_threshold",
+			{"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": -1},
 		)
 		self.assertIn("must not be negative", message)
 
 	def test_a_caller_without_the_foreman_role_is_refused(self):
 		set_roles("Administrator", ["Sales User"])
 		message = self.tool_error(
-			"update_fill_threshold", {"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": 85.0}
+			"update_fill_threshold",
+			{"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": 85.0},
 		)
 		self.assertIn("Foreman", message)
 
 	def test_the_tool_is_behind_its_own_switch(self):
 		self.configure(enabled=1, **{**ON, "allow_update_fill_threshold": 0})
 		message = self.tool_error(
-			"update_fill_threshold", {"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": 85.0}
+			"update_fill_threshold",
+			{"container_type": "cherry_bucket", "company": MAIN, "lower_bound_pct": 85.0},
 		)
 		self.assertIn("is switched off on this site", message)
 
@@ -231,15 +253,26 @@ class TheDetermination(FillPipelineTestCase):
 	def test_underfill_and_overfill_are_reported(self):
 		self.tool_data(
 			"update_fill_threshold",
-			{"container_type": "pear_bin", "company": MAIN, "lower_bound_pct": 80.0, "upper_bound_pct": 110.0},
+			{
+				"container_type": "pear_bin",
+				"company": MAIN,
+				"lower_bound_pct": 80.0,
+				"upper_bound_pct": 110.0,
+			},
 		)
 		self.an_entry(
-			"BLE-UNDER", entry_uuid="BLE-UNDER", container_type="pear_bin",
-			mask_area_px=30000.0, container_area_px=48000.0,  # 62.5%
+			"BLE-UNDER",
+			entry_uuid="BLE-UNDER",
+			container_type="pear_bin",
+			mask_area_px=30000.0,
+			container_area_px=48000.0,  # 62.5%
 		)
 		self.an_entry(
-			"BLE-OVER", entry_uuid="BLE-OVER", container_type="pear_bin",
-			mask_area_px=58000.0, container_area_px=48000.0,  # 120.83%
+			"BLE-OVER",
+			entry_uuid="BLE-OVER",
+			container_type="pear_bin",
+			mask_area_px=58000.0,
+			container_area_px=48000.0,  # 120.83%
 		)
 		under = self.tool_data("get_fill_determination", {"entry": "BLE-UNDER"})
 		over = self.tool_data("get_fill_determination", {"entry": "BLE-OVER"})
@@ -310,7 +343,9 @@ class TheChangeLog(FillPipelineTestCase):
 			"acknowledge_threshold_update",
 			{"employee": checker, "container_type": "cherry_bucket", "company": MAIN},
 		)
-		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "cherry_bucket"})["changes"]
+		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "cherry_bucket"})[
+			"changes"
+		]
 		self.assertEqual(len(changes), 1)
 		self.assertEqual(changes[0]["acknowledged_count"], 1)
 
@@ -321,7 +356,12 @@ class TheChangeLog(FillPipelineTestCase):
 		)
 		self.tool_data(
 			"update_fill_threshold",
-			{"container_type": "pear_bin", "company": MAIN, "lower_bound_pct": 80.0, "upper_bound_pct": 110.0},
+			{
+				"container_type": "pear_bin",
+				"company": MAIN,
+				"lower_bound_pct": 80.0,
+				"upper_bound_pct": 110.0,
+			},
 		)
 		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "pear_bin"})["changes"]
 		self.assertEqual([c["container_type"] for c in changes], ["pear_bin"])
@@ -357,7 +397,9 @@ class Acknowledging(FillPipelineTestCase):
 			{"employee": checker, "container_type": "cherry_bucket", "company": MAIN},
 		)
 		self.assertTrue(second["already_acknowledged"])
-		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "cherry_bucket"})["changes"]
+		changes = self.tool_data("list_fill_threshold_changes", {"container_type": "cherry_bucket"})[
+			"changes"
+		]
 		self.assertEqual(changes[0]["acknowledged_count"], 1)
 
 	def test_an_unknown_employee_is_refused(self):
@@ -456,16 +498,19 @@ class TheFillDeterminationEngine(SeededTestCase):
 		self.assertIsNone(result["fill_percentage"])
 
 	def test_a_zero_container_area_does_not_divide_by_zero(self):
-		result = bucket_bridge.fill_determination(
-			{"mask_area_px": 100.0, "container_area_px": 0.0}, None
-		)
+		result = bucket_bridge.fill_determination({"mask_area_px": 100.0, "container_area_px": 0.0}, None)
 		self.assertIsNone(result["computed_fill_percentage"])
 		self.assertEqual(result["result"], "Unknown")
 
 	def test_the_computed_percentage_wins_over_the_stored_one(self):
 		result = bucket_bridge.fill_determination(
 			{"mask_area_px": 45000.0, "container_area_px": 48000.0, "coverage_percent": 50.0},
-			{"lower_bound_pct": 0.0, "upper_bound_pct": None, "container_type": "cherry_bucket", "version": 1},
+			{
+				"lower_bound_pct": 0.0,
+				"upper_bound_pct": None,
+				"container_type": "cherry_bucket",
+				"version": 1,
+			},
 		)
 		self.assertEqual(result["computed_fill_percentage"], 93.75)
 		self.assertEqual(result["fill_percentage"], 93.75)

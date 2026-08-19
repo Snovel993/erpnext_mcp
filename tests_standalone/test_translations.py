@@ -157,7 +157,9 @@ class TheKeyIsNotTheEnglish(TranslationTestCase):
 			"update_translation",
 			{"key": "wizard.action.open", "language": "en", "value": "Open", "category": "Wizard Labels"},
 		)
-		self.tool_data("update_translation", {"key": "wizard.action.open", "language": "es", "value": "Abrir"})
+		self.tool_data(
+			"update_translation", {"key": "wizard.action.open", "language": "es", "value": "Abrir"}
+		)
 		self.tool_data("update_translation", {"key": "shift.status.open", "language": "en", "value": "Open"})
 
 		button = self.tool_data("get_translation", {"key": "wizard.action.open", "language": "es"})
@@ -179,7 +181,9 @@ class TheKeyIsNotTheEnglish(TranslationTestCase):
 		self.assertIn("Nothing was written", error)
 
 	def test_a_single_segment_key_is_refused_because_the_prefix_is_the_grouping(self):
-		error = self.tool_error("update_translation", {"key": "harvest", "language": "en", "value": "Harvest"})
+		error = self.tool_error(
+			"update_translation", {"key": "harvest", "language": "en", "value": "Harvest"}
+		)
 		self.assertIn("at least two parts", error)
 
 
@@ -197,12 +201,16 @@ class TheFallbackIsLoud(TranslationTestCase):
 		self.assertIn("no es for", data["translation_note"])
 
 	def test_a_missing_translation_is_never_a_blank(self):
-		self.tool_data("update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."})
+		self.tool_data(
+			"update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."}
+		)
 		data = self.tool_data("get_translation", {"key": "block.gate.locked", "language": "es"})
 		self.assertNotEqual(data["value"].strip(), "")
 
 	def test_a_missing_translation_is_never_the_raw_key(self):
-		self.tool_data("update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."})
+		self.tool_data(
+			"update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."}
+		)
 		data = self.tool_data("get_translation", {"key": "block.gate.locked", "language": "es"})
 		self.assertNotEqual(data["value"], "block.gate.locked")
 
@@ -221,13 +229,17 @@ class TheFallbackIsLoud(TranslationTestCase):
 		self.assertIn("update_translation", error)
 
 	def test_the_gap_is_listable(self):
-		self.tool_data("update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."})
+		self.tool_data(
+			"update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."}
+		)
 		data = self.tool_data("list_translations", {"language": "es"})
 		self.assertIn("block.gate.locked", data["missing_keys"])
 		self.assertIn("serves ENGLISH", data["translation_note"])
 
 	def test_missing_only_narrows_to_the_gap(self):
-		self.tool_data("update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."})
+		self.tool_data(
+			"update_translation", {"key": "block.gate.locked", "language": "en", "value": "Locked."}
+		)
 		data = self.tool_data("list_translations", {"language": "es", "missing_only": True})
 		self.assertEqual([row["translation_key"] for row in data["translations"]], ["block.gate.locked"])
 
@@ -426,9 +438,7 @@ class TheWizardCanPointAtTheRegister(TranslationTestCase):
 		edited: anything without the prefix behaves exactly as it did before."""
 		row = {"label_en": "When did it happen?"}
 		missing: list = []
-		self.assertEqual(
-			wizards._resolve(row, "label", "es", missing, "step.field"), "When did it happen?"
-		)
+		self.assertEqual(wizards._resolve(row, "label", "es", missing, "step.field"), "When did it happen?")
 		self.assertEqual(missing, [{"where": "step.field", "key": "label", "language": "es"}])
 
 	def test_a_tr_reference_that_falls_back_is_reported_on_the_same_channel(self):
@@ -449,9 +459,7 @@ class TheWizardCanPointAtTheRegister(TranslationTestCase):
 		row to go and write."""
 		row = {"label_en": "tr:wizard.field.nothing"}
 		missing: list = []
-		self.assertEqual(
-			wizards._resolve(row, "label", "es", missing, "step.x"), "wizard.field.nothing"
-		)
+		self.assertEqual(wizards._resolve(row, "label", "es", missing, "step.x"), "wizard.field.nothing")
 		self.assertEqual(missing[0]["reason"], "no such key")
 
 	def test_a_per_wizard_column_still_wins_over_the_register(self):
@@ -459,6 +467,4 @@ class TheWizardCanPointAtTheRegister(TranslationTestCase):
 		columns. The register is for the string that appears in nine."""
 		row = {"label_en": "tr:wizard.field.photo", "label_es": "Foto del accidente"}
 		missing: list = []
-		self.assertEqual(
-			wizards._resolve(row, "label", "es", missing, "step.field"), "Foto del accidente"
-		)
+		self.assertEqual(wizards._resolve(row, "label", "es", missing, "step.field"), "Foto del accidente")

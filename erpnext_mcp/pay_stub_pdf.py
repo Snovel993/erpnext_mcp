@@ -129,14 +129,14 @@ from .form_pdf_renderer import (
 )
 
 __all__ = [
+	"FOOTER",
+	"HEADER_NOTE",
+	"OT_MULTIPLIER",
 	"available",
+	"file_name_for",
+	"render_pay_stub",
 	"require",
 	"requires_sentence",
-	"render_pay_stub",
-	"file_name_for",
-	"HEADER_NOTE",
-	"FOOTER",
-	"OT_MULTIPLIER",
 ]
 
 #: The line at the head of every page. The tax forms' header says "verify before
@@ -292,11 +292,21 @@ def _identity(sheet: _Sheet, stub: dict, company: dict) -> None:
 	# against each other the moment an employer's address took a third line.
 	line_height = SIZE_SUBTITLE + 3
 	for index, body in enumerate(left):
-		sheet.text(MARGIN, top + index * line_height + SIZE_SUBTITLE,
-		           sheet.clip(body, 250, FONT_LABEL, SIZE_SUBTITLE), FONT_LABEL, SIZE_SUBTITLE)
+		sheet.text(
+			MARGIN,
+			top + index * line_height + SIZE_SUBTITLE,
+			sheet.clip(body, 250, FONT_LABEL, SIZE_SUBTITLE),
+			FONT_LABEL,
+			SIZE_SUBTITLE,
+		)
 	for index, body in enumerate(right):
-		sheet.text(MARGIN + 260, top + index * line_height + SIZE_SUBTITLE,
-		           sheet.clip(body, 250, FONT_LABEL, SIZE_SUBTITLE), FONT_LABEL, SIZE_SUBTITLE)
+		sheet.text(
+			MARGIN + 260,
+			top + index * line_height + SIZE_SUBTITLE,
+			sheet.clip(body, 250, FONT_LABEL, SIZE_SUBTITLE),
+			FONT_LABEL,
+			SIZE_SUBTITLE,
+		)
 	sheet.top = top + max(len(left), len(right)) * line_height
 
 	sheet.spacer(4)
@@ -313,8 +323,14 @@ def _identity(sheet: _Sheet, stub: dict, company: dict) -> None:
 	sheet.text(MARGIN, sheet.top + SIZE_SUBTITLE, period, FONT_LABEL_BOLD, SIZE_SUBTITLE)
 	reference = _clean(stub.get("payroll_entry") or "")
 	if reference:
-		sheet.text(_AMOUNT_X, sheet.top + SIZE_SUBTITLE, f"Payroll run: {reference}",
-		           FONT_LABEL, SIZE_SUBTITLE, align="right")
+		sheet.text(
+			_AMOUNT_X,
+			sheet.top + SIZE_SUBTITLE,
+			f"Payroll run: {reference}",
+			FONT_LABEL,
+			SIZE_SUBTITLE,
+			align="right",
+		)
 	sheet.top += SIZE_SUBTITLE + 6
 
 
@@ -355,38 +371,46 @@ def earnings_lines(stub: dict) -> list[dict]:
 	lines = []
 	pieced = bool(piece_units and piece_rate)
 	if pieced:
-		lines.append({
-			"label": "Piece work",
-			"quantity": _units(piece_units),
-			"rate": _rate(piece_rate),
-			"amount": piece_units * piece_rate,
-		})
+		lines.append(
+			{
+				"label": "Piece work",
+				"quantity": _units(piece_units),
+				"rate": _rate(piece_rate),
+				"amount": piece_units * piece_rate,
+			}
+		)
 		if total_hours:
 			# INFORMATION, NOT AN EARNING: no rate, no amount, and nothing added
 			# to the running total. It is the count the minimum wage floor was
 			# tested against, and a stub that showed piece units and no hours
 			# gives a worker no way to check that test themselves.
-			lines.append({
-				"label": "Hours worked (paid by the piece, not by the hour)",
-				"quantity": _hours(total_hours),
-				"rate": "",
-				"amount": None,
-			})
+			lines.append(
+				{
+					"label": "Hours worked (paid by the piece, not by the hour)",
+					"quantity": _hours(total_hours),
+					"rate": "",
+					"amount": None,
+				}
+			)
 	else:
 		if regular_hours and hourly_rate:
-			lines.append({
-				"label": "Regular hours",
-				"quantity": _hours(regular_hours),
-				"rate": _rate(hourly_rate),
-				"amount": regular_hours * hourly_rate,
-			})
+			lines.append(
+				{
+					"label": "Regular hours",
+					"quantity": _hours(regular_hours),
+					"rate": _rate(hourly_rate),
+					"amount": regular_hours * hourly_rate,
+				}
+			)
 		if overtime_hours and hourly_rate:
-			lines.append({
-				"label": f"Overtime hours at {OT_MULTIPLIER:g}x",
-				"quantity": _hours(overtime_hours),
-				"rate": _rate(hourly_rate * OT_MULTIPLIER),
-				"amount": overtime_hours * hourly_rate * OT_MULTIPLIER,
-			})
+			lines.append(
+				{
+					"label": f"Overtime hours at {OT_MULTIPLIER:g}x",
+					"quantity": _hours(overtime_hours),
+					"rate": _rate(hourly_rate * OT_MULTIPLIER),
+					"amount": overtime_hours * hourly_rate * OT_MULTIPLIER,
+				}
+			)
 
 	priced = [line for line in lines if line["amount"] is not None]
 	balance = earned_gross - sum(line["amount"] for line in priced)
@@ -421,7 +445,8 @@ def _earnings(sheet: _Sheet, stub: dict) -> None:
 	if total_hours and not any(line["amount"] is None for line in lines):
 		sheet.spacer(2)
 		sheet.paragraph(
-			f"Total hours worked this period: {_hours(total_hours)}", size=SIZE_SMALL,
+			f"Total hours worked this period: {_hours(total_hours)}",
+			size=SIZE_SMALL,
 		)
 	if makeup:
 		sheet.paragraph(
@@ -454,10 +479,12 @@ def deduction_lines(stub: dict) -> list[dict]:
 		for row in supplied:
 			amount = _num((row or {}).get("amount"))
 			if amount:
-				lines.append({
-					"label": _clean((row or {}).get("label") or "Other deduction"),
-					"amount": amount,
-				})
+				lines.append(
+					{
+						"label": _clean((row or {}).get("label") or "Other deduction"),
+						"amount": amount,
+					}
+				)
 		return lines
 
 	total = _num(stub.get("total_deductions"))
@@ -484,8 +511,7 @@ def _net(sheet: _Sheet, stub: dict) -> None:
 	top = sheet.top
 	sheet.fill_rect(MARGIN, top, CONTENT_WIDTH, 22, grey=0.9)
 	sheet.text(MARGIN + 6, top + 15, "NET PAY", FONT_LABEL_BOLD, SIZE_HEADING)
-	sheet.text(_AMOUNT_X - 4, top + 15, _money(stub.get("net_pay")), FONT_VALUE, SIZE_HEADING,
-	           align="right")
+	sheet.text(_AMOUNT_X - 4, top + 15, _money(stub.get("net_pay")), FONT_VALUE, SIZE_HEADING, align="right")
 	sheet.top = top + 22
 
 
@@ -606,9 +632,7 @@ def render_pay_stub(
 
 	payload = sheet.render()
 	if not payload.startswith(b"%PDF"):  # pragma: no cover - defensive
-		raise ValueError(
-			f"drawing the pay stub produced {len(payload)} byte(s) that are not a PDF."
-		)
+		raise ValueError(f"drawing the pay stub produced {len(payload)} byte(s) that are not a PDF.")
 	return payload
 
 

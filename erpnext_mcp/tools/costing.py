@@ -250,7 +250,11 @@ def create_biological_asset(args: dict) -> ToolResult:
 		data={"asset": described},
 		summary=(
 			f"registered {asset_type} biological asset {doc.name} ({company}), {status}"
-			+ (f", valued at {described['current_value']}" if described["current_value"] is not None else ", not yet valued")
+			+ (
+				f", valued at {described['current_value']}"
+				if described["current_value"] is not None
+				else ", not yet valued"
+			)
 		),
 		docstatus_delta="none → 0 (draft)",
 	)
@@ -415,12 +419,16 @@ def record_biological_asset_valuation(args: dict) -> ToolResult:
 	doc.save(ignore_permissions=True)
 
 	described = _describe_asset(doc)
-	data = {"asset": described, "previous_value": previous, "recorded": {
-		"valuation_date": valuation_date,
-		"valuation_method": method,
-		"value": float(value or 0),
-		"basis": basis,
-	}}
+	data = {
+		"asset": described,
+		"previous_value": previous,
+		"recorded": {
+			"valuation_date": valuation_date,
+			"valuation_method": method,
+			"value": float(value or 0),
+			"basis": basis,
+		},
+	}
 	if previous is not None:
 		change = round(float(value or 0) - previous, 2)
 		data["change"] = change
@@ -511,7 +519,8 @@ def create_standard_cost(args: dict) -> ToolResult:
 		data=data,
 		summary=(
 			f"created Standard Cost {doc.name}: {subject} at {doc.standard_rate} {basis} "
-			f"from {doc.effective_from}" + (f" to {doc.effective_to}" if doc.effective_to else " (open-ended)")
+			f"from {doc.effective_from}"
+			+ (f" to {doc.effective_to}" if doc.effective_to else " (open-ended)")
 		),
 		docstatus_delta="none → 0 (draft)",
 	)
@@ -642,9 +651,13 @@ def list_standard_costs(args: dict) -> ToolResult:
 		by_subject: dict = {}
 		for row in rows:
 			by_subject.setdefault((row["subject"], row.get("cost_basis")), []).append(row)
-		rows = [picked for picked in (select_effective(group, on_date) for group in by_subject.values()) if picked]
+		rows = [
+			picked for picked in (select_effective(group, on_date) for group in by_subject.values()) if picked
+		]
 
-	unmeasurable = [row["name"] for row in rows if not row.get("cost_center") and not row.get("expense_account")]
+	unmeasurable = [
+		row["name"] for row in rows if not row.get("cost_center") and not row.get("expense_account")
+	]
 	return ToolResult(
 		data={
 			"standards": rows,
@@ -762,9 +775,7 @@ def _actuals(standard: dict, from_date: str, to_date: str) -> dict:
 	if from_date and to_date:
 		filters["posting_date"] = ("between", [from_date, to_date])
 
-	rows = frappe.db.get_all(
-		"GL Entry", filters=filters, fields=["name", "debit", "credit"], limit=5000
-	)
+	rows = frappe.db.get_all("GL Entry", filters=filters, fields=["name", "debit", "credit"], limit=5000)
 	total = round(sum(float(row.get("debit") or 0) - float(row.get("credit") or 0) for row in rows or []), 2)
 	out.update(
 		{
@@ -831,7 +842,9 @@ def get_cost_variance_report(args: dict) -> ToolResult:
 	by_key: dict = {}
 	for row in rows:
 		by_key.setdefault((row["subject"], row.get("cost_basis")), []).append(row)
-	selected = [picked for picked in (select_effective(group, on_date) for group in by_key.values()) if picked]
+	selected = [
+		picked for picked in (select_effective(group, on_date) for group in by_key.values()) if picked
+	]
 
 	supplied = {}
 	raw = args.get("actuals")
@@ -859,7 +872,12 @@ def get_cost_variance_report(args: dict) -> ToolResult:
 
 		if given.get("actual_amount") is not None:
 			actual = round(float(given["actual_amount"]), 2)
-			measured = {"measurable": True, "actual_amount": actual, "entry_count": 0, "basis": "supplied by the caller"}
+			measured = {
+				"measurable": True,
+				"actual_amount": actual,
+				"entry_count": 0,
+				"basis": "supplied by the caller",
+			}
 		else:
 			measured = _actuals(standard, from_date, to_date)
 			actual = measured["actual_amount"]

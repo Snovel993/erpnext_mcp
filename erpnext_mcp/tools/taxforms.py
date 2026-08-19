@@ -33,6 +33,7 @@ WHAT THIS DOES NOT DO. File anything. Render an official scannable Copy A.
 Compute a deposit schedule. `mark_tax_form_filed` records that a human filed it
 and what the agency gave back — it is a bookkeeping act, not a transmission.
 """
+
 from __future__ import annotations
 
 import json
@@ -112,9 +113,19 @@ def list_tax_forms(args: dict) -> ToolResult:
 		TAX_FORM,
 		filters=filters,
 		fields=[
-			"name", "form_type", "company", "fiscal_year", "quarter",
-			"employee", "employee_name", "related_party", "status",
-			"period_start", "period_end", "filed_date", "generated_date",
+			"name",
+			"form_type",
+			"company",
+			"fiscal_year",
+			"quarter",
+			"employee",
+			"employee_name",
+			"related_party",
+			"status",
+			"period_start",
+			"period_end",
+			"filed_date",
+			"generated_date",
 		],
 		limit_page_length=limit,
 		order_by="fiscal_year desc, quarter asc, form_type asc, modified desc",
@@ -128,7 +139,7 @@ def list_tax_forms(args: dict) -> ToolResult:
 	return ToolResult(
 		data={"forms": forms, "count": len(forms), "by_status": by_status},
 		summary=f"{len(forms)} tax form(s)"
-		        + (f" — {', '.join(f'{n} {s}' for s, n in sorted(by_status.items()))}" if by_status else ""),
+		+ (f" — {', '.join(f'{n} {s}' for s, n in sorted(by_status.items()))}" if by_status else ""),
 	)
 
 
@@ -194,8 +205,7 @@ def generate_tax_form(args: dict) -> ToolResult:
 			related_party = as_str(args, "related_party") or as_str(args, "contractor")
 			if not related_party:
 				raise ToolError(
-					"related_party is required for a 1099-NEC — it names the contractor "
-					"the form is for."
+					"related_party is required for a 1099-NEC — it names the contractor the form is for."
 				)
 			if not frappe.db.exists(RELATED_PARTY, related_party):
 				raise ToolError(f"no Related Party called {related_party!r} on this site.")
@@ -210,22 +220,24 @@ def generate_tax_form(args: dict) -> ToolResult:
 
 	result = _compute(form_type, company, year, quarter, employee, related_party, args)
 
-	doc = frappe.get_doc({
-		"doctype": TAX_FORM,
-		"form_type": form_type,
-		"company": company,
-		"fiscal_year": str(year),
-		"quarter": quarter or None,
-		"employee": employee or None,
-		"related_party": related_party or None,
-		"period_start": result["period_start"],
-		"period_end": result["period_end"],
-		"status": "Generated",
-		"form_data_json": json.dumps(result["form_data"], default=str, indent=2),
-		"generated_by": _current_user(),
-		"generated_date": now(),
-		"notes": as_str(args, "notes") or None,
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": TAX_FORM,
+			"form_type": form_type,
+			"company": company,
+			"fiscal_year": str(year),
+			"quarter": quarter or None,
+			"employee": employee or None,
+			"related_party": related_party or None,
+			"period_start": result["period_start"],
+			"period_end": result["period_end"],
+			"status": "Generated",
+			"form_data_json": json.dumps(result["form_data"], default=str, indent=2),
+			"generated_by": _current_user(),
+			"generated_date": now(),
+			"notes": as_str(args, "notes") or None,
+		}
+	)
 	doc.flags.ignore_permissions = True
 	doc.insert()
 
@@ -246,8 +258,8 @@ def generate_tax_form(args: dict) -> ToolResult:
 			"form_data": result["form_data"],
 		},
 		summary=f"{form_type} {year}{' ' + quarter if quarter else ''} generated as {doc.name} "
-		        f"from {result['slip_count']} payroll slip(s)"
-		        + (f", {len(warnings)} warning(s)" if warnings else ""),
+		f"from {result['slip_count']} payroll slip(s)"
+		+ (f", {len(warnings)} warning(s)" if warnings else ""),
 	)
 
 
@@ -279,19 +291,28 @@ def regenerate_tax_form(args: dict) -> ToolResult:
 	previous = _load_form_data(doc.get("form_data_json"))
 
 	result = _compute(
-		doc.form_type, doc.company, year, quarter,
-		doc.get("employee"), doc.get("related_party"), args,
+		doc.form_type,
+		doc.company,
+		year,
+		quarter,
+		doc.get("employee"),
+		doc.get("related_party"),
+		args,
 	)
 	changes = _diff(previous, result["form_data"])
 
-	frappe.db.set_value(TAX_FORM, name, {
-		"form_data_json": json.dumps(result["form_data"], default=str, indent=2),
-		"period_start": result["period_start"],
-		"period_end": result["period_end"],
-		"generated_by": _current_user(),
-		"generated_date": now(),
-		"status": "Generated" if doc.status == "Draft" else doc.status,
-	})
+	frappe.db.set_value(
+		TAX_FORM,
+		name,
+		{
+			"form_data_json": json.dumps(result["form_data"], default=str, indent=2),
+			"period_start": result["period_start"],
+			"period_end": result["period_end"],
+			"generated_by": _current_user(),
+			"generated_date": now(),
+			"status": "Generated" if doc.status == "Draft" else doc.status,
+		},
+	)
 
 	return ToolResult(
 		data={
@@ -305,7 +326,7 @@ def regenerate_tax_form(args: dict) -> ToolResult:
 			"form_data": result["form_data"],
 		},
 		summary=f"{doc.form_type} {name} recomputed from {result['slip_count']} slip(s) — "
-		        + (f"{len(changes)} value(s) changed" if changes else "no values changed"),
+		+ (f"{len(changes)} value(s) changed" if changes else "no values changed"),
 	)
 
 
@@ -321,8 +342,7 @@ def mark_tax_form_filed(args: dict) -> ToolResult:
 		)
 	if status not in FILEABLE_STATUSES:
 		raise ToolError(
-			f"tax form {name} is {status!r}. Only {' or '.join(FILEABLE_STATUSES)} "
-			f"forms can be marked Filed."
+			f"tax form {name} is {status!r}. Only {' or '.join(FILEABLE_STATUSES)} forms can be marked Filed."
 		)
 
 	filed_date = as_date(args, "filed_date") or today()
@@ -337,7 +357,9 @@ def mark_tax_form_filed(args: dict) -> ToolResult:
 	frappe.db.set_value(TAX_FORM, name, values)
 
 	form_type, year, quarter = frappe.db.get_value(
-		TAX_FORM, name, ["form_type", "fiscal_year", "quarter"],
+		TAX_FORM,
+		name,
+		["form_type", "fiscal_year", "quarter"],
 	)
 
 	return ToolResult(
@@ -351,7 +373,7 @@ def mark_tax_form_filed(args: dict) -> ToolResult:
 			"confirmation_number": confirmation or None,
 		},
 		summary=f"{form_type} {name} marked Filed on {filed_date}"
-		        + (f" (confirmation {confirmation})" if confirmation else ""),
+		+ (f" (confirmation {confirmation})" if confirmation else ""),
 		docstatus_delta=f"{status} → Filed",
 	)
 
@@ -383,7 +405,11 @@ def render_tax_form_pdf(args: dict) -> ToolResult:
 
 	result = _render(doc, args)
 	attachment = artifacts.attach_bytes(
-		TAX_FORM, name, result["file_name"], result["pdf"], field="generated_pdf",
+		TAX_FORM,
+		name,
+		result["file_name"],
+		result["pdf"],
+		field="generated_pdf",
 	)
 
 	data = {
@@ -402,10 +428,9 @@ def render_tax_form_pdf(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=f"{doc.form_type} {name} rendered to {result['file_name']} "
-		        f"({len(result['pdf']):,} bytes) and attached"
-		        + (f", replacing {existing_pdf}" if existing_pdf else "")
-		        + (f" — {result['warning_count']} note(s) printed on it"
-		           if result["warning_count"] else ""),
+		f"({len(result['pdf']):,} bytes) and attached"
+		+ (f", replacing {existing_pdf}" if existing_pdf else "")
+		+ (f" — {result['warning_count']} note(s) printed on it" if result["warning_count"] else ""),
 	)
 
 
@@ -430,32 +455,42 @@ def bulk_render_tax_form_pdfs(args: dict) -> ToolResult:
 		doc = frappe.get_doc(TAX_FORM, name)
 		existing_pdf = str(doc.get("generated_pdf") or "").strip()
 		if existing_pdf and not overwrite:
-			skipped.append({
-				"name": name,
-				"form_type": doc.form_type,
-				"reason": f"already has a PDF at {existing_pdf}; pass overwrite=true to replace it",
-			})
+			skipped.append(
+				{
+					"name": name,
+					"form_type": doc.form_type,
+					"reason": f"already has a PDF at {existing_pdf}; pass overwrite=true to replace it",
+				}
+			)
 			continue
 		try:
 			result = _render(doc, args)
 			attachment = artifacts.attach_bytes(
-				TAX_FORM, name, result["file_name"], result["pdf"], field="generated_pdf",
+				TAX_FORM,
+				name,
+				result["file_name"],
+				result["pdf"],
+				field="generated_pdf",
 			)
 		except Exception as error:
-			failed.append({
+			failed.append(
+				{
+					"name": name,
+					"form_type": doc.form_type,
+					"reason": str(error) or type(error).__name__,
+				}
+			)
+			continue
+		rendered.append(
+			{
 				"name": name,
 				"form_type": doc.form_type,
-				"reason": str(error) or type(error).__name__,
-			})
-			continue
-		rendered.append({
-			"name": name,
-			"form_type": doc.form_type,
-			"subject": result["subject"] or None,
-			"warning_count": result["warning_count"],
-			"replaced": existing_pdf or None,
-			"attachment": artifacts.describe_attachment(attachment, result["pdf"]),
-		})
+				"subject": result["subject"] or None,
+				"warning_count": result["warning_count"],
+				"replaced": existing_pdf or None,
+				"attachment": artifacts.describe_attachment(attachment, result["pdf"]),
+			}
+		)
 
 	parts = [f"{len(rendered)} rendered"]
 	if skipped:
@@ -519,12 +554,13 @@ def _render(doc, args: dict) -> dict:
 		subject_info = _related_party_info(subject)
 
 	pdf = form_pdf_renderer.render_form_pdf(
-		doc.form_type, form_data, company_info, subject_info,
+		doc.form_type,
+		form_data,
+		company_info,
+		subject_info,
 	)
 	if not pdf.startswith(b"%PDF"):  # pragma: no cover - defensive
-		raise ToolError(
-			f"the renderer produced {len(pdf)} byte(s) that are not a PDF. Nothing was attached."
-		)
+		raise ToolError(f"the renderer produced {len(pdf)} byte(s) that are not a PDF. Nothing was attached.")
 
 	return {
 		"pdf": pdf,
@@ -550,8 +586,7 @@ def _bulk_selection(args: dict) -> tuple[list[str], dict]:
 		missing = [name for name in names if not frappe.db.exists(TAX_FORM, name)]
 		if missing:
 			raise ToolError(
-				f"no Tax Form called {', '.join(repr(name) for name in missing)}. "
-				f"Nothing was rendered."
+				f"no Tax Form called {', '.join(repr(name) for name in missing)}. Nothing was rendered."
 			)
 		return names, {"names": names}
 
@@ -589,7 +624,9 @@ def _bulk_selection(args: dict) -> tuple[list[str], dict]:
 	selection["limit"] = limit
 
 	rows = frappe.db.get_all(
-		TAX_FORM, filters=filters, fields=["name"],
+		TAX_FORM,
+		filters=filters,
+		fields=["name"],
 		limit_page_length=limit + 1,
 		order_by="fiscal_year asc, quarter asc, form_type asc, name asc",
 	)
@@ -641,8 +678,13 @@ def _compute(form_type, company, year, quarter, employee, related_party, args) -
 			)
 
 	form_data = generate_form_data(
-		form_type, slips, company_info, year,
-		quarter=quarter, subject_info=subject_info, payments=payments,
+		form_type,
+		slips,
+		company_info,
+		year,
+		quarter=quarter,
+		subject_info=subject_info,
+		payments=payments,
 	)
 
 	return {
@@ -785,14 +827,16 @@ def _load_contractor_payments(related_party: str, period_start: str, period_end:
 		amount = float(row.get("debit") or 0) - float(row.get("credit") or 0)
 		if amount <= 0:
 			continue
-		payments.append({
-			"amount": round(amount, 2),
-			"date": str(row.get("posting_date") or ""),
-			"account": row.get("account"),
-			"reference": row.get("voucher_no"),
-			"voucher_type": row.get("voucher_type"),
-			"federal_withholding": 0.0,
-		})
+		payments.append(
+			{
+				"amount": round(amount, 2),
+				"date": str(row.get("posting_date") or ""),
+				"account": row.get("account"),
+				"reference": row.get("voucher_no"),
+				"voucher_type": row.get("voucher_type"),
+				"federal_withholding": 0.0,
+			}
+		)
 	return payments
 
 
@@ -811,10 +855,18 @@ def _company_info(company: str, args: dict) -> dict:
 		"state_ids": _state_ids(company, args),
 	}
 
-	for key in ("ui_rate", "wa_ui_wage_base", "or_ui_wage_base", "ss_wage_base",
-	            "deposits", "sick_pay_adjustment", "section_3121q_notice",
-	            "tips_and_group_term_life_adjustment",
-	            "small_business_payroll_tax_credit", "nec_threshold"):
+	for key in (
+		"ui_rate",
+		"wa_ui_wage_base",
+		"or_ui_wage_base",
+		"ss_wage_base",
+		"deposits",
+		"sick_pay_adjustment",
+		"section_3121q_notice",
+		"tips_and_group_term_life_adjustment",
+		"small_business_payroll_tax_credit",
+		"nec_threshold",
+	):
 		if args.get(key) not in (None, ""):
 			try:
 				info[key] = float(args[key])
@@ -909,7 +961,10 @@ def _i9_row(employee: str) -> dict:
 		if not fields:
 			return {}
 		row = frappe.db.get_value(
-			"I-9 Form", {"employee": employee}, fields, as_dict=True,
+			"I-9 Form",
+			{"employee": employee},
+			fields,
+			as_dict=True,
 		)
 		return dict(row) if row else {}
 	except Exception:
@@ -948,9 +1003,7 @@ def _ss_wage_base() -> float:
 
 def _check_form_type(value: str) -> str:
 	if value not in FORM_TYPES:
-		raise ToolError(
-			f"form_type must be one of: {', '.join(sorted(FORM_TYPES))}. Got {value!r}."
-		)
+		raise ToolError(f"form_type must be one of: {', '.join(sorted(FORM_TYPES))}. Got {value!r}.")
 	return value
 
 
@@ -978,14 +1031,11 @@ def _quarter_for(form_type: str, args: dict) -> str | None:
 	quarter = as_str(args, "quarter")
 	if FORM_TYPES[form_type]["period"] == "quarter":
 		if not quarter:
-			raise ToolError(
-				f"quarter is required for a {form_type} — one of {', '.join(QUARTERS)}."
-			)
+			raise ToolError(f"quarter is required for a {form_type} — one of {', '.join(QUARTERS)}.")
 		return _check_quarter(quarter)
 	if quarter:
 		raise ToolError(
-			f"{form_type} is an annual form and covers the whole of the tax year; "
-			f"drop the quarter argument."
+			f"{form_type} is an annual form and covers the whole of the tax year; drop the quarter argument."
 		)
 	return None
 

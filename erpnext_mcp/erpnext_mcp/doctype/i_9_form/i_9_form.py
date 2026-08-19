@@ -21,6 +21,7 @@ days — 8 CFR 274a.2(b)(1)(vi)'s window. Both are read-only and both are
 recomputed here, so an operator who ticks a receipt box in the Desk gets the
 same deadline the tool would have written.
 """
+
 from datetime import timedelta
 
 import frappe

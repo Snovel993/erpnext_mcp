@@ -222,9 +222,7 @@ def _designation_or_refuse(designation: str) -> str:
 		return designation
 	if frappe.db.exists(DESIGNATION, designation):
 		return designation
-	found = frappe.db.get_all(
-		DESIGNATION, filters={"designation_name": designation}, pluck="name", limit=2
-	)
+	found = frappe.db.get_all(DESIGNATION, filters={"designation_name": designation}, pluck="name", limit=2)
 	if len(found) == 1:
 		return str(found[0])
 	raise ToolError(

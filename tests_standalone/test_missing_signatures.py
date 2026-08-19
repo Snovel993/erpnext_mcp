@@ -264,7 +264,8 @@ class TheRulesFindTheEmptyBoxes(SignatureTestCase):
 		self.a_reverification(name, name="I9REV-second", idx=2, reverification_date="2026-06-20")
 		self.sweep()
 		rows = [
-			row for row in self.alerts_of("i9_supplement_b_unsigned")
+			row
+			for row in self.alerts_of("i9_supplement_b_unsigned")
 			if not frappe.utils.cint(row.get("dismissed"))
 		]
 		self.assertEqual(len(rows), 1)
@@ -289,7 +290,8 @@ class TheRulesFindTheEmptyBoxes(SignatureTestCase):
 		self.a_w4(name="W4-2025-0009", status="Superseded", tax_year=2025)
 		self.sweep()
 		rows = [
-			row for row in self.alerts_of("w4_signature_missing")
+			row
+			for row in self.alerts_of("w4_signature_missing")
 			if not frappe.utils.cint(row.get("dismissed"))
 		]
 		self.assertEqual([row["source_docname"] for row in rows], ["W4-2026-0001"])
@@ -305,7 +307,8 @@ class TheRulesFindTheEmptyBoxes(SignatureTestCase):
 		self.a_w4(name="W4-2025-0002", tax_year=2025)
 		self.sweep()
 		rows = [
-			row for row in self.alerts_of("w4_tax_year_outdated")
+			row
+			for row in self.alerts_of("w4_tax_year_outdated")
 			if not frappe.utils.cint(row.get("dismissed"))
 		]
 		self.assertEqual([row["source_docname"] for row in rows], ["W4-2025-0002"])
@@ -373,9 +376,7 @@ class TheAlertsBecomeWork(SignatureTestCase):
 		self.an_i9(status="Complete", verification_date="2026-07-03")
 		self.sweep()
 		report = self.tool_data("generate_tasks_from_compliance_alerts", {"company": MAIN})
-		entry = next(
-			row for row in report["created"] if row["alert_type"] == "i9_section_2_unsigned"
-		)
+		entry = next(row for row in report["created"] if row["alert_type"] == "i9_section_2_unsigned")
 		self.assertIsNone(entry["assigned_to"])
 		self.assertEqual(entry["skill_required"], "hr_admin")
 		self.assertNotEqual(entry["dispatch_mode"], "Dispatched")
@@ -386,9 +387,7 @@ class TheAlertsBecomeWork(SignatureTestCase):
 		self.an_i9()
 		self.sweep()
 		report = self.tool_data("generate_tasks_from_compliance_alerts", {"company": MAIN})
-		entry = next(
-			row for row in report["created"] if row["alert_type"] == "i9_section_1_unsigned"
-		)
+		entry = next(row for row in report["created"] if row["alert_type"] == "i9_section_1_unsigned")
 		self.assertIsNone(entry["assigned_to"])
 		self.assertIn("reports_to", " ".join(entry["routing_notes"]))
 
@@ -406,8 +405,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		name = self.an_i9()
 		data = self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		row = frappe.db.get_value(
 			"I-9 Form", name, ["section_1_signature", "section_1_signed_at"], as_dict=True
@@ -421,8 +424,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		name = self.an_i9()
 		data = self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "signature_base64": A_CAPTURE,
-			 "field": "section_1_signature"},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"signature_base64": A_CAPTURE,
+				"field": "section_1_signature",
+			},
 		)
 		self.assertTrue(frappe.db.get_value("File", data["file_docname"], "is_private"))
 
@@ -438,13 +445,15 @@ class TheSignatureIsCollected(SignatureTestCase):
 		self.a_roster()
 		name = self.an_i9(status="Reverification Needed")
 		self.a_reverification(name, signed="/private/files/old.png")
-		newest = self.a_reverification(
-			name, name="I9REV-second", idx=2, reverification_date="2026-06-20"
-		)
+		newest = self.a_reverification(name, name="I9REV-second", idx=2, reverification_date="2026-06-20")
 		data = self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_3_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_3_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertEqual(data["row"], newest)
 		self.assertTrue(frappe.db.get_value("I-9 Reverification", newest, "section_3_signature"))
@@ -455,8 +464,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		task = self.task_for("i9_section_1_unsigned")
 		data = self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertEqual(data["task"]["task"], task["name"])
 		self.assertTrue(data["task"]["completed"])
@@ -467,21 +480,21 @@ class TheSignatureIsCollected(SignatureTestCase):
 		people. Closing the wrong one would tell a supervisor the employee had
 		signed because an authorized signer had."""
 		self.a_roster()
-		name = self.an_i9(
-			status="Complete", verification_date="2026-07-03", verifier_name="Ada Orchard"
-		)
+		name = self.an_i9(status="Complete", verification_date="2026-07-03", verifier_name="Ada Orchard")
 		self.sweep()
 		section_1 = self.task_for("i9_section_1_unsigned")
 		section_2 = self.task_for("i9_section_2_unsigned")
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_2_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_2_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertEqual(frappe.db.get_value("Farm Task", section_2["name"], "state"), "Completed")
-		self.assertNotEqual(
-			frappe.db.get_value("Farm Task", section_1["name"], "state"), "Completed"
-		)
+		self.assertNotEqual(frappe.db.get_value("Farm Task", section_1["name"], "state"), "Completed")
 
 	def test_the_alert_auto_dismisses_on_the_next_sweep(self):
 		"""The test that makes this a loop rather than three features."""
@@ -490,8 +503,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		self.assertIn("i9_section_1_unsigned", self.raised())
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.sweep()
 		self.assertNotIn("i9_section_1_unsigned", self.raised())
@@ -500,8 +517,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		name = self.an_i9()
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": f"data:image/png;base64,{A_CAPTURE}"},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": f"data:image/png;base64,{A_CAPTURE}",
+			},
 		)
 		self.assertTrue(frappe.db.get_value("I-9 Form", name, "section_1_signature"))
 
@@ -512,8 +533,12 @@ class TheSignatureIsCollected(SignatureTestCase):
 		name = self.an_i9()
 		data = self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertFalse(data["pdf"]["regenerated"])
 		self.assertIn("nothing to bring up to date", data["pdf"]["note"])
@@ -525,8 +550,7 @@ class TheRefusals(SignatureTestCase):
 		name = self.an_i9()
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "generated_pdf",
-			 "signature_base64": A_CAPTURE},
+			{"doctype": "I-9 Form", "name": name, "field": "generated_pdf", "signature_base64": A_CAPTURE},
 		)
 		self.assertIn("not a signature box", error)
 		self.assertIn("section_2_signature", error)
@@ -536,8 +560,12 @@ class TheRefusals(SignatureTestCase):
 		name = self.an_i9()
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": base64.b64encode(b"<svg onload=alert(1)>").decode()},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": base64.b64encode(b"<svg onload=alert(1)>").decode(),
+			},
 		)
 		self.assertIn("neither a PNG nor a JPEG", error)
 
@@ -548,23 +576,27 @@ class TheRefusals(SignatureTestCase):
 		).decode()
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": oversized},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": oversized,
+			},
 		)
 		self.assertIn("attach_signed_i9", error)
 
 	def test_a_second_signature_is_refused_without_overwrite(self):
 		name = self.an_i9()
 		payload = {
-			"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
+			"doctype": "I-9 Form",
+			"name": name,
+			"field": "section_1_signature",
 			"signature_base64": A_CAPTURE,
 		}
 		first = self.tool_data("collect_form_signature", payload)
 		error = self.tool_error("collect_form_signature", payload)
 		self.assertIn("already carries a signature", error)
-		self.assertEqual(
-			frappe.db.get_value("I-9 Form", name, "section_1_signature"), first["signature"]
-		)
+		self.assertEqual(frappe.db.get_value("I-9 Form", name, "section_1_signature"), first["signature"])
 		replaced = self.tool_data("collect_form_signature", {**payload, "overwrite": True})
 		self.assertEqual(replaced["replaced"], first["signature"])
 
@@ -572,8 +604,12 @@ class TheRefusals(SignatureTestCase):
 		name = self.an_i9(status="Destroyed")
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertIn("destroyed", error.lower())
 
@@ -587,15 +623,23 @@ class TheRefusals(SignatureTestCase):
 
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_2_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_2_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertIn("authorized signer", error)
 
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertTrue(frappe.db.get_value("I-9 Form", name, "section_1_signature"))
 
@@ -633,8 +677,12 @@ class TheRefusals(SignatureTestCase):
 
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": theirs, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": theirs,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertIn(OTHER, error)
 		self.assertIn("not scoped to", error)
@@ -643,8 +691,12 @@ class TheRefusals(SignatureTestCase):
 		# And the entity they DO manage is untouched by the refusal.
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": mine, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": mine,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertTrue(frappe.db.get_value("I-9 Form", mine, "section_1_signature"))
 
@@ -659,8 +711,12 @@ class TheRefusals(SignatureTestCase):
 		theirs = self.an_i9(name="I9-2026-THEIRS", company=OTHER)
 		self.tool_data(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": theirs, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": theirs,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertTrue(frappe.db.get_value("I-9 Form", theirs, "section_1_signature"))
 
@@ -669,7 +725,11 @@ class TheRefusals(SignatureTestCase):
 		name = self.an_i9()
 		error = self.tool_error(
 			"collect_form_signature",
-			{"doctype": "I-9 Form", "name": name, "field": "section_1_signature",
-			 "signature_base64": A_CAPTURE},
+			{
+				"doctype": "I-9 Form",
+				"name": name,
+				"field": "section_1_signature",
+				"signature_base64": A_CAPTURE,
+			},
 		)
 		self.assertTrue(error)

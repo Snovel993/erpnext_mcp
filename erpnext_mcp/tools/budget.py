@@ -92,8 +92,7 @@ def _resolve(reference: str):
 	if found:
 		return frappe.get_doc(DOCTYPE, str(found))
 	raise ToolError(
-		f"no Budget called {reference!r} on this site. list_budgets has the register. "
-		"Nothing was changed."
+		f"no Budget called {reference!r} on this site. list_budgets has the register. Nothing was changed."
 	)
 
 
@@ -203,7 +202,10 @@ def _requested_line_items(raw, company: str) -> list:
 				"account. Nothing was changed."
 			)
 		seen.add(resolved)
-		row = {"account": resolved, "budgeted_amount": as_float(entry.get("budgeted_amount"), "budgeted_amount")}
+		row = {
+			"account": resolved,
+			"budgeted_amount": as_float(entry.get("budgeted_amount"), "budgeted_amount"),
+		}
 		if entry.get("threshold_pct") not in (None, ""):
 			row["threshold_pct"] = as_float(entry.get("threshold_pct"), "threshold_pct")
 		rows.append(row)
@@ -275,7 +277,9 @@ def _gl_actual(account: str, company: str, start: str, end: str) -> float:
 	filters = {"company": company, "account": account, "posting_date": ("between", [start, end])}
 	if compat.has_field("GL Entry", "is_cancelled"):
 		filters["is_cancelled"] = 0
-	totals = frappe.db.get_all("GL Entry", filters=filters, fields=["sum(debit) as debit", "sum(credit) as credit"])
+	totals = frappe.db.get_all(
+		"GL Entry", filters=filters, fields=["sum(debit) as debit", "sum(credit) as credit"]
+	)
 	row = (totals or [{}])[0] or {}
 	debit = float(row.get("debit") or 0)
 	credit = float(row.get("credit") or 0)
@@ -360,8 +364,7 @@ def create_budget(args: dict) -> ToolResult:
 	status = as_str(args, "status") or budget_engine.STATUS_DRAFT
 	if status not in budget_engine.STATUSES:
 		raise ToolError(
-			f"status must be one of {', '.join(budget_engine.STATUSES)}; got {status!r}. "
-			"Nothing was changed."
+			f"status must be one of {', '.join(budget_engine.STATUSES)}; got {status!r}. Nothing was changed."
 		)
 
 	doc = frappe.new_doc(DOCTYPE)
@@ -538,11 +541,15 @@ def list_budgets(args: dict) -> ToolResult:
 	rows = []
 	for row in found:
 		line_count = len(
-			frappe.db.get_all(LINE_ITEM, filters={"parent": row["name"], "parenttype": DOCTYPE}, pluck="name", limit=1000)
+			frappe.db.get_all(
+				LINE_ITEM, filters={"parent": row["name"], "parenttype": DOCTYPE}, pluck="name", limit=1000
+			)
 			or []
 		)
 		kpi_count = len(
-			frappe.db.get_all(KPI_TARGET, filters={"parent": row["name"], "parenttype": DOCTYPE}, pluck="name", limit=1000)
+			frappe.db.get_all(
+				KPI_TARGET, filters={"parent": row["name"], "parenttype": DOCTYPE}, pluck="name", limit=1000
+			)
 			or []
 		)
 		rows.append({**row, "line_item_count": line_count, "kpi_target_count": kpi_count})
@@ -612,7 +619,10 @@ def refresh_all_active_budgets() -> dict:
 	report = {"refreshed": [], "failed": []}
 	if not compat.doctype_exists(DOCTYPE):
 		return report
-	names = frappe.db.get_all(DOCTYPE, filters={"status": budget_engine.STATUS_ACTIVE}, pluck="name", limit=1000) or []
+	names = (
+		frappe.db.get_all(DOCTYPE, filters={"status": budget_engine.STATUS_ACTIVE}, pluck="name", limit=1000)
+		or []
+	)
 	for name in names:
 		try:
 			doc = frappe.get_doc(DOCTYPE, name)
@@ -659,8 +669,7 @@ def get_budget_variance_report(args: dict) -> ToolResult:
 			"the KPI framework."
 		)
 	summary = (
-		f"{doc.budget_name}: {len(breaches)} breach(es) "
-		f"({len(critical)} critical, {len(warning)} warning)"
+		f"{doc.budget_name}: {len(breaches)} breach(es) ({len(critical)} critical, {len(warning)} warning)"
 	)
 	return ToolResult(data=data, summary=summary)
 

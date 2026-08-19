@@ -463,7 +463,9 @@ def get_crop(args: dict) -> ToolResult:
 	#: are all in one group cannot set fruit for itself — reported, never
 	#: refused, because a grower may be pollinating from a neighbouring block or
 	#: with a variety they have not recorded here.
-	groups = sorted({str(v.get("pollination_group") or "").strip() for v in varieties if v.get("pollination_group")})
+	groups = sorted(
+		{str(v.get("pollination_group") or "").strip() for v in varieties if v.get("pollination_group")}
+	)
 	notes = []
 	if described["default_phi_days"] is None:
 		notes.append(
@@ -555,7 +557,9 @@ def create_crop(args: dict) -> ToolResult:
 	if not described["harvest_months"]:
 		warnings.append("No harvest window recorded, so nothing can schedule against this crop's season.")
 	if not doc.varieties:
-		warnings.append("No varieties recorded. Packouts and yields grouped by variety will have nothing to group.")
+		warnings.append(
+			"No varieties recorded. Packouts and yields grouped by variety will have nothing to group."
+		)
 
 	return ToolResult(
 		data={
@@ -566,8 +570,7 @@ def create_crop(args: dict) -> ToolResult:
 			"phi_caveat": PHI_CAVEAT,
 		},
 		summary=(
-			f"registered crop {doc.name} ({described['crop_type']}, "
-			f"{len(doc.varieties or [])} variety(ies))"
+			f"registered crop {doc.name} ({described['crop_type']}, {len(doc.varieties or [])} variety(ies))"
 		),
 		docstatus_delta="none → 0 (created)",
 	)
@@ -687,7 +690,10 @@ def update_crop(args: dict) -> ToolResult:
 			doc.append("varieties", entry)
 	if "water_requirements" in args:
 		wanted = _water_rows(args.get("water_requirements"))
-		changes["water_requirements"] = [f"{len(doc.water_requirements or [])} row(s)", f"{len(wanted)} row(s)"]
+		changes["water_requirements"] = [
+			f"{len(doc.water_requirements or [])} row(s)",
+			f"{len(wanted)} row(s)",
+		]
 		doc.set("water_requirements", [])
 		for entry in wanted:
 			doc.append("water_requirements", entry)
@@ -843,9 +849,7 @@ def get_market(args: dict) -> ToolResult:
 			"grade_count": len(grades),
 			"top_grade": ladder[0]["grade_name"] if ladder else None,
 			"premium_spread_pct": (
-				round(
-					float(ladder[0].get("premium_pct") or 0) - float(ladder[-1].get("premium_pct") or 0), 2
-				)
+				round(float(ladder[0].get("premium_pct") or 0) - float(ladder[-1].get("premium_pct") or 0), 2)
 				if len(ladder) > 1
 				else None
 			),
@@ -880,7 +884,9 @@ def create_market(args: dict) -> ToolResult:
 
 	doc = frappe.new_doc(MARKET)
 	doc.market_name = market_name
-	doc.market_type = as_choice(MARKET, "market_type", as_str(args, "market_type", required=True), "market_type")
+	doc.market_type = as_choice(
+		MARKET, "market_type", as_str(args, "market_type", required=True), "market_type"
+	)
 	for key in ("region", "shipping_point", "notes"):
 		doc.set(key, as_str(args, key))
 	for key, doctype in (("country", "Country"), ("currency", "Currency"), ("primary_commodity", CROP)):
@@ -968,7 +974,12 @@ def update_market(args: dict) -> ToolResult:
 			_stage(changes, doc, key, as_str(args, key))
 	if "market_type" in args:
 		value = as_str(args, "market_type")
-		_stage(changes, doc, "market_type", as_choice(MARKET, "market_type", value, "market_type") if value else "")
+		_stage(
+			changes,
+			doc,
+			"market_type",
+			as_choice(MARKET, "market_type", value, "market_type") if value else "",
+		)
 	for key, doctype in (("country", "Country"), ("currency", "Currency"), ("primary_commodity", CROP)):
 		if key not in args:
 			continue
@@ -1196,8 +1207,7 @@ def get_uom_conversions(args: dict) -> ToolResult:
 		return ToolResult(
 			data=_conversion_answer(from_uom, to_uom, crop, chained, pair_rows, path=chained["path"]),
 			summary=(
-				f"1 {from_uom} = {round(chained['factor'], 6)} {to_uom} via "
-				f"{' → '.join(chained['path'])}"
+				f"1 {from_uom} = {round(chained['factor'], 6)} {to_uom} via {' → '.join(chained['path'])}"
 			),
 		)
 

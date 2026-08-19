@@ -198,8 +198,7 @@ def _field(row: dict) -> dict:
 		"last_spray_date": str(row.get("last_spray_date") or "")[:10] or None,
 		"water_test_last_date": str(row.get("water_test_last_date") or "")[:10] or None,
 		"food_safety_zone": compat.checked(row.get("food_safety_zone")),
-		"wildlife_intrusion_last_report": str(row.get("wildlife_intrusion_last_report") or "")[:10]
-		or None,
+		"wildlife_intrusion_last_report": str(row.get("wildlife_intrusion_last_report") or "")[:10] or None,
 	}
 
 
@@ -390,8 +389,7 @@ def _backward_seeds(args: dict, company: str) -> tuple:
 				"never filled in — which is the finding, and list_bucket_entries shows the rest."
 			)
 		notes.append(
-			f"Started from one capture and widened to everything sharing its "
-			f"{', '.join(sorted(seeds))}."
+			f"Started from one capture and widened to everything sharing its {', '.join(sorted(seeds))}."
 		)
 		return {"kind": "bucket entry", "id": entry}, seeds, notes
 
@@ -439,9 +437,7 @@ def _backward_seeds(args: dict, company: str) -> tuple:
 			[row.get("field") for row in tickets] + [row.get("block") for row in tickets]
 		)
 		days = sorted(str(row.get("date") or "")[:10] for row in tickets if row.get("date"))
-		notes.append(
-			f"Reached the ground through {len(tickets)} scale ticket(s) on this settlement."
-		)
+		notes.append(f"Reached the ground through {len(tickets)} scale ticket(s) on this settlement.")
 		return (
 			{"kind": "settlement", "id": statement},
 			{
@@ -479,9 +475,7 @@ def trace_forward(args: dict) -> ToolResult:
 			"water test itself, to bound it."
 		)
 
-	entries = traceability.buckets_for(
-		company=company, blocks=blocks, start=after, end=end
-	)[:cap]
+	entries = traceability.buckets_for(company=company, blocks=blocks, start=after, end=end)[:cap]
 	summary = traceability.summarise_buckets(entries)
 
 	breaks = []
@@ -640,8 +634,7 @@ def _forward_seeds(args: dict) -> tuple:
 		zone = row.get("source")
 		if not zone:
 			raise ToolError(
-				f"Water Test {test} names no irrigation zone, so it reaches no ground. "
-				"Nothing was read."
+				f"Water Test {test} names no irrigation zone, so it reaches no ground. Nothing was read."
 			)
 		blocks = traceability.distinct(
 			dict(entry).get("field")

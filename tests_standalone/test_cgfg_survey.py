@@ -89,7 +89,9 @@ class OrganicStatusIsPerBlock(SurveyTestCase):
 		self.a_parcel()
 
 	def test_certified_organic_derives_the_flag(self):
-		field = self.a_field("Block 1", organic_status="Certified Organic", organic_cert_agency="Oregon Tilth")
+		field = self.a_field(
+			"Block 1", organic_status="Certified Organic", organic_cert_agency="Oregon Tilth"
+		)
 		self.assertEqual(field["organic_status"], "Certified Organic")
 		self.assertTrue(field["organic_certified"])
 		self.assertEqual(field["organic_cert_agency"], "Oregon Tilth")
@@ -115,9 +117,7 @@ class OrganicStatusIsPerBlock(SurveyTestCase):
 
 	def test_the_derived_flag_follows_a_status_change(self):
 		self.a_field("Block 1", organic_status="Certified Organic", organic_cert_agency="CCOF")
-		changed = self.tool_data(
-			"update_field", {"field": "Block 1", "organic_status": "Transitional"}
-		)
+		changed = self.tool_data("update_field", {"field": "Block 1", "organic_status": "Transitional"})
 		self.assertFalse(changed["organic_certified"])
 		self.assertEqual(changed["changed"]["organic_status"], ["Certified Organic", "Transitional"])
 
@@ -130,9 +130,7 @@ class OrganicStatusIsPerBlock(SurveyTestCase):
 		"""
 		self.a_field("Block 1")
 		# create and update both refuse, and both name the field that decides it
-		message = self.tool_error(
-			"update_field", {"field": "Block 1", "organic_certified": True}
-		)
+		message = self.tool_error("update_field", {"field": "Block 1", "organic_certified": True})
 		self.assertIn("organic_status", message)
 		self.assertIn("Nothing was changed", message)
 		message = self.tool_error(
@@ -157,9 +155,7 @@ class OrganicContradictionsAreReportedNotRefused(SurveyTestCase):
 		self.a_parcel()
 
 	def test_an_agency_on_a_conventional_block_warns(self):
-		field = self.a_field(
-			"Block 1", organic_status="Conventional", organic_cert_agency="Oregon Tilth"
-		)
+		field = self.a_field("Block 1", organic_status="Conventional", organic_cert_agency="Oregon Tilth")
 		self.assertTrue(
 			any("certifying agency is recorded" in warning for warning in field["warnings"]),
 			field["warnings"],
@@ -193,11 +189,21 @@ class TheCropFlagCannotAnswerAcreage(SurveyTestCase):
 	def setUp(self):
 		super().setUp()
 		self.a_parcel()
-		self.a_field("Block 1", acreage=8.0, crop="Gala", organic_status="Certified Organic",
-			organic_cert_agency="Oregon Tilth")
+		self.a_field(
+			"Block 1",
+			acreage=8.0,
+			crop="Gala",
+			organic_status="Certified Organic",
+			organic_cert_agency="Oregon Tilth",
+		)
 		self.a_field("Block 2", acreage=12.0, crop="Gala", organic_status="Conventional")
-		self.a_field("Block 3", acreage=5.0, crop="Gala", organic_status="Transitional",
-			transition_start_date="2025-03-01")
+		self.a_field(
+			"Block 3",
+			acreage=5.0,
+			crop="Gala",
+			organic_status="Transitional",
+			transition_start_date="2025-03-01",
+		)
 
 	def test_one_crop_covers_blocks_in_all_three_states(self):
 		"""Nothing about the crop distinguishes them, which is the whole problem."""
@@ -216,9 +222,7 @@ class TheCropFlagCannotAnswerAcreage(SurveyTestCase):
 		)
 
 	def test_the_register_filters_on_the_status_and_on_the_flag(self):
-		by_status = self.tool_data(
-			"list_fields", {"company": MAIN, "organic_status": "Certified Organic"}
-		)
+		by_status = self.tool_data("list_fields", {"company": MAIN, "organic_status": "Certified Organic"})
 		self.assertEqual([row["field_name"] for row in by_status["fields"]], ["Block 1"])
 		by_flag = self.tool_data("list_fields", {"company": MAIN, "organic_certified": True})
 		self.assertEqual([row["field_name"] for row in by_flag["fields"]], ["Block 1"])
@@ -250,9 +254,7 @@ class CountyIsNotCopiedOntoTheBlock(SurveyTestCase):
 	def test_every_row_carries_its_parcels_county(self):
 		register = self.tool_data("list_fields", {"company": MAIN})
 		counties = {row["field_name"]: row["county"] for row in register["fields"]}
-		self.assertEqual(
-			counties, {"Block 1": "Wasco", "Block 2": "Wasco", "Block 3": "Hood River"}
-		)
+		self.assertEqual(counties, {"Block 1": "Wasco", "Block 2": "Wasco", "Block 3": "Hood River"})
 
 	def test_acreage_rolls_up_by_county(self):
 		register = self.tool_data("list_fields", {"company": MAIN})
@@ -326,9 +328,7 @@ class TheTypedDirectShareSaysItIsTyped(SurveyTestCase):
 		self.tool_data(
 			"create_crop", {"crop_name": "Cherry", "crop_type": "Stone Fruit", "pct_direct_marketed": 35}
 		)
-		changed = self.tool_data(
-			"update_crop", {"crop": "Cherry", "pct_direct_marketed": 40}
-		)
+		changed = self.tool_data("update_crop", {"crop": "Cherry", "pct_direct_marketed": 40})
 		self.assertEqual(changed["changed"]["pct_direct_marketed"], [35.0, 40.0])
 		cleared = self.tool_data("update_crop", {"crop": "Cherry", "pct_direct_marketed": ""})
 		self.assertIsNone(cleared["pct_direct_marketed"])
@@ -368,9 +368,7 @@ class TheSalesChannelIsOnTheCustomer(MastersTestCase):
 		self.tool_data(
 			"create_customer", {"customer_name": "Hood River Farm Stand", "sales_channel": "Direct"}
 		)
-		self.tool_data(
-			"create_customer", {"customer_name": "Columbia Packing", "sales_channel": "Packer"}
-		)
+		self.tool_data("create_customer", {"customer_name": "Columbia Packing", "sales_channel": "Packer"})
 		register = self.tool_data("list_customers")
 		self.assertTrue(register["sales_channel_installed"])
 		self.assertEqual(register["by_sales_channel"]["Direct"], 1)
@@ -437,7 +435,11 @@ class PestManagementProvidersAreATable(MastersTestCase):
 						"service_type": "Scouting and written recommendations",
 						"license_number": "OR-PC-4471",
 					},
-					{"provider": "Gorge Orchard IPM", "commodity": "Sweet Cherry", "service_type": "Full IPM programme"},
+					{
+						"provider": "Gorge Orchard IPM",
+						"commodity": "Sweet Cherry",
+						"service_type": "Full IPM programme",
+					},
 				],
 			},
 		)
@@ -531,9 +533,7 @@ class PestManagementProvidersAreATable(MastersTestCase):
 			"update_company",
 			{"company": MAIN, "pest_management_providers": [{"provider": MASTER_SUPPLIER}]},
 		)
-		changed = self.tool_data(
-			"update_company", {"company": MAIN, "pest_management_providers": []}
-		)
+		changed = self.tool_data("update_company", {"company": MAIN, "pest_management_providers": []})
 		self.assertEqual(changed["changed"]["pest_management_providers"], ["1 row(s)", "0 row(s)"])
 		self.assertEqual(changed["pest_management_providers"], [])
 
@@ -567,12 +567,8 @@ class GovernanceCategoriesForPartThree(SurveyTestCase):
 			)
 		for category in self.NEW:
 			with self.subTest(category=category):
-				found = self.tool_data(
-					"list_governance_documents", {"company": MAIN, "category": category}
-				)
-				self.assertEqual(
-					[row["title"] for row in found["documents"]], [f"{category} 2026"]
-				)
+				found = self.tool_data("list_governance_documents", {"company": MAIN, "category": category})
+				self.assertEqual([row["title"] for row in found["documents"]], [f"{category} 2026"])
 
 	def test_the_six_that_were_already_there_still_file(self):
 		"""The other direction: adding to a Select must not disturb it."""

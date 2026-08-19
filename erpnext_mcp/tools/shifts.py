@@ -69,11 +69,11 @@ import itertools
 import frappe
 
 from .. import breaks as breaks_mod
-from ..services import push as push_service
 from .. import compat, geo, minors, shifts, timezones
 from ..args import as_bool, as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
+from ..services import push as push_service
 from . import employee as employee_tool
 from . import shadow_log
 
@@ -289,7 +289,9 @@ def _crew_argument(raw, label: str = "crew_employees") -> list:
 _I9_CLEARED = ("Verified",)
 
 
-def minor_findings(employee: str, employee_name: str, shift_row: dict, joined: str, exclude: str = "") -> dict:
+def minor_findings(
+	employee: str, employee_name: str, shift_row: dict, joined: str, exclude: str = ""
+) -> dict:
 	"""What being under eighteen says about putting this person on this shift.
 
 	v0.98.0. RETURNS FINDINGS; IT DOES NOT REFUSE. Two callers want two different
@@ -319,7 +321,9 @@ def minor_findings(employee: str, employee_name: str, shift_row: dict, joined: s
 	when = str(joined or shift_row.get("start_datetime") or "")
 	born = None
 	if compat.doctype_exists("Employee") and compat.has_field("Employee", "date_of_birth"):
-		row = frappe.db.get_value("Employee", employee, ["employee_name", "date_of_birth"], as_dict=True) or {}
+		row = (
+			frappe.db.get_value("Employee", employee, ["employee_name", "date_of_birth"], as_dict=True) or {}
+		)
 		born = row.get("date_of_birth")
 		# THE NAME IS LOOKED UP WHERE THE CALLER DID NOT HAVE ONE, because every
 		# sentence this function produces is read by a foreman standing next to
@@ -347,9 +351,7 @@ def minor_findings(employee: str, employee_name: str, shift_row: dict, joined: s
 	worked = shifts.hours_worked_by(employee, when[:10], exclude=exclude or str(shift_row.get("name") or ""))
 	out["hours_today"] = worked["today"]
 	out["hours_this_week"] = worked["week"]
-	out["other_shifts_today"] = [
-		entry for entry in worked["shifts"] if entry["day"] == worked["day"]
-	]
+	out["other_shifts_today"] = [entry for entry in worked["shifts"] if entry["day"] == worked["day"]]
 
 	# The span this shift ADDS, where the shift already has an end time. Where it
 	# does not — the ordinary case, a shift that is still running — nothing is
@@ -379,11 +381,7 @@ def _refuse_a_minor_over_the_limit(findings: dict) -> None:
 		"refusal rather than a note: the ceiling is "
 		f"{limits.get('daily_hours')} hour(s) a day and {limits.get('weekly_hours')} a week for the "
 		f"{findings.get('minor_band')} band"
-		+ (
-			f", between {limits['earliest']} and {limits['latest']}"
-			if limits.get("earliest")
-			else ""
-		)
+		+ (f", between {limits['earliest']} and {limits['latest']}" if limits.get("earliest") else "")
 		+ f" ({limits.get('citation')}). If they have already worked today on another crew, close "
 		"or clock them out of that shift first; if the date of birth on their record is wrong, "
 		"correct it with update_employee."
@@ -534,7 +532,9 @@ def start_shift(args: dict) -> ToolResult:
 	# than a record carrying the finding. The finding is loud and it names the
 	# person, the citation and the figure.
 	minors_found = [
-		minor_findings(entry["employee"], "", dict(doc.as_dict()), entry["joined_at"] or start, exclude=doc.name)
+		minor_findings(
+			entry["employee"], "", dict(doc.as_dict()), entry["joined_at"] or start, exclude=doc.name
+		)
 		for entry in crew
 	]
 	over = [entry for entry in minors_found if entry.get("blocked")]
@@ -1054,8 +1054,7 @@ def end_shift(args: dict) -> ToolResult:
 	late = [
 		entry
 		for entry in crew_before
-		if entry.get("left_at")
-		and shifts.to_the_second(entry["left_at"]) > shifts.to_the_second(end)
+		if entry.get("left_at") and shifts.to_the_second(entry["left_at"]) > shifts.to_the_second(end)
 	]
 	if late:
 		names = ", ".join(str(entry.get("employee_name") or entry.get("employee")) for entry in late)
@@ -1604,6 +1603,7 @@ def _track_gaps(points: list) -> list:
 			)
 	return out
 
+
 # ── 9. log_shift_break ────────────────────────────────────────────────────
 
 #: The payroll classification a break is logged under, and the compliance event
@@ -1666,7 +1666,6 @@ def _push_break(shift_name: str, break_kind: str, phase: str, duration_minutes=N
 		return {"shift": shift_name, "sent": 0, "failed": 0, "skipped": 0, "reason": f"error: {error}"}
 
 
-
 def log_shift_break(args: dict) -> ToolResult:
 	"""Start a break on a shift — rest, meal or cool-down.
 
@@ -1682,9 +1681,7 @@ def log_shift_break(args: dict) -> ToolResult:
 
 	break_kind = as_str(args, "break_kind", required=True).strip()
 	if break_kind not in BREAK_KINDS:
-		raise ToolError(
-			f"break_kind must be one of {', '.join(BREAK_KINDS)}. Got {break_kind!r}."
-		)
+		raise ToolError(f"break_kind must be one of {', '.join(BREAK_KINDS)}. Got {break_kind!r}.")
 
 	applies_to = (as_str(args, "applies_to") or "Crew").strip()
 	if applies_to not in VALID_APPLIES_TO:
@@ -1741,7 +1738,11 @@ def log_shift_break(args: dict) -> ToolResult:
 		# a break row with blank heat columns, which is the honest answer:
 		# nobody measured, and that is not a temperature.
 		entry.update(
-			{key: value for key, value in shifts.heat_conditions(shifts.weather_of(row["name"]), when).items() if value is not None}
+			{
+				key: value
+				for key, value in shifts.heat_conditions(shifts.weather_of(row["name"]), when).items()
+				if value is not None
+			}
 		)
 
 	doc = frappe.get_doc(DOCTYPE, row["name"])
@@ -1817,6 +1818,7 @@ def log_shift_break(args: dict) -> ToolResult:
 
 
 # ── 10. end_shift_break ──────────────────────────────────────────────────
+
 
 def end_shift_break(args: dict) -> ToolResult:
 	"""End a running break — write the observed duration.
@@ -1921,7 +1923,7 @@ def get_break_policy(args: dict) -> ToolResult:
 		BREAK_POLICY_DOCTYPE,
 		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
 	)
-	actor = employee_tool.require_shift_role()
+	employee_tool.require_shift_role()
 	# THE CALL USED TO BE `resolve_company(args, actor)`, WHICH IS NOT THIS
 	# FUNCTION'S SIGNATURE. `args.resolve_company` takes (company, required) —
 	# so the dict went in where the docname belongs, `(company or "").strip()`
@@ -2071,7 +2073,9 @@ def _break_schedule_for(row: dict, planned_hours=None, now: str = "", employee: 
 	if measured:
 		heat_index = max(measured)
 
-	events = [dict(entry) for entry in shifts.events_of(str(row.get("name") or "")) if entry.get("break_kind")]
+	events = [
+		dict(entry) for entry in shifts.events_of(str(row.get("name") or "")) if entry.get("break_kind")
+	]
 	# WHOSE SCHEDULE, ANSWERED AS OF THE SHIFT'S OWN DAY. Same one query
 	# `shifts.describe` runs over the whole crew, for one person here.
 	described = (
@@ -2335,12 +2339,12 @@ def _validated_schedule_rows(raw, label: str) -> list[dict]:
 			hours_from = float(hours_from)
 			hours_to = float(hours_to)
 		except (TypeError, ValueError):
-			raise ToolError(f"{label}[{i}]: hours_from and hours_to must be numbers.")
+			raise ToolError(f"{label}[{i}]: hours_from and hours_to must be numbers.") from None
 		try:
 			periods_owed = int(periods_owed)
 			minutes_each = int(minutes_each)
 		except (TypeError, ValueError):
-			raise ToolError(f"{label}[{i}]: periods_owed and minutes_each must be integers.")
+			raise ToolError(f"{label}[{i}]: periods_owed and minutes_each must be integers.") from None
 		if hours_from < 0 or hours_to <= hours_from:
 			raise ToolError(f"{label}[{i}]: hours_from must be >= 0 and hours_to must be > hours_from.")
 		if periods_owed < 1:
@@ -2350,13 +2354,15 @@ def _validated_schedule_rows(raw, label: str) -> list[dict]:
 		paid = entry.get("paid", True)
 		if isinstance(paid, str):
 			paid = paid.strip().lower() in ("1", "true", "yes")
-		out.append({
-			"hours_from": hours_from,
-			"hours_to": hours_to,
-			"periods_owed": periods_owed,
-			"minutes_each": minutes_each,
-			"paid": 1 if paid else 0,
-		})
+		out.append(
+			{
+				"hours_from": hours_from,
+				"hours_to": hours_to,
+				"periods_owed": periods_owed,
+				"minutes_each": minutes_each,
+				"paid": 1 if paid else 0,
+			}
+		)
 	return out
 
 
@@ -2389,13 +2395,15 @@ def _validated_heat_rows(raw, label: str) -> list[dict]:
 		concurrent = entry.get("concurrent_with_rest", True)
 		if isinstance(concurrent, str):
 			concurrent = concurrent.strip().lower() in ("1", "true", "yes")
-		out.append({
-			"heat_index_from": float(hi_from),
-			"heat_index_to": float(hi_to),
-			"minutes_each": int(mins),
-			"every_hours": float(every),
-			"concurrent_with_rest": 1 if concurrent else 0,
-		})
+		out.append(
+			{
+				"heat_index_from": float(hi_from),
+				"heat_index_to": float(hi_to),
+				"minutes_each": int(mins),
+				"every_hours": float(every),
+				"concurrent_with_rest": 1 if concurrent else 0,
+			}
+		)
 	return out
 
 
@@ -2415,10 +2423,7 @@ def create_break_policy(args: dict) -> ToolResult:
 
 	policy_id = as_str(args, "policy_id") or f"{work_state}-{effective_from}"
 	if frappe.db.exists(BREAK_POLICY_DOCTYPE, policy_id):
-		raise ToolError(
-			f"A Labor Break Policy named {policy_id!r} already exists. "
-			"Nothing was created."
-		)
+		raise ToolError(f"A Labor Break Policy named {policy_id!r} already exists. Nothing was created.")
 
 	enabled = as_bool(args, "enabled", default=True)
 	effective_to = as_date(args, "effective_to")
@@ -2823,11 +2828,7 @@ def get_shift_crew_timeline(args: dict) -> ToolResult:
 		for entry in workers
 		if shift_first_crossing and not entry["exposure"]["present_at_shift_first_crossing"]
 	]
-	short = [
-		entry["employee"]
-		for entry in workers
-		if entry["breaks"] and entry["breaks"].get("short")
-	]
+	short = [entry["employee"] for entry in workers if entry["breaks"] and entry["breaks"].get("short")]
 
 	data = {
 		"shift": shift_name,
@@ -2920,7 +2921,7 @@ def _sample_gap_minutes(readings: list):
 	if len(stamps) < 2:
 		return None
 	gaps = []
-	for earlier, later in zip(stamps, stamps[1:]):
+	for earlier, later in itertools.pairwise(stamps):
 		try:
 			gaps.append(float(frappe.utils.time_diff_in_seconds(later, earlier)) / 60.0)
 		except Exception:
@@ -2968,11 +2969,7 @@ def _crew_envelope(
 	joined = described["joined_at"] or str(shift_row.get("start_datetime") or "")
 	until = described["present_until"] or str(shift_row.get("end_datetime") or "") or frappe.utils.now()
 
-	mine = [
-		entry
-		for entry in readings
-		if _within(str(entry.get("reading_datetime") or ""), joined, until)
-	]
+	mine = [entry for entry in readings if _within(str(entry.get("reading_datetime") or ""), joined, until)]
 	crossings = [
 		str(entry.get("reading_datetime") or "")
 		for entry in mine
@@ -3021,8 +3018,12 @@ def _crew_envelope(
 		"hours_present": shifts.hours_between(joined, until),
 		"span": {"from": joined or None, "to": until or None},
 		"pay_type": member.get("pay_type") or shift_row.get("pay_type") or None,
-		"pay_rate": member.get("pay_rate") if member.get("pay_rate") not in (None, "") else shift_row.get("pay_rate"),
-		"pay_basis_from": "crew row" if member.get("pay_type") else ("shift" if shift_row.get("pay_type") else None),
+		"pay_rate": member.get("pay_rate")
+		if member.get("pay_rate") not in (None, "")
+		else shift_row.get("pay_rate"),
+		"pay_basis_from": "crew row"
+		if member.get("pay_type")
+		else ("shift" if shift_row.get("pay_type") else None),
 		"exposure": {
 			"readings_in_span": len(mine),
 			"peak_temp_f": peak("temp_f"),

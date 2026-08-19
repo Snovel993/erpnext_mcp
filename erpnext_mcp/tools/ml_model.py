@@ -238,8 +238,7 @@ def _resolve(reference: str, company: str = "", version: str = ""):
 		return frappe.get_doc(DOCTYPE, by_uuid)
 
 	raise ToolError(
-		f"no ML Model called {reference!r} on this site. list_models has the register. "
-		"Nothing was changed."
+		f"no ML Model called {reference!r} on this site. list_models has the register. Nothing was changed."
 	)
 
 
@@ -268,8 +267,7 @@ def _as_json_arg(args: dict, key: str, expected_type: type):
 			raise ToolError(f"{key} must be valid JSON. Nothing was changed.") from None
 		if not isinstance(parsed, expected_type):
 			raise ToolError(
-				f"{key} must be a JSON {'array' if expected_type is list else 'object'}. "
-				"Nothing was changed."
+				f"{key} must be a JSON {'array' if expected_type is list else 'object'}. Nothing was changed."
 			)
 		return parsed
 	raise ToolError(
@@ -455,7 +453,12 @@ def update_model(args: dict) -> ToolResult:
 	if "model_name" in changed or "version" in changed:
 		clash = frappe.db.exists(
 			DOCTYPE,
-			{"company": doc.company, "model_name": doc.model_name, "version": doc.version, "name": ("!=", doc.name)},
+			{
+				"company": doc.company,
+				"model_name": doc.model_name,
+				"version": doc.version,
+				"name": ("!=", doc.name),
+			},
 		)
 		if clash:
 			raise ToolError(
@@ -518,8 +521,17 @@ def list_models(args: dict) -> ToolResult:
 		DOCTYPE,
 		filters=filters,
 		fields=[
-			"name", "model_name", "version", "status", "company", "piecework_activity",
-			"source_uuid", "model_kind", "model_format", "deployed_at", "modified",
+			"name",
+			"model_name",
+			"version",
+			"status",
+			"company",
+			"piecework_activity",
+			"source_uuid",
+			"model_kind",
+			"model_format",
+			"deployed_at",
+			"modified",
 		],
 		order_by="modified desc",
 		limit=limit + 1,
@@ -564,7 +576,9 @@ def activate_model(args: dict) -> ToolResult:
 			f"{conflict['supersedes']} was Active for this (company, piecework_activity) pair and "
 			"has been auto-deprecated. get_active_model for this pair now returns this record."
 		)
-	summary = f"activated {doc.model_name} v{doc.version} ({doc.name}) for {doc.company}/{doc.piecework_activity}"
+	summary = (
+		f"activated {doc.model_name} v{doc.version} ({doc.name}) for {doc.company}/{doc.piecework_activity}"
+	)
 	if was_active:
 		summary += " (was already Active — deployed_at refreshed)"
 	elif conflict["supersedes"]:
@@ -572,9 +586,8 @@ def activate_model(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=summary,
-		docstatus_delta=f"status → Active on {doc.name}" + (
-			f"; {conflict['supersedes']} → Deprecated" if conflict["supersedes"] else ""
-		),
+		docstatus_delta=f"status → Active on {doc.name}"
+		+ (f"; {conflict['supersedes']} → Deprecated" if conflict["supersedes"] else ""),
 	)
 
 
@@ -618,7 +631,11 @@ def get_active_model(args: dict) -> ToolResult:
 
 	name = frappe.db.get_value(
 		DOCTYPE,
-		{"company": company, "piecework_activity": piecework_activity, "status": model_registry.STATUS_ACTIVE},
+		{
+			"company": company,
+			"piecework_activity": piecework_activity,
+			"status": model_registry.STATUS_ACTIVE,
+		},
 		"name",
 	)
 	if not name:
@@ -958,9 +975,7 @@ def get_model_file_chunk(args: dict) -> ToolResult:
 			"is_bundle": is_bundle,
 			"manifest_source": doc.get("manifest_source")
 			or (
-				model_registry.MANIFEST_SOURCE_BUNDLE
-				if is_bundle
-				else model_registry.MANIFEST_SOURCE_RECORD
+				model_registry.MANIFEST_SOURCE_BUNDLE if is_bundle else model_registry.MANIFEST_SOURCE_RECORD
 			),
 		},
 		summary=f"{doc.name} chunk {chunk_index + 1}/{total_chunks} ({len(piece)} bytes"
@@ -1090,8 +1105,7 @@ def pull_model_from_vv(args: dict) -> ToolResult:
 	}
 	shape = "bundle" if bundle["is_bundle"] else "raw model file"
 	summary = (
-		f"pulled {file_name} ({doc.file_size_bytes} bytes, {shape}) from {fetched['url']} onto "
-		f"{doc.name}"
+		f"pulled {file_name} ({doc.file_size_bytes} bytes, {shape}) from {fetched['url']} onto {doc.name}"
 	)
 	if bundle["is_bundle"]:
 		summary += f"; class_names from its manifest ({len(described['class_names'])} label(s))"
@@ -1207,10 +1221,7 @@ def migrate_model_format(args: dict) -> ToolResult:
 	report = model_registry.manifest_migration_report(doc.as_dict())
 
 	if report["blockers"]:
-		raise ToolError(
-			"; ".join(report["blockers"])
-			+ f". {doc.name} was left exactly as it was."
-		)
+		raise ToolError("; ".join(report["blockers"]) + f". {doc.name} was left exactly as it was.")
 
 	if not report["needs_migration"] and not force:
 		return ToolResult(
@@ -1594,9 +1605,7 @@ def list_models_needing_migration(args: dict) -> ToolResult:
 	status = as_str(args, "status")
 	if status:
 		if status not in model_registry.STATUSES:
-			raise ToolError(
-				f"status must be one of {', '.join(model_registry.STATUSES)}; got {status!r}."
-			)
+			raise ToolError(f"status must be one of {', '.join(model_registry.STATUSES)}; got {status!r}.")
 		filters["status"] = status
 	piecework_activity = as_str(args, "piecework_activity")
 	if piecework_activity:

@@ -490,9 +490,7 @@ class TheLoopCloses(DispatchTestCase):
 		unit = self.a_camp()
 		raised = self.tool_data("refresh_compliance_alerts", {"today": TODAY})
 		alerts = [
-			entry["name"]
-			for entry in raised["alerts"]
-			if entry["alert_type"] == "housing_inspection_overdue"
+			entry["name"] for entry in raised["alerts"] if entry["alert_type"] == "housing_inspection_overdue"
 		]
 		self.assertEqual(len(alerts), 1)
 

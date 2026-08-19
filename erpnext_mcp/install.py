@@ -273,8 +273,7 @@ def _sales_channel_field() -> None:
 		)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
-			"erpnext_mcp: the Customer sales channel field was not installed — "
-			f"{type(exc).__name__}: {exc}"
+			f"erpnext_mcp: the Customer sales channel field was not installed — {type(exc).__name__}: {exc}"
 		)
 
 
@@ -494,7 +493,6 @@ def _translations() -> None:
 		print(f"erpnext_mcp: could not seed translation {failure.get('key')} — {failure.get('reason')}")
 
 
-
 def _reporting_templates() -> None:
 	"""Seed the three shipped report shapes, per company. v0.81.0.
 
@@ -531,7 +529,9 @@ def _reporting_templates() -> None:
 			"OVERWRITTEN by a later migrate."
 		)
 	if report.get("failed"):
-		print(f"erpnext_mcp: {len(report['failed'])} reporting template(s) could not be seeded: {report['failed']}")
+		print(
+			f"erpnext_mcp: {len(report['failed'])} reporting template(s) could not be seeded: {report['failed']}"
+		)
 
 
 def _trade_documents() -> None:
@@ -643,8 +643,7 @@ def _settlement_invoice_link() -> None:
 		)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
-			f"erpnext_mcp: the Sales Invoice settlement link was not installed — "
-			f"{type(exc).__name__}: {exc}"
+			f"erpnext_mcp: the Sales Invoice settlement link was not installed — {type(exc).__name__}: {exc}"
 		)
 
 
@@ -716,8 +715,7 @@ def _bank_pairing_fields() -> None:
 		)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(
-			f"erpnext_mcp: the Bank Account pairing fields were not installed — "
-			f"{type(exc).__name__}: {exc}"
+			f"erpnext_mcp: the Bank Account pairing fields were not installed — {type(exc).__name__}: {exc}"
 		)
 
 
@@ -842,15 +840,19 @@ def _federal_tax_table() -> None:
 		brackets = withholding.seed_brackets()
 		created = 0
 		for bracket in brackets:
-			doc = frappe.get_doc({
-				"doctype": "Federal Tax Table",
-				**bracket,
-			})
+			doc = frappe.get_doc(
+				{
+					"doctype": "Federal Tax Table",
+					**bracket,
+				}
+			)
 			doc.flags.ignore_permissions = True
 			doc.insert()
 			created += 1
 		if created:
-			print(f"erpnext_mcp: seeded {created} federal tax bracket(s) for tax year {withholding.SEED_TAX_YEAR}")
+			print(
+				f"erpnext_mcp: seeded {created} federal tax bracket(s) for tax year {withholding.SEED_TAX_YEAR}"
+			)
 	except Exception as exc:  # pragma: no cover - a site mid-migrate
 		print(f"erpnext_mcp: the federal tax table was not seeded — {type(exc).__name__}: {exc}")
 
@@ -885,10 +887,12 @@ def _state_tax_table() -> None:
 			return
 		created = 0
 		for bracket in state_withholding.seed_or_brackets(year):
-			doc = frappe.get_doc({
-				"doctype": "State Tax Table",
-				**bracket,
-			})
+			doc = frappe.get_doc(
+				{
+					"doctype": "State Tax Table",
+					**bracket,
+				}
+			)
 			doc.flags.ignore_permissions = True
 			doc.insert()
 			created += 1
@@ -1721,7 +1725,10 @@ _REGENERATED_DOCTYPES = (
 	# handful of numbers an operator typed and can retype, and the readings they
 	# governed go with `Farm Shift` — which IS on the precious list, and whose
 	# entry is where the loss of a weather timeline is actually spelled out.
-	("I-9 Document Type", "pre-seeded USCIS-accepted document list, rebuilt from i9_documents.py on every migrate"),
+	(
+		"I-9 Document Type",
+		"pre-seeded USCIS-accepted document list, rebuilt from i9_documents.py on every migrate",
+	),
 	("I-9 Settings", "reseeded from its own declared defaults on every migrate"),
 	("FICA Configuration", "reseeded from its own declared defaults on every migrate"),
 	("Federal Tax Table", "pre-seeded IRS Pub 15-T brackets, rebuilt from withholding.py on every migrate"),
@@ -2054,7 +2061,9 @@ def _farm_task_templates() -> None:
 			"you have read what it asks for."
 		)
 	for failure in report.get("failed") or ():
-		print(f"erpnext_mcp: could not seed farm task template {failure.get('name')} — {failure.get('reason')}")
+		print(
+			f"erpnext_mcp: could not seed farm task template {failure.get('name')} — {failure.get('reason')}"
+		)
 
 
 def _breakeven_account_fields() -> None:

@@ -244,7 +244,9 @@ class MissingIsAStatus(ReportTestCase):
 class TheMatrixIsAsOfADate(ReportTestCase):
 	def test_training_completed_after_the_date_is_not_counted(self):
 		"""A report run for last year's audit must not know about March."""
-		self.a_training(training_type=WPS, regimes=["WPS"], completed_date=days_out(-5), expires_date=days_out(300))
+		self.a_training(
+			training_type=WPS, regimes=["WPS"], completed_date=days_out(-5), expires_date=days_out(300)
+		)
 
 		before = self.matrix(as_of_date=days_out(-10))
 		after = self.matrix(as_of_date=frappe.utils.today())
@@ -471,7 +473,17 @@ class TheLogIsNotTheRegister(AccidentReportTestCase):
 		self.assertTrue(any("1904.29(b)(7)" in note for note in self.log()["notes"]))
 
 	def test_a_case_from_another_company_is_not_on_this_log(self):
-		STORE.seed("Employee", [{"name": "HR-EMP-OTHER", "employee_name": "Otto Elsewhere", "company": OTHER, "status": "Active"}])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "HR-EMP-OTHER",
+					"employee_name": "Otto Elsewhere",
+					"company": OTHER,
+					"status": "Active",
+				}
+			],
+		)
 		mine = self.a_report()
 		self.determine(mine["name"])
 		theirs = self.a_report(company=OTHER, injured_person="HR-EMP-OTHER")
@@ -782,9 +794,7 @@ class TheGuards(ReportTestCase):
 		which is a number that goes on a posted form."""
 		from erpnext_mcp.farmops_api import routes
 
-		accepted = routes.accepted_arguments(
-			routes.BY_PATH["/mobile/get_osha_300a_summary"].handler
-		)
+		accepted = routes.accepted_arguments(routes.BY_PATH["/mobile/get_osha_300a_summary"].handler)
 
 		self.assertEqual(accepted, {"company", "year"})
 		self.assertNotIn("total_hours_worked", accepted)

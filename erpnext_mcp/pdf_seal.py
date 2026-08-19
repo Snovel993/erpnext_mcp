@@ -368,8 +368,9 @@ def _draw_footer(sheet, width: float, cursor: float, note: str) -> None:
 		_draw_wrapped(sheet, MARGIN, cursor, width - 2 * MARGIN, str(note).strip(), BODY_SIZE)
 
 
-def _draw_wrapped(sheet, x: float, y: float, wide: float, text: str, size: float,
-                  font: str = "Helvetica") -> float:
+def _draw_wrapped(
+	sheet, x: float, y: float, wide: float, text: str, size: float, font: str = "Helvetica"
+) -> float:
 	"""Draw `text` wrapped to `wide` points. Returns the cursor below the last line.
 
 	MEASURED WITH `stringWidth` RATHER THAN COUNTED IN CHARACTERS, because a

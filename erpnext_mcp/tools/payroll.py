@@ -34,8 +34,7 @@ import frappe
 from frappe.utils import today
 
 from .. import breaks as breaks_mod
-from .. import bucket_bridge, compat, pay_stub_pdf, payroll_integration, wage_defaults
-from .. import payroll_deductions
+from .. import bucket_bridge, compat, pay_stub_pdf, payroll_deductions, payroll_integration, wage_defaults
 from ..args import as_date, as_int, as_str, resolve_company
 from ..errors import ToolError
 from ..payroll_calc import (
@@ -110,7 +109,7 @@ def _as_float(args: dict, key: str, default: float = 0.0, required: bool = False
 	try:
 		return float(val)
 	except (TypeError, ValueError):
-		raise ToolError(f"{key} must be a number, got {val!r}.")
+		raise ToolError(f"{key} must be a number, got {val!r}.") from None
 
 
 def _num(value, default: float = 0.0) -> float:
@@ -302,9 +301,7 @@ def get_salary_structure(args: dict) -> ToolResult:
 	effective_rate = _num(row.get("base_rate"))
 	rate_source = wage_defaults.SOURCE_STRUCTURE
 	if str(row.get("pay_type") or "") == "Piece Rate" and effective_rate <= 0:
-		resolved, unresolved = _resolve_piece_rates(
-			{employee: structure}, row.get("company") or "", today()
-		)
+		resolved, unresolved = _resolve_piece_rates({employee: structure}, row.get("company") or "", today())
 		if unresolved:
 			data["effective_rate"] = None
 			data["rate_source"] = None
@@ -761,14 +758,12 @@ def create_salary_structure(args: dict) -> ToolResult:
 		raise ToolError(
 			"base_rate must be positive"
 			+ (
-				f", and {company} has no active Position Wage Default for "
-				f"{designation!r} to take it from"
+				f", and {company} has no active Position Wage Default for {designation!r} to take it from"
 				if pay_type == "Hourly" and designation
 				else ""
 			)
 			+ (
-				". This employee has no designation, so there is no position wage default to "
-				"look up either"
+				". This employee has no designation, so there is no position wage default to look up either"
 				if pay_type == "Hourly" and not designation
 				else ""
 			)
@@ -1143,9 +1138,7 @@ def _minimum_wage_summary(rows: list) -> dict:
 	"""
 	topped_up = [row for row in rows if row["minimum_wage_makeup"] > 0.005]
 	below = [row for row in rows if not row["meets_minimum_wage"] and row["pay_type"] != "Salary"]
-	salaried = [
-		row for row in rows if row["pay_type"] == "Salary" and not row["meets_minimum_wage"]
-	]
+	salaried = [row for row in rows if row["pay_type"] == "Salary" and not row["meets_minimum_wage"]]
 	total = round(sum(row["minimum_wage_makeup"] for row in rows), 2)
 	note = ""
 	if topped_up:
@@ -1785,10 +1778,15 @@ def _register_window(args: dict, company: str) -> tuple[str, str, str]:
 				f"run and takes its period from it; pass date_from and date_to instead to "
 				f"cover a range of runs. List them with list_payroll_entries."
 			)
-		row = frappe.db.get_value(
-			PAYROLL_ENTRY, pay_period,
-			["company", "pay_period_start", "pay_period_end"], as_dict=True,
-		) or {}
+		row = (
+			frappe.db.get_value(
+				PAYROLL_ENTRY,
+				pay_period,
+				["company", "pay_period_start", "pay_period_end"],
+				as_dict=True,
+			)
+			or {}
+		)
 		if str(row.get("company") or "") != company:
 			raise ToolError(
 				f"payroll entry {pay_period} belongs to {row.get('company')!r}, not to "
@@ -1894,13 +1892,16 @@ def get_payroll_register(args: dict) -> ToolResult:
 			if not employee:
 				continue
 			slip_count += 1
-			row = by_employee.setdefault(employee, {
-				"employee_id": employee,
-				"employee_name": get("employee_name") or employee,
-				"periods": 0,
-				**{key: 0.0 for key, _field in _REGISTER_COLUMNS},
-				"other_deductions": 0.0,
-			})
+			row = by_employee.setdefault(
+				employee,
+				{
+					"employee_id": employee,
+					"employee_name": get("employee_name") or employee,
+					"periods": 0,
+					**{key: 0.0 for key, _field in _REGISTER_COLUMNS},
+					"other_deductions": 0.0,
+				},
+			)
 			row["periods"] += 1
 			if not row.get("employee_name"):
 				row["employee_name"] = get("employee_name") or employee
@@ -1914,14 +1915,16 @@ def get_payroll_register(args: dict) -> ToolResult:
 			)
 			for key, field in _EMPLOYER_COLUMNS:
 				employer[key] += _num(get(field))
-		counted.append({
-			"name": entry["name"],
-			"pay_period_start": str(entry.get("pay_period_start") or ""),
-			"pay_period_end": str(entry.get("pay_period_end") or ""),
-			"pay_frequency": entry.get("pay_frequency"),
-			"status": entry.get("status"),
-			"slips": slip_count,
-		})
+		counted.append(
+			{
+				"name": entry["name"],
+				"pay_period_start": str(entry.get("pay_period_start") or ""),
+				"pay_period_end": str(entry.get("pay_period_end") or ""),
+				"pay_frequency": entry.get("pay_frequency"),
+				"status": entry.get("status"),
+				"slips": slip_count,
+			}
+		)
 
 	employees = sorted(
 		(
@@ -1944,9 +1947,7 @@ def get_payroll_register(args: dict) -> ToolResult:
 		"date_from": date_from,
 		"date_to": date_to,
 		"pay_period": pay_period or None,
-		"statuses_counted": (
-			sorted({str(row["status"]) for row in counted}) if pay_period else statuses
-		),
+		"statuses_counted": (sorted({str(row["status"]) for row in counted}) if pay_period else statuses),
 		"payroll_entries": counted,
 		"payroll_entry_count": len(counted),
 		"employees": employees,
@@ -2006,13 +2007,32 @@ def _stub_slip(doc, employee: str) -> tuple[dict, str]:
 	slip, name = match
 	get = _slip_get(slip)
 	fields = (
-		"employee", "employee_name", "salary_structure", "pay_type", "work_state",
-		"total_hours", "regular_hours", "overtime_hours", "piece_units", "piece_rate",
-		"gross_pay", "earned_gross", "minimum_wage_makeup",
-		"federal_withholding", "state_withholding", "social_security", "medicare",
-		"total_deductions", "net_pay", "effective_hourly_rate",
-		"social_security_employer", "medicare_employer", "futa", "state_unemployment",
-		"state_employer_other", "total_employer_taxes",
+		"employee",
+		"employee_name",
+		"salary_structure",
+		"pay_type",
+		"work_state",
+		"total_hours",
+		"regular_hours",
+		"overtime_hours",
+		"piece_units",
+		"piece_rate",
+		"gross_pay",
+		"earned_gross",
+		"minimum_wage_makeup",
+		"federal_withholding",
+		"state_withholding",
+		"social_security",
+		"medicare",
+		"total_deductions",
+		"net_pay",
+		"effective_hourly_rate",
+		"social_security_employer",
+		"medicare_employer",
+		"futa",
+		"state_unemployment",
+		"state_employer_other",
+		"total_employer_taxes",
 	)
 	payload = {field: get(field) for field in fields}
 	payload["earned_gross"] = payload.get("earned_gross") or payload.get("gross_pay")
@@ -2035,9 +2055,15 @@ def _stub_hourly_rate(salary_structure: str, pay_type: str) -> float:
 	"""
 	if not salary_structure:
 		return 0.0
-	row = frappe.db.get_value(
-		SALARY_STRUCTURE, salary_structure, ["pay_type", "base_rate", "hourly_rate"], as_dict=True,
-	) or {}
+	row = (
+		frappe.db.get_value(
+			SALARY_STRUCTURE,
+			salary_structure,
+			["pay_type", "base_rate", "hourly_rate"],
+			as_dict=True,
+		)
+		or {}
+	)
 	hourly = _num(row.get("hourly_rate"))
 	if hourly:
 		return hourly
@@ -2077,8 +2103,13 @@ def _stub_ytd(company: str, employee: str, period_end: str, entry_name: str) -> 
 		limit_page_length=0,
 	)
 	keys = (
-		"gross_pay", "federal_withholding", "state_withholding",
-		"social_security", "medicare", "total_deductions", "net_pay",
+		"gross_pay",
+		"federal_withholding",
+		"state_withholding",
+		"social_security",
+		"medicare",
+		"total_deductions",
+		"net_pay",
 	)
 	totals = {key: 0.0 for key in keys}
 	periods = 0
@@ -2442,8 +2473,17 @@ def _attach_break_hours(shifts_list: list, kept: list, names: list) -> None:
 	if not compat.first_field(COMPLIANCE_EVENT, "break_kind"):
 		return
 
-	break_fields = ["parent", "event_type", "event_datetime", "break_kind",
-		"ended_at", "duration_minutes", "duration_source", "applies_to", "employee"]
+	break_fields = [
+		"parent",
+		"event_type",
+		"event_datetime",
+		"break_kind",
+		"ended_at",
+		"duration_minutes",
+		"duration_source",
+		"applies_to",
+		"employee",
+	]
 	existing = compat.existing_fields(COMPLIANCE_EVENT, tuple(break_fields))
 	if "break_kind" not in existing:
 		return
@@ -2882,13 +2922,10 @@ def _load_deductions(
 		"on_file": len(rows),
 		"in_force_on": on_date,
 		"employees": sorted(by_employee),
-		"garnishment_count": len(
-			[row for row in live if payroll_deductions.row_type(row) == "garnishment"]
-		),
-		"voluntary_count": len(
-			[row for row in live if payroll_deductions.row_type(row) == "voluntary"]
-		),
+		"garnishment_count": len([row for row in live if payroll_deductions.row_type(row) == "garnishment"]),
+		"voluntary_count": len([row for row in live if payroll_deductions.row_type(row) == "voluntary"]),
 	}
+
 
 def _load_structures(company: str, employees: list[str] | None = None) -> dict:
 	"""Active salary structures for a company, keyed by employee.

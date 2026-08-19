@@ -33,7 +33,7 @@ import frappe
 from erpnext_mcp import payroll_deductions as pd
 from erpnext_mcp.payroll_calc import calculate_full_payroll
 from erpnext_mcp.payroll_integration import run_integrated_payroll, summarize_payroll_run
-from erpnext_mcp.withholding import ANNUAL_BRACKETS, PERIODS_PER_YEAR, calculate_federal_withholding
+from erpnext_mcp.withholding import calculate_federal_withholding
 
 from .fixtures import MAIN, V12TestCase, install_hrms
 from .harness import STORE
@@ -142,12 +142,12 @@ class ChildSupportCeiling(V12TestCase):
 		not_supporting = [row(deduction_category="Child Support", supports_other_dependents=0)]
 		self.assertEqual(pd.child_support_ceiling(1000.0, not_supporting)["rate"], 0.60)
 
-		arrears = [row(deduction_category="Child Support", supports_other_dependents=1,
-		               arrears_over_12_weeks=1)]
+		arrears = [
+			row(deduction_category="Child Support", supports_other_dependents=1, arrears_over_12_weeks=1)
+		]
 		self.assertEqual(pd.child_support_ceiling(1000.0, arrears)["rate"], 0.55)
 
-		both = [row(deduction_category="Child Support", supports_other_dependents=0,
-		            arrears_over_12_weeks=1)]
+		both = [row(deduction_category="Child Support", supports_other_dependents=0, arrears_over_12_weeks=1)]
 		self.assertEqual(pd.child_support_ceiling(1000.0, both)["rate"], 0.65)
 
 	def test_two_orders_that_will_not_both_fit_are_prorated(self):
@@ -213,10 +213,8 @@ class SharedPool(V12TestCase):
 	def test_child_support_is_taken_before_a_creditor_whatever_order_they_arrive_in(self):
 		"""The creditor is listed first and filed earlier, and still yields."""
 		orders = [
-			row(name="WG", deduction_category="Wage Garnishment", amount=500,
-			    effective_from="2020-01-01"),
-			row(name="CS", deduction_category="Child Support", amount=200,
-			    effective_from="2026-01-01"),
+			row(name="WG", deduction_category="Wage Garnishment", amount=500, effective_from="2020-01-01"),
+			row(name="CS", deduction_category="Child Support", amount=200, effective_from="2026-01-01"),
 		]
 		result = pd.apply_garnishments(1000.0, pd.active_deductions(orders), "Biweekly")
 		self.assertEqual([line["deduction"] for line in result["lines"]], ["CS", "WG"])
@@ -289,10 +287,12 @@ class PreTaxSplit(V12TestCase):
 
 	def test_the_two_bases_differ_by_exactly_the_deferral(self):
 		"""Which is what W-2 Box 1 and Box 3 are supposed to differ by."""
-		rows = pd.active_deductions([
-			row(name="K", deduction_category="Retirement 401k", amount=120),
-			row(name="H", deduction_category="Health Insurance", amount=200),
-		])
+		rows = pd.active_deductions(
+			[
+				row(name="K", deduction_category="Retirement 401k", amount=120),
+				row(name="H", deduction_category="Health Insurance", amount=200),
+			]
+		)
 		result = pd.calculate_pre_tax_deductions(2000.0, rows)
 		self.assertEqual(result["federal_taxable_gross"], 1680.0)
 		self.assertEqual(result["fica_taxable_gross"], 1800.0)
@@ -310,7 +310,14 @@ class PreTaxSplit(V12TestCase):
 		"""The engine's own contract, not the deduction module's: Social
 		Security is computed on `fica_gross` and income tax on `gross_pay`."""
 		both = calculate_federal_withholding(
-			1880.0, "Biweekly", {"filing_status": "Single"}, 0, 0, FICA, [], fica_gross=2000.0,
+			1880.0,
+			"Biweekly",
+			{"filing_status": "Single"},
+			0,
+			0,
+			FICA,
+			[],
+			fica_gross=2000.0,
 		)
 		self.assertEqual(both["social_security_employee"], round(2000.0 * 0.062, 2))
 
@@ -318,10 +325,23 @@ class PreTaxSplit(V12TestCase):
 		"""The parameter is optional and defaults to `gross_pay`, so a release
 		that never heard of deductions computes exactly what it always did."""
 		without = calculate_federal_withholding(
-			2000.0, "Biweekly", {"filing_status": "Single"}, 0, 0, FICA, [],
+			2000.0,
+			"Biweekly",
+			{"filing_status": "Single"},
+			0,
+			0,
+			FICA,
+			[],
 		)
 		explicit = calculate_federal_withholding(
-			2000.0, "Biweekly", {"filing_status": "Single"}, 0, 0, FICA, [], fica_gross=2000.0,
+			2000.0,
+			"Biweekly",
+			{"filing_status": "Single"},
+			0,
+			0,
+			FICA,
+			[],
+			fica_gross=2000.0,
 		)
 		self.assertEqual(without["social_security_employee"], explicit["social_security_employee"])
 		self.assertNotIn("fica_base", without["computation_detail"])
@@ -359,10 +379,12 @@ class Ordering(V12TestCase):
 	def test_a_garnishment_outranks_a_voluntary_deduction(self):
 		"""$260 of cash, a $250 garnishment and $100 of union dues. The dues are
 		what goes short, because a court order does not yield to one."""
-		orders = pd.active_deductions([
-			row(name="WG", deduction_category="Wage Garnishment", amount=250),
-			row(name="UD", deduction_category="Union Dues", amount=100),
-		])
+		orders = pd.active_deductions(
+			[
+				row(name="WG", deduction_category="Wage Garnishment", amount=250),
+				row(name="UD", deduction_category="Union Dues", amount=100),
+			]
+		)
 		garnishments = pd.apply_garnishments(1000.0, orders, "Biweekly")
 		self.assertEqual(garnishments["total"], 250.0)
 
@@ -372,15 +394,18 @@ class Ordering(V12TestCase):
 		self.assertEqual(post["lines"][0]["shortfall"], 90.0)
 
 	def test_the_default_priority_order_is_the_legal_one(self):
-		orders = pd.active_deductions([
-			row(name="UD", deduction_category="Union Dues", amount=10),
-			row(name="WG", deduction_category="Wage Garnishment", amount=10),
-			row(name="SL", deduction_category="Student Loan", amount=10),
-			row(name="TL", deduction_category="Tax Levy", amount=10),
-			row(name="CS", deduction_category="Child Support", amount=10),
-		])
+		orders = pd.active_deductions(
+			[
+				row(name="UD", deduction_category="Union Dues", amount=10),
+				row(name="WG", deduction_category="Wage Garnishment", amount=10),
+				row(name="SL", deduction_category="Student Loan", amount=10),
+				row(name="TL", deduction_category="Tax Levy", amount=10),
+				row(name="CS", deduction_category="Child Support", amount=10),
+			]
+		)
 		self.assertEqual(
-			[r["name"] for r in orders], ["CS", "TL", "SL", "WG", "UD"],
+			[r["name"] for r in orders],
+			["CS", "TL", "SL", "WG", "UD"],
 		)
 
 	def test_an_explicit_priority_beats_the_categorys_but_zero_does_not(self):
@@ -393,9 +418,7 @@ class Ordering(V12TestCase):
 	def test_a_garnishment_can_never_be_marked_pre_tax(self):
 		"""Even where the row asserts it. Money taken under a court order is
 		wages the worker was taxed on."""
-		self.assertFalse(
-			pd.row_is_pre_tax(row(deduction_category="Child Support", pre_tax=1))
-		)
+		self.assertFalse(pd.row_is_pre_tax(row(deduction_category="Child Support", pre_tax=1)))
 
 
 # ── 9. The whole stack on a slip ────────────────────────────────────────────
@@ -407,32 +430,40 @@ class SlipIntegration(V12TestCase):
 	def _slip(self, deductions=None):
 		return calculate_full_payroll(
 			{"employee": "E1", "employee_name": "Ana"},
-			[{"work_state": "OR", "hours": 80, "overtime_hours": 0,
-			  "piece_units": 0, "break_hours": 0}],
+			[{"work_state": "OR", "hours": 80, "overtime_hours": 0, "piece_units": 0, "break_hours": 0}],
 			{"name": "S1", "pay_type": "Hourly", "base_rate": 25.0},
-			{"w4_data": {"filing_status": "Single"}, "fica_config": FICA,
-			 "federal_tax_table": [], "pay_frequency": "Biweekly"},
+			{
+				"w4_data": {"filing_status": "Single"},
+				"fica_config": FICA,
+				"federal_tax_table": [],
+				"pay_frequency": "Biweekly",
+			},
 			deductions=deductions,
 		)
 
 	def test_net_pay_is_still_gross_less_total_deductions(self):
 		"""The invariant every reader of a slip relies on. Deductions are INSIDE
 		`total_deductions`, so net pay stays what the worker is handed."""
-		slip = self._slip([
-			row(name="K", deduction_category="Retirement 401k", amount=120),
-			row(name="CS", deduction_category="Child Support", amount=300),
-			row(name="UD", deduction_category="Union Dues", amount=40),
-		])
+		slip = self._slip(
+			[
+				row(name="K", deduction_category="Retirement 401k", amount=120),
+				row(name="CS", deduction_category="Child Support", amount=300),
+				row(name="UD", deduction_category="Union Dues", amount=40),
+			]
+		)
 		self.assertEqual(
-			round(slip["gross_pay"] - slip["total_deductions"], 2), slip["net_pay"],
+			round(slip["gross_pay"] - slip["total_deductions"], 2),
+			slip["net_pay"],
 		)
 
 	def test_the_totals_decompose(self):
-		slip = self._slip([
-			row(name="K", deduction_category="Retirement 401k", amount=120),
-			row(name="CS", deduction_category="Child Support", amount=300),
-			row(name="UD", deduction_category="Union Dues", amount=40),
-		])
+		slip = self._slip(
+			[
+				row(name="K", deduction_category="Retirement 401k", amount=120),
+				row(name="CS", deduction_category="Child Support", amount=300),
+				row(name="UD", deduction_category="Union Dues", amount=40),
+			]
+		)
 		self.assertEqual(slip["pre_tax_deductions"], 120.0)
 		self.assertEqual(slip["garnishment_total"], 300.0)
 		self.assertEqual(slip["post_tax_deductions"], 340.0)
@@ -444,17 +475,21 @@ class SlipIntegration(V12TestCase):
 
 	def test_every_line_is_itemised_for_a_pay_stub(self):
 		"""A stub prints line by line; one lump called 'Other' is not a stub."""
-		slip = self._slip([
-			row(name="K", deduction_category="Retirement 401k", amount=120),
-			row(name="CS", deduction_category="Child Support", amount=300),
-		])
+		slip = self._slip(
+			[
+				row(name="K", deduction_category="Retirement 401k", amount=120),
+				row(name="CS", deduction_category="Child Support", amount=300),
+			]
+		)
 		labels = [line["label"] for line in slip["deduction_lines"]]
 		self.assertEqual(labels, ["401(k)", "Child Support"])
 
 	def test_a_custom_label_survives_to_the_stub(self):
-		slip = self._slip([
-			row(deduction_category="Child Support", amount=100, label="Support - Case 44821"),
-		])
+		slip = self._slip(
+			[
+				row(deduction_category="Child Support", amount=100, label="Support - Case 44821"),
+			]
+		)
 		self.assertEqual(slip["deduction_lines"][0]["label"], "Support - Case 44821")
 
 	def test_the_fica_base_reduction_reaches_the_actual_withholding(self):
@@ -479,17 +514,25 @@ class SlipIntegration(V12TestCase):
 		self.assertEqual(empty["total_deduction_withholdings"], 0.0)
 
 	def test_a_shortfall_is_reported_on_the_slip(self):
-		slip = self._slip([
-			row(deduction_category="Wage Garnishment", amount=900),
-		])
+		slip = self._slip(
+			[
+				row(deduction_category="Wage Garnishment", amount=900),
+			]
+		)
 		self.assertTrue(slip["deduction_shortfalls"])
 		self.assertGreater(slip["deduction_shortfalls"][0]["shortfall"], 0)
 
 	def test_the_run_summary_carries_the_deduction_totals_and_the_shortfalls(self):
 		slips = run_integrated_payroll(
-			[{"name": "SH1", "work_state": "OR", "start_datetime": "2026-03-02 06:00:00",
-			  "end_datetime": "2026-03-02 14:00:00",
-			  "crew": [{"employee": "E1", "employee_name": "Ana"}]}],
+			[
+				{
+					"name": "SH1",
+					"work_state": "OR",
+					"start_datetime": "2026-03-02 06:00:00",
+					"end_datetime": "2026-03-02 14:00:00",
+					"crew": [{"employee": "E1", "employee_name": "Ana"}],
+				}
+			],
 			{"E1": {"name": "S1", "employee": "E1", "pay_type": "Hourly", "base_rate": 25.0}},
 			{},
 			{},
@@ -510,9 +553,13 @@ class SlipIntegration(V12TestCase):
 		"""A per-employee map, and a bug here garnishes the wrong person."""
 		slips = run_integrated_payroll(
 			[
-				{"name": "SH1", "work_state": "OR", "start_datetime": "2026-03-02 06:00:00",
-				 "end_datetime": "2026-03-02 14:00:00",
-				 "crew": [{"employee": "E1"}, {"employee": "E2"}]},
+				{
+					"name": "SH1",
+					"work_state": "OR",
+					"start_datetime": "2026-03-02 06:00:00",
+					"end_datetime": "2026-03-02 14:00:00",
+					"crew": [{"employee": "E1"}, {"employee": "E2"}],
+				},
 			],
 			{
 				"E1": {"name": "S1", "employee": "E1", "pay_type": "Hourly", "base_rate": 25.0},
@@ -561,8 +608,7 @@ class ActiveWindow(V12TestCase):
 			{"employee": "E1"},
 			[{"work_state": "OR", "hours": 80, "overtime_hours": 0}],
 			{"name": "S1", "pay_type": "Hourly", "base_rate": 25.0},
-			{"w4_data": {}, "fica_config": FICA, "federal_tax_table": [],
-			 "pay_frequency": "Biweekly"},
+			{"w4_data": {}, "fica_config": FICA, "federal_tax_table": [], "pay_frequency": "Biweekly"},
 			deductions=[row(deduction_category="Child Support", amount=300, status="Suspended")],
 		)
 		self.assertEqual(slip["garnishment_total"], 0.0)
@@ -614,8 +660,9 @@ class DeductionTools(V12TestCase):
 
 	def test_the_derived_facts_are_on_every_row(self):
 		"""What the engine will make of it, not just what is stored."""
-		created = self._create(deduction_category="Retirement 401k", amount=6,
-		                       amount_type="Percentage", reference="PLAN-1")
+		created = self._create(
+			deduction_category="Retirement 401k", amount=6, amount_type="Percentage", reference="PLAN-1"
+		)
 		row_out = created["deduction"]
 		self.assertEqual(row_out["effective_type"], "voluntary")
 		self.assertTrue(row_out["effective_pre_tax"])
@@ -629,7 +676,8 @@ class DeductionTools(V12TestCase):
 		self.assertEqual(everything["count"], 2)
 
 		garnishments = self.tool_data(
-			"list_payroll_deductions", {"company": MAIN, "deduction_type": "Garnishment"},
+			"list_payroll_deductions",
+			{"company": MAIN, "deduction_type": "Garnishment"},
 		)
 		self.assertEqual(garnishments["count"], 1)
 
@@ -645,12 +693,15 @@ class DeductionTools(V12TestCase):
 	def test_the_preview_prices_the_ccpa_ceiling(self):
 		"""$400 ordered against $1000 disposable biweekly: the ceiling is $250."""
 		self._create(amount=400)
-		data = self.tool_data("list_employee_deductions", {
-			"employee": "HR-EMP-00001",
-			"gross_pay": 1350.0,
-			"statutory_withholding": 350.0,
-			"pay_frequency": "Biweekly",
-		})
+		data = self.tool_data(
+			"list_employee_deductions",
+			{
+				"employee": "HR-EMP-00001",
+				"gross_pay": 1350.0,
+				"statutory_withholding": 350.0,
+				"pay_frequency": "Biweekly",
+			},
+		)
 		self.assertEqual(data["preview"]["disposable_earnings"], 1000.0)
 		self.assertEqual(data["preview"]["garnishment_total"], 400.0)
 		self.assertNotIn("basis_warning", data["preview"])
@@ -659,17 +710,25 @@ class DeductionTools(V12TestCase):
 		"""Treating gross as disposable OVERSTATES what a garnishment may take,
 		so it is named rather than quietly assumed."""
 		self._create()
-		data = self.tool_data("list_employee_deductions", {
-			"employee": "HR-EMP-00001", "gross_pay": 1350.0,
-		})
+		data = self.tool_data(
+			"list_employee_deductions",
+			{
+				"employee": "HR-EMP-00001",
+				"gross_pay": 1350.0,
+			},
+		)
 		self.assertIn("basis_warning", data["preview"])
 
 	def test_update_changes_and_echoes(self):
 		created = self._create()
 		name = created["deduction"]["name"]
-		data = self.tool_data("update_payroll_deduction", {
-			"deduction": name, "amount": 300.0,
-		})
+		data = self.tool_data(
+			"update_payroll_deduction",
+			{
+				"deduction": name,
+				"amount": 300.0,
+			},
+		)
 		self.assertEqual(data["deduction"]["amount"], 300.0)
 		self.assertTrue(any(c["field"] == "amount" for c in data["changes"]))
 
@@ -683,20 +742,30 @@ class DeductionTools(V12TestCase):
 
 	def test_it_refuses_to_move_a_deduction_to_another_worker(self):
 		created = self._create()
-		error = self.tool_error("update_payroll_deduction", {
-			"deduction": created["deduction"]["name"], "employee": "HR-EMP-00002",
-		})
+		error = self.tool_error(
+			"update_payroll_deduction",
+			{
+				"deduction": created["deduction"]["name"],
+				"employee": "HR-EMP-00002",
+			},
+		)
 		self.assertIn("cannot be changed", error)
 
 	def test_it_refuses_a_duplicate_active_order(self):
 		"""Filing the same order twice withholds it twice, which is money
 		actually taken from somebody."""
 		self._create()
-		error = self.tool_error("create_payroll_deduction", {
-			"employee": "HR-EMP-00001", "company": MAIN,
-			"deduction_category": "Child Support", "amount": 250.0,
-			"effective_from": "2026-01-01", "reference": "CASE-44821",
-		})
+		error = self.tool_error(
+			"create_payroll_deduction",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"deduction_category": "Child Support",
+				"amount": 250.0,
+				"effective_from": "2026-01-01",
+				"reference": "CASE-44821",
+			},
+		)
 		self.assertIn("already has an active", error)
 
 	def test_a_second_order_with_a_different_reference_is_allowed(self):
@@ -710,18 +779,25 @@ class DeductionTools(V12TestCase):
 
 	def test_it_warns_about_a_401k_marked_fica_exempt(self):
 		created = self._create(
-			deduction_category="Retirement 401k", amount=100,
-			reference="PLAN-2", fica_exempt=True,
+			deduction_category="Retirement 401k",
+			amount=100,
+			reference="PLAN-2",
+			fica_exempt=True,
 		)
 		self.assertTrue(any("FICA" in note for note in created["notes"]))
 
 	def test_a_mistyped_category_is_refused_at_write_time(self):
 		"""'401k' is not the key — `retirement_401k` is. Caught here, it never
 		reaches a pay stub as an unlabelled 'Other' line with a real amount."""
-		error = self.tool_error("create_payroll_deduction", {
-			"employee": "HR-EMP-00001", "company": MAIN,
-			"deduction_category": "401k", "amount": 100.0,
-		})
+		error = self.tool_error(
+			"create_payroll_deduction",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"deduction_category": "401k",
+				"amount": 100.0,
+			},
+		)
 		self.assertIn("must be one of", error)
 		self.assertIn("Retirement 401k", error)
 
@@ -743,29 +819,35 @@ class DeductionTools(V12TestCase):
 	def test_a_genuine_other_category_is_recognised(self):
 		"""`Other` is a real category and must not be confused with the fallback
 		an unrecognised one lands on — they resolve to the same spec."""
-		created = self._create(deduction_category="Other", deduction_type="Voluntary",
-		                       amount=15, reference="MISC-1")
-		self.assertTrue(created["deduction"]["deduction_category_recognised"])
-		self.assertFalse(
-			any("not one this app recognises" in note for note in created.get("notes", []))
+		created = self._create(
+			deduction_category="Other", deduction_type="Voluntary", amount=15, reference="MISC-1"
 		)
+		self.assertTrue(created["deduction"]["deduction_category_recognised"])
+		self.assertFalse(any("not one this app recognises" in note for note in created.get("notes", [])))
 
 	def test_an_ambiguous_employee_name_is_refused(self):
-		STORE.tables.setdefault("Employee", {}).update({
-			f"HR-EMP-0000{index}": {
-				"doctype": "Employee",
-				"name": f"HR-EMP-0000{index}",
-				"employee_name": "Jose Garcia",
-				"company": MAIN,
-				"status": "Active",
-				"docstatus": 0,
+		STORE.tables.setdefault("Employee", {}).update(
+			{
+				f"HR-EMP-0000{index}": {
+					"doctype": "Employee",
+					"name": f"HR-EMP-0000{index}",
+					"employee_name": "Jose Garcia",
+					"company": MAIN,
+					"status": "Active",
+					"docstatus": 0,
+				}
+				for index in (2, 3)
 			}
-			for index in (2, 3)
-		})
-		error = self.tool_error("create_payroll_deduction", {
-			"employee": "Jose Garcia", "company": MAIN,
-			"deduction_category": "Union Dues", "amount": 25.0,
-		})
+		)
+		error = self.tool_error(
+			"create_payroll_deduction",
+			{
+				"employee": "Jose Garcia",
+				"company": MAIN,
+				"deduction_category": "Union Dues",
+				"amount": 25.0,
+			},
+		)
 		self.assertIn("matches 2 employees", error)
 
 
@@ -789,20 +871,24 @@ class EdgeCases(V12TestCase):
 
 	def test_an_other_category_can_still_be_typed_a_garnishment(self):
 		"""And is then bounded by the ordinary ceiling, not left unbounded."""
-		orders = pd.active_deductions([
-			row(deduction_category="Other", deduction_type="Garnishment", amount=900),
-		])
+		orders = pd.active_deductions(
+			[
+				row(deduction_category="Other", deduction_type="Garnishment", amount=900),
+			]
+		)
 		result = pd.apply_garnishments(1000.0, orders, "Biweekly")
 		self.assertEqual(result["lines"][0]["amount"], 250.0)
 		self.assertEqual(result["lines"][0]["limit_rule"], "ordinary")
 
 	def test_a_percentage_is_of_the_basis_it_names(self):
-		gross_based = row(deduction_category="Retirement 401k", amount_type="Percentage",
-		                  amount=6, basis="Gross Pay")
+		gross_based = row(
+			deduction_category="Retirement 401k", amount_type="Percentage", amount=6, basis="Gross Pay"
+		)
 		self.assertEqual(pd.scheduled_amount(gross_based, 2000.0, 1500.0)["requested"], 120.0)
 
-		net_based = row(deduction_category="Union Dues", amount_type="Percentage",
-		                amount=2, basis="Net After Tax")
+		net_based = row(
+			deduction_category="Union Dues", amount_type="Percentage", amount=2, basis="Net After Tax"
+		)
 		self.assertEqual(pd.scheduled_amount(net_based, 2000.0, 1500.0)["requested"], 30.0)
 
 	def test_a_percentage_defaults_to_the_basis_its_kind_is_written_against(self):
@@ -815,8 +901,13 @@ class EdgeCases(V12TestCase):
 		self.assertEqual(pd.scheduled_amount(election, 2000.0, 1000.0)["requested"], 200.0)
 
 	def test_max_per_period_caps_a_percentage(self):
-		capped = row(deduction_category="Retirement 401k", amount_type="Percentage",
-		             amount=10, basis="Gross Pay", max_per_period=150)
+		capped = row(
+			deduction_category="Retirement 401k",
+			amount_type="Percentage",
+			amount=10,
+			basis="Gross Pay",
+			max_per_period=150,
+		)
 		schedule = pd.scheduled_amount(capped, 2000.0, 2000.0)
 		self.assertEqual(schedule["requested"], 150.0)
 		self.assertEqual(schedule["capped_by"], "max_per_period")
@@ -846,6 +937,7 @@ class EdgeCases(V12TestCase):
 				if spec["fica_exempt"]:
 					self.assertTrue(spec["pre_tax"], f"{name} is FICA-exempt but not pre-tax")
 		self.assertEqual(
-			set(pd.GARNISHMENT_CATEGORIES) | set(pd.VOLUNTARY_CATEGORIES), set(pd.CATEGORIES),
+			set(pd.GARNISHMENT_CATEGORIES) | set(pd.VOLUNTARY_CATEGORIES),
+			set(pd.CATEGORIES),
 		)
 		self.assertEqual(set(pd.GARNISHMENT_CATEGORIES) & set(pd.VOLUNTARY_CATEGORIES), set())

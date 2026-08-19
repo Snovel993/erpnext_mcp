@@ -905,9 +905,7 @@ class TheRuleEngine(SessionTestCase):
 			for row in STORE.rows("Compliance Alert")
 			if not int(row.get("dismissed") or 0)
 		}
-		self.assertEqual(
-			sorted(open_alerts), ["housing_detector_test_stale", "housing_inspection_overdue"]
-		)
+		self.assertEqual(sorted(open_alerts), ["housing_detector_test_stale", "housing_inspection_overdue"])
 
 		session = self.a_session(unit="MC-Cabin-01 - MC")["name"]
 		submitted = self.tool_data(

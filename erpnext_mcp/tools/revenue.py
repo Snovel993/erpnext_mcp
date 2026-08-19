@@ -244,8 +244,7 @@ def _requested_schedule(raw, obligations: list) -> list[dict]:
 				)
 		elif not due_date:
 			raise ToolError(
-				f"schedule[{index}] is a Time row and has no due_date, so nothing could ever make it "
-				"ripe."
+				f"schedule[{index}] is a Time row and has no due_date, so nothing could ever make it ripe."
 			)
 		rows.append(
 			{
@@ -297,7 +296,10 @@ def create_revenue_contract(args: dict) -> ToolResult:
 	currency = as_str(args, "currency")
 	if currency:
 		doc.currency = currency
-	for field, label in (("revenue_account", "revenue_account"), ("receivable_account", "receivable_account")):
+	for field, label in (
+		("revenue_account", "revenue_account"),
+		("receivable_account", "receivable_account"),
+	):
 		value = as_str(args, label)
 		if value:
 			doc.set(field, resolve_account(value, company))
@@ -472,9 +474,7 @@ def update_revenue_contract(args: dict) -> ToolResult:
 				"entries would point at tranches that no longer say what they said. Cancel those "
 				"entries first, or add to the schedule on a new contract. Nothing was changed."
 			)
-		current = [
-			{"obligation": str(_get(row, "obligation") or "")} for row in doc.get("obligations") or []
-		]
+		current = [{"obligation": str(_get(row, "obligation") or "")} for row in doc.get("obligations") or []]
 		rows = _requested_schedule(args.get("schedule"), current)
 		doc.set("schedule", [])
 		for row in rows:
@@ -649,9 +649,7 @@ def recognize_revenue_milestone(args: dict) -> ToolResult:
 	basis = str(_get(row, "basis") or "Milestone")
 	if basis == "Milestone":
 		obligation_text = str(_get(row, "obligation") or "")
-		match = [
-			item for item in described["obligations"] if item["obligation"] == obligation_text
-		]
+		match = [item for item in described["obligations"] if item["obligation"] == obligation_text]
 		if not match or not match[0]["satisfied"]:
 			findings.append(
 				enforcement.Finding(
@@ -698,7 +696,11 @@ def recognize_revenue_milestone(args: dict) -> ToolResult:
 	# ── the draft entry ─────────────────────────────────────────────────────
 	remark = as_str(args, "user_remark") or (
 		f"Revenue recognition — {doc.contract_name} — "
-		+ (str(_get(row, "obligation") or "") if basis == "Milestone" else f"tranche due {_get(row, 'due_date')}")
+		+ (
+			str(_get(row, "obligation") or "")
+			if basis == "Milestone"
+			else f"tranche due {_get(row, 'due_date')}"
+		)
 	)
 	lines = mutate.validated_journal_lines(
 		[
@@ -762,9 +764,7 @@ def _pick_tranche(doc, args: dict) -> dict:
 		except (TypeError, ValueError):
 			raise ToolError(f"tranche must be a whole number (1-based), got {index!r}") from None
 		if not 1 <= index <= len(schedule):
-			raise ToolError(
-				f"tranche {index} is outside this contract's schedule of {len(schedule)} row(s)."
-			)
+			raise ToolError(f"tranche {index} is outside this contract's schedule of {len(schedule)} row(s).")
 		position = index - 1
 		if compat.checked(_get(schedule[position], "recognized")):
 			raise ToolError(
@@ -787,9 +787,7 @@ def _pick_tranche(doc, args: dict) -> dict:
 				f"every tranche for obligation {obligation!r} on {doc.name} has already been "
 				"recognised, or there is no such obligation on its schedule. Nothing was written."
 			)
-		raise ToolError(
-			f"every tranche on {doc.name} has already been recognised. Nothing was written."
-		)
+		raise ToolError(f"every tranche on {doc.name} has already been recognised. Nothing was written.")
 	return {"index": candidates[0]}
 
 
@@ -918,9 +916,7 @@ def trace_contract_to_cash(args: dict) -> ToolResult:
 	hops = {"contract", "settlement", "invoice", "payment", "gl"}
 	present = {entry["hop"] for entry in chain}
 	collected = round(sum(float(row.get("paid_amount") or 0) for row in payments), 2)
-	outstanding = round(
-		sum(float(row.get("outstanding_amount") or 0) for row in invoices), 2
-	)
+	outstanding = round(sum(float(row.get("outstanding_amount") or 0) for row in invoices), 2)
 
 	return ToolResult(
 		data={
@@ -1061,9 +1057,7 @@ def _gl_entries(vouchers: list, breaks: list) -> list[dict]:
 	vouchers = sorted({name for name in vouchers if name})
 	if not vouchers or not compat.doctype_exists("GL Entry"):
 		if vouchers:
-			breaks.append(
-				{"after": "payment", "missing": "gl", "note": "This site has no GL Entry doctype."}
-			)
+			breaks.append({"after": "payment", "missing": "gl", "note": "This site has no GL Entry doctype."})
 		return []
 	rows = frappe.db.get_all(
 		"GL Entry",

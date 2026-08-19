@@ -38,7 +38,7 @@ import frappe
 
 from erpnext_mcp import asset_tag_form_action, asset_tag_list_action, asset_tag_sheet
 
-from .fixtures import MAIN, OTHER, V12TestCase
+from .fixtures import MAIN, V12TestCase
 from .harness import STORE
 
 VALVE = "MC-Valve-05"
@@ -79,14 +79,8 @@ class TheGeometry(unittest.TestCase):
 		for key in asset_tag_sheet.TEMPLATES:
 			spec = asset_tag_sheet.template_spec(key)
 			with self.subTest(template=key):
-				right = (
-					spec["margin_left_mm"]
-					+ (spec["across"] - 1) * spec["pitch_x_mm"]
-					+ spec["width_mm"]
-				)
-				bottom = (
-					spec["margin_top_mm"] + (spec["down"] - 1) * spec["pitch_y_mm"] + spec["height_mm"]
-				)
+				right = spec["margin_left_mm"] + (spec["across"] - 1) * spec["pitch_x_mm"] + spec["width_mm"]
+				bottom = spec["margin_top_mm"] + (spec["down"] - 1) * spec["pitch_y_mm"] + spec["height_mm"]
 				self.assertLessEqual(right, asset_tag_sheet.PAGE["width_mm"])
 				self.assertLessEqual(bottom, asset_tag_sheet.PAGE["height_mm"])
 
@@ -165,9 +159,7 @@ class TheTagMarkup(unittest.TestCase):
 		self.assertIn("data:image/png;base64,iVBORw0KGgo=", html)
 
 	def test_every_value_is_escaped(self):
-		html = asset_tag_sheet.tag_html(
-			_tag(name='Pump "A" <script>', location="Block & Co"), self.spec, 0
-		)
+		html = asset_tag_sheet.tag_html(_tag(name='Pump "A" <script>', location="Block & Co"), self.spec, 0)
 		self.assertNotIn("<script>", html)
 		self.assertIn("&lt;script&gt;", html)
 		self.assertIn("&amp;", html)
@@ -186,9 +178,7 @@ class TheTagMarkup(unittest.TestCase):
 		self.assertNotIn(f"left:{round(self.spec['margin_left_mm'], 3)}mm", second)
 		# Fourth wraps to the next row, back at the left margin.
 		self.assertIn(f"left:{round(self.spec['margin_left_mm'], 3)}mm", fourth)
-		self.assertIn(
-			f"top:{round(self.spec['margin_top_mm'] + self.spec['pitch_y_mm'], 3)}mm", fourth
-		)
+		self.assertIn(f"top:{round(self.spec['margin_top_mm'] + self.spec['pitch_y_mm'], 3)}mm", fourth)
 
 
 # ── 4 ───────────────────────────────────────────────────────────────────────
@@ -196,9 +186,7 @@ class TheWholeSheet(unittest.TestCase):
 	def test_the_skipped_assets_are_on_the_page(self):
 		"""THE SHEET'S HALF OF THE PROMISE. Thirty assets that quietly came back
 		as twenty-eight is two machines that stay untagged for a season."""
-		html = asset_tag_sheet.sheet_html(
-			[_tag()], [{"asset_name": "MC-Pump-09", "error": "not found"}]
-		)
+		html = asset_tag_sheet.sheet_html([_tag()], [{"asset_name": "MC-Pump-09", "error": "not found"}])
 		self.assertIn("MC-Pump-09", html)
 		self.assertIn("not found", html)
 		self.assertIn("1 skipped", html)
@@ -228,9 +216,7 @@ class TheEndpoints(V12TestCase):
 	def setUp(self):
 		super().setUp()
 		self.configure(enabled=1, **ALL_ON)
-		self.tool_data(
-			"register_asset", {"name": VALVE, "asset_type": "Irrigation Valve", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": VALVE, "asset_type": "Irrigation Valve", "company": MAIN})
 
 	def tearDown(self):
 		frappe.has_permission = self._real_has_permission
@@ -345,9 +331,7 @@ class TheEndpoints(V12TestCase):
 		"""One asset in another company must not lose the other twenty-nine
 		labels — but it must not print either."""
 		second = "MC-Valve-06"
-		self.tool_data(
-			"register_asset", {"name": second, "asset_type": "Irrigation Valve", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": second, "asset_type": "Irrigation Valve", "company": MAIN})
 		self.deny(second)
 		answer = asset_tag_sheet.render_asset_qr_sheet(assets=[VALVE, second])
 		self.assertEqual(answer["label_count"], 1)
@@ -470,9 +454,7 @@ class TheListAction(V12TestCase):
 		asset_tag_form_action.seed_asset_tag_form_action()
 		asset_tag_list_action.seed_asset_tag_list_action()
 		self.assertEqual(len(STORE.rows("Client Script")), 2)
-		self.assertNotEqual(
-			asset_tag_form_action._existing(), asset_tag_list_action._existing()
-		)
+		self.assertNotEqual(asset_tag_form_action._existing(), asset_tag_list_action._existing())
 
 	def test_it_does_not_overwrite_the_list_settings_object(self):
 		"""ERPNext and this app both write `frappe.listview_settings`. Assigning a
@@ -543,9 +525,7 @@ class TheScriptsAndTheServerAgree(unittest.TestCase):
 	def test_the_two_markers_are_different(self):
 		"""They are the identity each seeder matches on. Equal markers would make
 		the two seeders fight over one row at every migrate."""
-		self.assertNotEqual(
-			asset_tag_form_action.SCRIPT_MARKER, asset_tag_list_action.SCRIPT_MARKER
-		)
+		self.assertNotEqual(asset_tag_form_action.SCRIPT_MARKER, asset_tag_list_action.SCRIPT_MARKER)
 
 	def test_neither_script_writes_the_sheet_into_about_blank(self):
 		"""v0.56.1's bug, which the asset sheet ships already fixed: a document

@@ -149,6 +149,7 @@ def _file_the_evidence(record: str, raw) -> list:
 		)
 	return [filed, skipped]
 
+
 #: Most steps one chain carries. An employee with more than this is not a
 #: discipline question any more, and a list nobody can read is not a defence.
 CHAIN_CAP = 100
@@ -440,6 +441,7 @@ def _gaps(steps: list[dict], today: str) -> list[dict]:
 
 
 # ── create_incident_record ──────────────────────────────────────────────────
+
 
 def _reporting_employee() -> str | None:
 	"""The Employee behind the calling account, or None. WHO OPENED THIS.
@@ -807,9 +809,7 @@ def list_incident_history(args: dict) -> ToolResult:
 			"step_count": len(steps),
 			"active_step_count": len(active),
 			"chain_step_count": len(chain),
-			"worker_report_count": len(
-				[step for step in steps if _direction_of(step) == WORKER_REPORT]
-			),
+			"worker_report_count": len([step for step in steps if _direction_of(step) == WORKER_REPORT]),
 			"steps": steps,
 			"current_level": current["discipline_type"] if current else None,
 			"current_severity": current["severity"] if current else 0,

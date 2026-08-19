@@ -374,9 +374,7 @@ class TheWorkersDoorHasNoOverride(PhiTestCase):
 		from erpnext_mcp.errors import ToolError
 		from erpnext_mcp.tools import dispatch
 
-		self.assertNotIn(
-			"override_phi", registry.TOOLS["claim_farm_task"]["inputSchema"]["properties"]
-		)
+		self.assertNotIn("override_phi", registry.TOOLS["claim_farm_task"]["inputSchema"]["properties"])
 		task = self.raise_harvest(BLOCK_TWO, dispatch_mode="Self-pick")["name"]
 		self.a_spray(blocks=(BLOCK_TWO,))
 		with self.assertRaises(ToolError) as caught:

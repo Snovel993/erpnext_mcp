@@ -24,7 +24,11 @@ from frappe.model.document import Document
 class StandardCost(Document):
 	def autoname(self):
 		abbr = frappe.db.get_value("Company", self.company, "abbr") or ""
-		parts = [str(self.subject or "").strip(), str(self.cost_basis or "").strip(), str(self.effective_from or "")]
+		parts = [
+			str(self.subject or "").strip(),
+			str(self.cost_basis or "").strip(),
+			str(self.effective_from or ""),
+		]
 		stem = " ".join(part for part in parts if part)
 		self.name = f"{stem} - {abbr}" if abbr else stem
 

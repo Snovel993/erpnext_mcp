@@ -73,7 +73,11 @@ class DisclosureTestCase(SeededTestCase):
 			"items": [
 				{"disclosure_item": "Related party transactions", "requirement_reference": "ASC 850"},
 				{"disclosure_item": "Subsequent events", "requirement_reference": "ASC 855"},
-				{"disclosure_item": "Segment information", "requirement_reference": "ASC 280", "required": False},
+				{
+					"disclosure_item": "Segment information",
+					"requirement_reference": "ASC 280",
+					"required": False,
+				},
 			],
 			**extra,
 		}
@@ -138,7 +142,10 @@ class TheShapeOfAReport(DisclosureTestCase):
 
 	def test_sections_keep_their_order_and_their_sources(self):
 		data = self.a_template()
-		self.assertEqual([row["section_name"] for row in data["sections"]], ["Results of Operations", "Liquidity", "Outlook"])
+		self.assertEqual(
+			[row["section_name"] for row in data["sections"]],
+			["Results of Operations", "Liquidity", "Outlook"],
+		)
 		self.assertEqual(data["sections"][0]["data_source"], "compute_all_kpis")
 
 	def test_a_template_with_no_sections_is_refused(self):
@@ -200,7 +207,9 @@ class TheShapeOfAReport(DisclosureTestCase):
 				"sections": ["Overview", "Results of Operations"],
 			},
 		)
-		self.assertEqual([row["section_name"] for row in data["sections"]], ["Overview", "Results of Operations"])
+		self.assertEqual(
+			[row["section_name"] for row in data["sections"]], ["Overview", "Results of Operations"]
+		)
 		self.assertIn("restated whole", data["sections_note"])
 
 	def test_emptying_the_sections_is_refused_and_disabling_is_offered(self):
@@ -473,7 +482,9 @@ class TheCompletenessGate(DisclosureTestCase):
 				{"disclosure_checklist": checklist["name"], "disclosure_item": item, **payload},
 			)
 		self.set_mode("disclosure_completeness", "Enforced")
-		self.tool_data("update_disclosure_checklist", {"disclosure_checklist": checklist["name"], "status": "Filed"})
+		self.tool_data(
+			"update_disclosure_checklist", {"disclosure_checklist": checklist["name"], "status": "Filed"}
+		)
 		data = self.tool_data("get_disclosure_checklist", {"disclosure_checklist": checklist["name"]})
 		self.assertEqual(data["status"], "Filed")
 
@@ -486,7 +497,9 @@ class TheCompletenessGate(DisclosureTestCase):
 
 	def test_a_filing_marked_filed_while_incomplete_is_listed(self):
 		checklist = self.a_checklist()
-		self.tool_data("update_disclosure_checklist", {"disclosure_checklist": checklist["name"], "status": "Filed"})
+		self.tool_data(
+			"update_disclosure_checklist", {"disclosure_checklist": checklist["name"], "status": "Filed"}
+		)
 		data = self.tool_data("list_disclosure_checklists", {"company": MAIN})
 		self.assertIn(checklist["name"], data["filed_incomplete"])
 		self.assertIn("before deciding whether to enforce", data["filed_incomplete_note"])

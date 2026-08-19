@@ -32,23 +32,42 @@ jobs:
         python-version: ["3.10", "3.11"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install werkzeug and jinja2
-        # Neither is a declared dependency, and both arrive with Frappe in a real
-        # bench. erpnext_mcp.mcp returns a werkzeug Response so it can control the
-        # HTTP status; jinja2 is what renders the v0.14.0 check Print Format, and
-        # the tests that render it are the only proof the template produces a page
-        # rather than an UndefinedError the first time somebody presses Print.
-        # Those tests skip themselves where jinja2 is absent, so the suite still
-        # passes on a bare environment — installing it here is what stops that
-        # skip from being permanent.
-        run: python -m pip install --upgrade pip werkzeug jinja2
+      - name: Install what the bench always has
+        # werkzeug and jinja2 are not declared dependencies, and both arrive with
+        # Frappe in a real bench. erpnext_mcp.mcp returns a werkzeug Response so it
+        # can control the HTTP status; jinja2 is what renders the v0.14.0 check
+        # Print Format, and the tests that render it are the only proof the
+        # template produces a page rather than an UndefinedError the first time
+        # somebody presses Print. Those tests skip themselves where jinja2 is
+        # absent, so the suite still passes on a bare environment — installing it
+        # here is what stops that skip from being permanent.
+        #
+        # segno AND Pillow ARE DECLARED DEPENDENCIES (see pyproject.toml) and were
+        # simply never installed by this workflow — the step below names four of
+        # the six. That is why they are here rather than there. The step below
+        # omits a package to prove a tool goes quietly unavailable without it;
+        # omitting these two proved nothing, because nothing skips on them. It
+        # only failed ~156 tests across seventeen modules, most of them end-to-end
+        # hire and scan flows that touch one QR step and are not about QR at all.
+        # cryptography joins them for the same reason: `wallet.py` and
+        # `services/push.py` import it inside the functions that need it, and the
+        # Apple/Google pass and APNs tests have no other way in.
+        #
+        # THE COST OF PUTTING THEM HERE is that the encoder-absent path — the one
+        # that answers "this site has no QR encoder" with the pip command to fix
+        # it — is not exercised by either run. `test_badges.py` and
+        # `test_i9_pdf.py` already guard themselves with `qr.available()` and
+        # `pdf_signing.available()`; a third run that omitted these three would be
+        # where that path belongs, once enough of the suite guards itself for the
+        # skip to be honest rather than a way of hiding a failure.
+        run: python -m pip install --upgrade pip werkzeug jinja2 "segno>=1.5" "Pillow>=9.0" cryptography
 
       - name: Run the standalone suite WITHOUT shapely, h3, reportlab and pypdf
         # Proves the graceful-degrade path: the geospatial tools, the two
@@ -84,11 +103,17 @@ jobs:
     name: ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
-      - run: python -m pip install --upgrade pip ruff
+      # RUFF IS PINNED, AND THE PIN IS THE POINT. `ruff` unpinned means every
+      # push is also a bet on whatever ruff released that morning: a new rule
+      # promoted into a selected group, or a formatter change, reddens a board
+      # nobody touched, on a commit that changed nothing about the code. Bump
+      # this deliberately — `ruff check` and `ruff format` in one commit of
+      # their own — rather than discovering it under an unrelated change.
+      - run: python -m pip install --upgrade pip "ruff==0.16.1"
       - run: ruff check .
       - run: ruff format --check .

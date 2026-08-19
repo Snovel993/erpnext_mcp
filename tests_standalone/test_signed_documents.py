@@ -43,6 +43,7 @@ SEVEN CLAIMS, the last of them v0.64.1's.
 
 import base64
 import io
+import unittest
 
 import frappe
 
@@ -106,6 +107,12 @@ class SignedDocumentTestCase(EvidenceTestCase):
 
 
 # ── Claim 1 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class ThePreviewIsBytes(SignedDocumentTestCase):
 	def test_the_page_comes_back_as_base64(self):
 		"""§17.5. The whole reason this route exists: a `file_url` is a login page
@@ -150,13 +157,17 @@ class ThePreviewIsBytes(SignedDocumentTestCase):
 		"""`destroy_i9` certifies the record was disposed of at the end of its
 		retention period. Drawing a copy afterwards contradicts the certificate."""
 		name = self.an_i9(status="Destroyed")
-		error = self.tool_error(
-			"get_document_preview", {"document_type": "I-9 Form", "document_name": name}
-		)
+		error = self.tool_error("get_document_preview", {"document_type": "I-9 Form", "document_name": name})
 		self.assertIn("destroyed", error)
 
 
 # ── Claim 2 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class ThePreviewDrawsOnceAndDoesNotOverwrite(SignedDocumentTestCase):
 	def test_a_form_with_no_page_gets_one_drawn(self):
 		"""Otherwise the route answers 'no page' on the exact case the pad opens
@@ -216,6 +227,12 @@ class ThePreviewSaysWhatCanBeSigned(SignedDocumentTestCase):
 
 
 # ── Claim 4 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class TheSealIsAppended(SignedDocumentTestCase):
 	def test_the_sealed_copy_has_one_page_more_than_the_form(self):
 		name = self.signed_i9()
@@ -336,6 +353,12 @@ class TheSealIsAppended(SignedDocumentTestCase):
 
 
 # ── Claim 7 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class TheSealedCopyReachesThePersonnelFolder(SignedDocumentTestCase):
 	"""v0.64.1. A completed I-9 that only an I-9 Form docname could find.
 
@@ -381,9 +404,7 @@ class TheSealedCopyReachesThePersonnelFolder(SignedDocumentTestCase):
 		# same hash, which is what makes it evidence in both places.
 		filed = self.folder(employee)[0]
 		docname = str(frappe.db.get_value("File", {"file_url": filed["file_url"]}, "name"))
-		self.assertEqual(
-			pdf_seal.sha256_of(file_tools.read_file_bytes(docname)), sealed["sealed_pdf_hash"]
-		)
+		self.assertEqual(pdf_seal.sha256_of(file_tools.read_file_bytes(docname)), sealed["sealed_pdf_hash"])
 
 	def test_a_reseal_does_not_file_a_duplicate(self):
 		"""`seal_signed_document` is documented as re-runnable — an operator
@@ -448,6 +469,12 @@ class TheSealedCopyReachesThePersonnelFolder(SignedDocumentTestCase):
 
 
 # ── Claim 5 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class TheSealRefusesAnUnsignedForm(SignedDocumentTestCase):
 	def test_an_unsigned_form_is_refused(self):
 		error = self.tool_error(
@@ -464,6 +491,12 @@ class TheSealRefusesAnUnsignedForm(SignedDocumentTestCase):
 
 
 # ── Claim 6 ─────────────────────────────────────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class TheSealFollowsTheSignature(SignedDocumentTestCase):
 	def setUp(self):
 		super().setUp()
@@ -648,6 +681,12 @@ class TheEntityGateRunsBeforeTheDraw(SignedDocumentTestCase):
 
 
 # ── the pure module, with no site behind it ─────────────────────────────────
+@unittest.skipUnless(
+	pdf_seal.available(),
+	"drawing and appending the verification page needs reportlab and pypdf. Without "
+	"them the seal tools go unavailable and say so, which is what the two classes "
+	"left unguarded here exist to check.",
+)
 class ThePureSealModule(EvidenceTestCase):
 	def test_the_hash_is_prefixed_the_way_document_hash_is(self):
 		"""An operator comparing a document fingerprint with a file hash should
@@ -669,8 +708,9 @@ class ThePureSealModule(EvidenceTestCase):
 		"""A latitude with no longitude is a point on a line rather than a place."""
 		self.assertEqual(pdf_seal._coordinates({"gps_latitude": 45.5}), "")
 		self.assertEqual(pdf_seal._coordinates({"gps_longitude": -122.6}), "")
-		self.assertEqual(pdf_seal._coordinates({"gps_latitude": 45.5, "gps_longitude": -122.6}),
-		                 "45.500000, -122.600000")
+		self.assertEqual(
+			pdf_seal._coordinates({"gps_latitude": 45.5, "gps_longitude": -122.6}), "45.500000, -122.600000"
+		)
 
 	def test_a_long_token_wraps_by_measurement_rather_than_running_off_the_page(self):
 		"""A 71-character hash contains no spaces, so a word-only wrapper hands

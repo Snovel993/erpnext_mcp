@@ -260,7 +260,9 @@ def raci_chain(employee: str, max_level: int = MAX_LEVEL) -> dict:
 
 		try:
 			detail = (
-				frappe.db.get_value(EMPLOYEE, supervisor, ["employee_name", "status", "company"], as_dict=True)
+				frappe.db.get_value(
+					EMPLOYEE, supervisor, ["employee_name", "status", "company"], as_dict=True
+				)
 				or {}
 			)
 		except Exception:  # pragma: no cover
@@ -401,7 +403,10 @@ def shadow_key(event_type: str, source_doctype: str, source_name: str, recipient
 	readable key is worth more than four saved characters when somebody is
 	looking at this table trying to work out why a copy did or did not appear.
 	"""
-	parts = [str(part or "").strip().replace("::", ":") for part in (event_type, source_doctype, source_name, recipient)]
+	parts = [
+		str(part or "").strip().replace("::", ":")
+		for part in (event_type, source_doctype, source_name, recipient)
+	]
 	key = "::".join(parts)
 	if len(key) <= 140:
 		return key

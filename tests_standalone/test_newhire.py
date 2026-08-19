@@ -24,6 +24,7 @@ FOUR CLAIMS.
 """
 
 import base64
+from typing import ClassVar
 
 import frappe
 
@@ -116,7 +117,7 @@ class ThePassIsActuallySinglePass(NewHireTestCase):
 			},
 		)["name"]
 
-	W4 = {"filing_status": "Married Filing Jointly", "dependents_under_17_count": 2}
+	W4: ClassVar[dict] = {"filing_status": "Married Filing Jointly", "dependents_under_17_count": 2}
 
 	def an_open_shift(self):
 		"""A shift needs a foreman, and the foreman is not the person being hired."""
@@ -181,9 +182,7 @@ class ThePassIsActuallySinglePass(NewHireTestCase):
 		self.assertEqual(len(data["documents"]), 1)
 
 	def test_the_scan_and_the_elections_are_both_kept(self):
-		data = self.hire(
-			w4=self.W4, documents={"w4": {"file_name": "w4.pdf", "file_content": A_PDF}}
-		)
+		data = self.hire(w4=self.W4, documents={"w4": {"file_name": "w4.pdf", "file_content": A_PDF}})
 		self.assertTrue(data["w4_form"])
 		self.assertEqual([entry["kind"] for entry in data["documents"]], ["w4"])
 
@@ -204,13 +203,13 @@ class ThePassIsActuallySinglePass(NewHireTestCase):
 		empty that it did not."""
 		unit = self.a_cabin()
 		self.hire(housing_unit=unit, date_of_joining="2026-05-04")
-		row = [row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit][0]
+		row = next(row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit)
 		self.assertEqual(str(row.get("assigned_date"))[:10], "2026-05-04")
 
 	def test_an_explicit_housing_date_wins(self):
 		unit = self.a_cabin()
 		self.hire(housing_unit=unit, date_of_joining="2026-05-04", housing_assigned_date="2026-05-20")
-		row = [row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit][0]
+		row = next(row for row in STORE.rows("Housing Assignment") if row.get("unit") == unit)
 		self.assertEqual(str(row.get("assigned_date"))[:10], "2026-05-20")
 
 	def test_a_housing_refusal_is_reported_and_does_not_undo_the_hire(self):

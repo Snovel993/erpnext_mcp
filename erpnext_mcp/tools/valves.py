@@ -395,8 +395,7 @@ def _next_action(state: str) -> dict:
 			"note": (
 				f"A valve in state {state!r} does not toggle. "
 				+ (
-					f"Available actions: {', '.join(available)} — send one through "
-					"log_asset_state_change."
+					f"Available actions: {', '.join(available)} — send one through log_asset_state_change."
 					if available
 					else "It has no available action at all, which means the register holds a "
 					"state this valve's machine does not define."
@@ -550,8 +549,7 @@ def create_irrigation_valve(args: dict) -> ToolResult:
 	# the register that no Asset State Log row accounts for, and runtime is
 	# summed from those rows.
 	described["state_source"] = (
-		"the Irrigation Valve state machine's default — no state change has been logged on "
-		"this valve yet"
+		"the Irrigation Valve state machine's default — no state change has been logged on this valve yet"
 	)
 	described["next_action"] = _next_action(described["state"])
 
@@ -623,9 +621,7 @@ def list_irrigation_valves(args: dict) -> ToolResult:
 			| {asset_tags._STATE_DEFINITIONS[VALVE]["default"]}
 		)
 		if state not in known:
-			raise ToolError(
-				f"state must be one of {', '.join(known)}, not {wanted!r}. Nothing was listed."
-			)
+			raise ToolError(f"state must be one of {', '.join(known)}, not {wanted!r}. Nothing was listed.")
 		valves = [valve for valve in valves if valve["state"] == state]
 
 	# One query for every child count rather than one per valve: a turnout with
@@ -708,8 +704,11 @@ def get_irrigation_valve(args: dict) -> ToolResult:
 		summary=(
 			f"{row['name']} ({data['valve_type'] or 'unranked'}): {data['state']}, "
 			f"{runtime['hours']} h today"
-			+ (f", {len(data['children_open'])} of {data['child_count']} children open"
-			   if data["child_count"] else "")
+			+ (
+				f", {len(data['children_open'])} of {data['child_count']} children open"
+				if data["child_count"]
+				else ""
+			)
 		),
 	)
 
@@ -913,9 +912,7 @@ def _zone_rollup(zone: str, company: str, opened: str, closed: str) -> dict:
 		"valves_open_now": [entry["asset_name"] for entry in measured if entry["still_open"]],
 		"flow_rate_gpm": rate,
 		"gallons": gallons,
-		"acre_inches": (
-			round(gallons / irrigation.GALLONS_PER_ACRE_INCH, 3) if gallons else None
-		),
+		"acre_inches": (round(gallons / irrigation.GALLONS_PER_ACRE_INCH, 3) if gallons else None),
 		"valves_truncated": truncated,
 	}
 

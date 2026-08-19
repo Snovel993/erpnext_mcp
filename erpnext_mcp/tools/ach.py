@@ -49,10 +49,12 @@ inside the window — it warns rather than refuses, because the waiting period i
 a convention between a company and its bank and not something this app should
 enforce against a payroll that has to go out.
 """
+
 from __future__ import annotations
 
 import frappe
-from frappe.utils import add_days, getdate, now as nowdate_time, nowdate
+from frappe.utils import add_days, getdate, nowdate
+from frappe.utils import now as nowdate_time
 
 from .. import nacha
 from ..args import as_bool, as_int, as_limit, as_str, resolve_company
@@ -152,7 +154,9 @@ def create_employee_bank_account(args: dict) -> ToolResult:
 	"""Register one deposit destination for one employee."""
 	employee = _resolve_employee(args)
 	company = resolve_company(as_str(args, "company")) or frappe.db.get_value(
-		EMPLOYEE, employee, "company",
+		EMPLOYEE,
+		employee,
+		"company",
 	)
 	if not company:
 		raise ToolError(f"employee {employee!r} has no company, and none was given.")
@@ -161,7 +165,9 @@ def create_employee_bank_account(args: dict) -> ToolResult:
 	account_number = _account_number(as_str(args, "account_number", required=True))
 	account_type = _choice(as_str(args, "account_type") or "Checking", ACCOUNT_TYPES, "account_type")
 	allocation_type = _choice(
-		as_str(args, "allocation_type") or "Full", ALLOCATION_TYPES, "allocation_type",
+		as_str(args, "allocation_type") or "Full",
+		ALLOCATION_TYPES,
+		"allocation_type",
 	)
 	allocation_amount = _allocation_amount(args, allocation_type)
 	bank_name = as_str(args, "bank_name", required=True)
@@ -170,22 +176,24 @@ def create_employee_bank_account(args: dict) -> ToolResult:
 	if status == "Active":
 		_check_allocation_set(employee, allocation_type, allocation_amount, exclude="")
 
-	doc = frappe.get_doc({
-		"doctype": EMPLOYEE_BANK_ACCOUNT,
-		"employee": employee,
-		"employee_name": frappe.db.get_value(EMPLOYEE, employee, "employee_name") or "",
-		"company": company,
-		"bank_name": bank_name,
-		"routing_number": routing,
-		"account_number": account_number,
-		"account_number_last_four": account_number[-4:],
-		"account_type": account_type,
-		"allocation_type": allocation_type,
-		"allocation_amount": allocation_amount,
-		"priority": as_int(args, "priority", 0) or 0,
-		"status": status,
-		"prenote_sent": 0,
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": EMPLOYEE_BANK_ACCOUNT,
+			"employee": employee,
+			"employee_name": frappe.db.get_value(EMPLOYEE, employee, "employee_name") or "",
+			"company": company,
+			"bank_name": bank_name,
+			"routing_number": routing,
+			"account_number": account_number,
+			"account_number_last_four": account_number[-4:],
+			"account_type": account_type,
+			"allocation_type": allocation_type,
+			"allocation_amount": allocation_amount,
+			"priority": as_int(args, "priority", 0) or 0,
+			"status": status,
+			"prenote_sent": 0,
+		}
+	)
 	doc.flags.ignore_permissions = True
 	doc.insert()
 
@@ -228,12 +236,16 @@ def update_employee_bank_account(args: dict) -> ToolResult:
 
 	if args.get("allocation_type") is not None:
 		doc.allocation_type = _choice(
-			as_str(args, "allocation_type"), ALLOCATION_TYPES, "allocation_type",
+			as_str(args, "allocation_type"),
+			ALLOCATION_TYPES,
+			"allocation_type",
 		)
 		updated.append("allocation_type")
 	if args.get("allocation_amount") is not None or "allocation_type" in updated:
 		doc.allocation_amount = _allocation_amount(
-			args, str(doc.allocation_type), current=float(doc.allocation_amount or 0),
+			args,
+			str(doc.allocation_type),
+			current=float(doc.allocation_amount or 0),
 		)
 		if "allocation_amount" not in updated and args.get("allocation_amount") is not None:
 			updated.append("allocation_amount")
@@ -251,8 +263,10 @@ def update_employee_bank_account(args: dict) -> ToolResult:
 
 	if str(doc.status) == "Active":
 		_check_allocation_set(
-			str(doc.employee), str(doc.allocation_type),
-			float(doc.allocation_amount or 0), exclude=name,
+			str(doc.employee),
+			str(doc.allocation_type),
+			float(doc.allocation_amount or 0),
+			exclude=name,
 		)
 
 	doc.flags.ignore_permissions = True
@@ -273,9 +287,7 @@ def generate_nacha_file(args: dict) -> ToolResult:
 	effective = _effective_date(args, originator)
 	slips = entry.get("slips") or []
 	if not slips:
-		raise ToolError(
-			f"payroll entry {entry['name']} has no slips, so there is nothing to deposit."
-		)
+		raise ToolError(f"payroll entry {entry['name']} has no slips, so there is nothing to deposit.")
 
 	entries: list[dict] = []
 	skipped: list[dict] = []
@@ -291,12 +303,24 @@ def generate_nacha_file(args: dict) -> ToolResult:
 
 		accounts = _employee_accounts(employee, active_only=True, with_secret=True)
 		if not accounts:
-			skipped.append({"employee": employee, "employee_name": name, "net_pay": net,
-			                "reason": "no active bank account — pay by cheque"})
+			skipped.append(
+				{
+					"employee": employee,
+					"employee_name": name,
+					"net_pay": net,
+					"reason": "no active bank account — pay by cheque",
+				}
+			)
 			continue
 		if net <= 0:
-			skipped.append({"employee": employee, "employee_name": name, "net_pay": net,
-			                "reason": "net pay is not positive"})
+			skipped.append(
+				{
+					"employee": employee,
+					"employee_name": name,
+					"net_pay": net,
+					"reason": "net pay is not positive",
+				}
+			)
 			continue
 
 		try:
@@ -307,19 +331,25 @@ def generate_nacha_file(args: dict) -> ToolResult:
 
 		for account, amount in splits:
 			warnings.extend(_prenote_warnings(account, name))
-			entries.append({
-				"routing_number": account["routing_number"],
-				"account_number": account["account_number"],
-				"account_type": account["account_type"],
-				"amount": amount,
-				"individual_id": employee,
-				"individual_name": name,
-			})
+			entries.append(
+				{
+					"routing_number": account["routing_number"],
+					"account_number": account["account_number"],
+					"account_type": account["account_type"],
+					"amount": amount,
+					"individual_id": employee,
+					"individual_name": name,
+				}
+			)
 			touched.append(account["name"])
-		paid.append({
-			"employee": employee, "employee_name": name, "net_pay": net,
-			"entries": len(splits),
-		})
+		paid.append(
+			{
+				"employee": employee,
+				"employee_name": name,
+				"net_pay": net,
+				"entries": len(splits),
+			}
+		)
 
 	if problems:
 		raise ToolError(
@@ -361,7 +391,10 @@ def generate_nacha_file(args: dict) -> ToolResult:
 		today = nowdate()
 		for account_name in sorted(set(touched)):
 			frappe.db.set_value(
-				EMPLOYEE_BANK_ACCOUNT, account_name, "last_deposit_date", today,
+				EMPLOYEE_BANK_ACCOUNT,
+				account_name,
+				"last_deposit_date",
+				today,
 			)
 
 	data = {
@@ -422,14 +455,16 @@ def generate_prenote_file(args: dict) -> ToolResult:
 	entries = []
 	for row in rows:
 		secret = _full_account_number(row["name"])
-		entries.append({
-			"routing_number": row["routing_number"],
-			"account_number": secret,
-			"account_type": row["account_type"],
-			"amount": 0,
-			"individual_id": row["employee"],
-			"individual_name": row["employee_name"] or row["employee"],
-		})
+		entries.append(
+			{
+				"routing_number": row["routing_number"],
+				"account_number": secret,
+				"account_type": row["account_type"],
+				"amount": 0,
+				"individual_id": row["employee"],
+				"individual_name": row["employee_name"] or row["employee"],
+			}
+		)
 
 	built = nacha.build_file(
 		originator=originator,
@@ -451,7 +486,8 @@ def generate_prenote_file(args: dict) -> ToolResult:
 	if as_bool(args, "mark_sent") is not False:
 		for row in rows:
 			frappe.db.set_value(
-				EMPLOYEE_BANK_ACCOUNT, row["name"],
+				EMPLOYEE_BANK_ACCOUNT,
+				row["name"],
 				{"prenote_sent": 1, "prenote_date": today},
 			)
 			marked.append(row["name"])
@@ -465,8 +501,11 @@ def generate_prenote_file(args: dict) -> ToolResult:
 		"entry_hash": built["entry_hash"],
 		"total_credit": 0.0,
 		"accounts": [
-			{"name": r["name"], "employee": r["employee"],
-			 "account_number_last_four": r["account_number_last_four"]}
+			{
+				"name": r["name"],
+				"employee": r["employee"],
+				"account_number_last_four": r["account_number_last_four"],
+			}
 			for r in rows
 		],
 		"marked_sent": marked,
@@ -541,15 +580,11 @@ def allocate(net_pay: float, accounts: list[dict]) -> list[tuple[dict, float]]:
 		)
 
 	if not splits:
-		raise ToolError(
-			f"the allocations produce no deposit at all out of ${net_pay:,.2f} net pay."
-		)
+		raise ToolError(f"the allocations produce no deposit at all out of ${net_pay:,.2f} net pay.")
 
 	total = nacha.round_money(sum(a for _, a in splits))
 	if abs(total - net_pay) > 0.005:
-		raise ToolError(
-			f"the deposits total ${total:,.2f} but net pay is ${net_pay:,.2f}."
-		)
+		raise ToolError(f"the deposits total ${total:,.2f} but net pay is ${net_pay:,.2f}.")
 	return splits
 
 
@@ -580,7 +615,7 @@ def _routing(value: str) -> str:
 	try:
 		return nacha.normalize_routing(value)
 	except nacha.NachaError as exc:
-		raise ToolError(str(exc))
+		raise ToolError(str(exc)) from None
 
 
 def _account_number(value: str) -> str:
@@ -618,7 +653,8 @@ def _check_allocation_set(employee: str, allocation_type: str, amount: float, ex
 	tool — and the standalone suite exercises the tool.
 	"""
 	siblings = [
-		row for row in frappe.db.get_all(
+		row
+		for row in frappe.db.get_all(
 			EMPLOYEE_BANK_ACCOUNT,
 			filters={"employee": employee, "status": "Active"},
 			fields=["name", "allocation_type", "allocation_amount"],
@@ -637,8 +673,7 @@ def _check_allocation_set(employee: str, allocation_type: str, amount: float, ex
 
 	if allocation_type == "Percentage":
 		total = amount + sum(
-			float(s["allocation_amount"] or 0)
-			for s in siblings if str(s["allocation_type"]) == "Percentage"
+			float(s["allocation_amount"] or 0) for s in siblings if str(s["allocation_type"]) == "Percentage"
 		)
 		if total > 100:
 			raise ToolError(
@@ -671,9 +706,14 @@ def _employee_accounts(employee: str, active_only: bool, with_secret: bool = Fal
 def _full_account_number(name: str) -> str:
 	"""The one read path that materialises the secret. Only generators call it."""
 	doc = frappe.get_doc(EMPLOYEE_BANK_ACCOUNT, name)
-	number = doc.get_password("account_number", raise_exception=False) if hasattr(
-		doc, "get_password",
-	) else None
+	number = (
+		doc.get_password("account_number", raise_exception=False)
+		if hasattr(
+			doc,
+			"get_password",
+		)
+		else None
+	)
 	number = str(number or doc.get("account_number") or "").strip()
 	if not number or set(number) == {"*"}:
 		raise ToolError(
@@ -789,7 +829,9 @@ def _deliver(args: dict, doctype: str, name: str, file_name: str, content: str) 
 	path = artifacts.resolve_output_path(as_str(args, "output_path"), file_name)
 	if path:
 		out["written"] = artifacts.write_output(
-			path, payload, as_bool(args, "overwrite") is True,
+			path,
+			payload,
+			as_bool(args, "overwrite") is True,
 		)
 	return out
 

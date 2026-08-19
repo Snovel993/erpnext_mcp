@@ -96,14 +96,16 @@ def compute_budget_actuals(budget_doc: dict, gl_balances: dict, kpi_values: dict
 			variance_amount, variance_pct = _variance(actual, budgeted)
 		else:
 			actual, variance_amount, variance_pct = None, None, None
-		line_items.append({
-			"account": account,
-			"budgeted_amount": budgeted,
-			"actual_amount": actual,
-			"variance_amount": variance_amount,
-			"variance_pct": variance_pct,
-			"threshold_pct": threshold,
-		})
+		line_items.append(
+			{
+				"account": account,
+				"budgeted_amount": budgeted,
+				"actual_amount": actual,
+				"variance_amount": variance_amount,
+				"variance_pct": variance_pct,
+				"threshold_pct": threshold,
+			}
+		)
 
 	kpi_targets = []
 	for row in budget_doc.get("kpi_targets") or []:
@@ -116,13 +118,15 @@ def compute_budget_actuals(budget_doc: dict, gl_balances: dict, kpi_values: dict
 		else:
 			actual = round(_as_float(raw_actual), 6)
 			_amount, variance_pct = _variance(actual, target)
-		kpi_targets.append({
-			"kpi_definition": kpi_definition,
-			"target_value": round(target, 6),
-			"actual_value": actual,
-			"variance_pct": variance_pct,
-			"threshold_pct": threshold,
-		})
+		kpi_targets.append(
+			{
+				"kpi_definition": kpi_definition,
+				"target_value": round(target, 6),
+				"actual_value": actual,
+				"variance_pct": variance_pct,
+				"threshold_pct": threshold,
+			}
+		)
 
 	return {"line_items": line_items, "kpi_targets": kpi_targets}
 
@@ -156,18 +160,20 @@ def check_budget_variances(budget_result: dict, threshold_default: float = DEFAU
 		ratio = abs(pct) / threshold
 		if ratio < 1.0:
 			continue
-		breaches.append({
-			"kind": "line_item",
-			"identifier": row.get("account"),
-			"budgeted_amount": row.get("budgeted_amount"),
-			"actual_amount": row.get("actual_amount"),
-			"variance_amount": row.get("variance_amount"),
-			"variance_pct": pct,
-			"threshold_pct": threshold,
-			"ratio": round(ratio, 2),
-			"direction": "over" if pct > 0 else "under",
-			"severity": _severity_for(ratio),
-		})
+		breaches.append(
+			{
+				"kind": "line_item",
+				"identifier": row.get("account"),
+				"budgeted_amount": row.get("budgeted_amount"),
+				"actual_amount": row.get("actual_amount"),
+				"variance_amount": row.get("variance_amount"),
+				"variance_pct": pct,
+				"threshold_pct": threshold,
+				"ratio": round(ratio, 2),
+				"direction": "over" if pct > 0 else "under",
+				"severity": _severity_for(ratio),
+			}
+		)
 
 	for row in budget_result.get("kpi_targets") or []:
 		pct = row.get("variance_pct")
@@ -177,17 +183,19 @@ def check_budget_variances(budget_result: dict, threshold_default: float = DEFAU
 		ratio = abs(pct) / threshold
 		if ratio < 1.0:
 			continue
-		breaches.append({
-			"kind": "kpi_target",
-			"identifier": row.get("kpi_definition"),
-			"target_value": row.get("target_value"),
-			"actual_value": row.get("actual_value"),
-			"variance_pct": pct,
-			"threshold_pct": threshold,
-			"ratio": round(ratio, 2),
-			"direction": "over" if pct > 0 else "under",
-			"severity": _severity_for(ratio),
-		})
+		breaches.append(
+			{
+				"kind": "kpi_target",
+				"identifier": row.get("kpi_definition"),
+				"target_value": row.get("target_value"),
+				"actual_value": row.get("actual_value"),
+				"variance_pct": pct,
+				"threshold_pct": threshold,
+				"ratio": round(ratio, 2),
+				"direction": "over" if pct > 0 else "under",
+				"severity": _severity_for(ratio),
+			}
+		)
 
 	breaches.sort(key=lambda breach: (breach["severity"] != SEVERITY_CRITICAL, -breach["ratio"]))
 	return breaches

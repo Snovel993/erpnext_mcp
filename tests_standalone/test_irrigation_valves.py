@@ -224,9 +224,7 @@ class TheToggleReadsTheState(ValveTestCase):
 		"""The screen was drawn before somebody else opened it."""
 		self.a_valve(LATERAL)
 		self.toggle(LATERAL)
-		message = self.tool_error(
-			"toggle_irrigation_valve", {"name": LATERAL, "expect_state": "closed"}
-		)
+		message = self.tool_error("toggle_irrigation_valve", {"name": LATERAL, "expect_state": "closed"})
 		self.assertIn("is 'open'", message)
 		self.assertIn("Nothing was changed", message)
 		self.assertEqual(self.state_of(LATERAL), "open")
@@ -237,9 +235,7 @@ class TheToggleReadsTheState(ValveTestCase):
 		self.assertEqual(data["to_state"], "open")
 
 	def test_a_tractor_is_not_a_valve_and_the_refusal_says_what_it_is(self):
-		self.tool_data(
-			"register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN})
 		message = self.tool_error("toggle_irrigation_valve", {"name": "HR-Tractor-1"})
 		self.assertIn("Tractor", message)
 		self.assertIn("Irrigation Valve", message)
@@ -339,8 +335,13 @@ class TheRankMustMatchTheLine(ValveTestCase):
 		self.a_valve(LATERAL, "Lateral")
 		message = self.tool_error(
 			"create_irrigation_valve",
-			{"valve_id": MAIN_VALVE, "valve_type": "Main", "parent_valve": LATERAL, "zone": ZONE,
-			 "company": MAIN},
+			{
+				"valve_id": MAIN_VALVE,
+				"valve_type": "Main",
+				"parent_valve": LATERAL,
+				"zone": ZONE,
+				"company": MAIN,
+			},
 		)
 		self.assertIn("cannot be the parent", message)
 		self.assertIn("Nothing was created", message)
@@ -352,13 +353,16 @@ class TheRankMustMatchTheLine(ValveTestCase):
 		self.assertEqual(created["parent_valve"], LATERAL)
 
 	def test_a_parent_that_is_not_a_valve_is_refused(self):
-		self.tool_data(
-			"register_asset", {"name": "HR-Pump-1", "asset_type": "General", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": "HR-Pump-1", "asset_type": "General", "company": MAIN})
 		message = self.tool_error(
 			"create_irrigation_valve",
-			{"valve_id": LATERAL, "valve_type": "Lateral", "parent_valve": "HR-Pump-1",
-			 "zone": ZONE, "company": MAIN},
+			{
+				"valve_id": LATERAL,
+				"valve_type": "Lateral",
+				"parent_valve": "HR-Pump-1",
+				"zone": ZONE,
+				"company": MAIN,
+			},
 		)
 		self.assertIn("Irrigation Valve", message)
 		self.assertIn("Nothing was created", message)
@@ -387,8 +391,7 @@ class TheRankMustMatchTheLine(ValveTestCase):
 		self.a_valve(MAIN_VALVE, "Main", zone=ZONE)
 		created = self.tool_data(
 			"create_irrigation_valve",
-			{"valve_id": LATERAL, "valve_type": "Lateral", "parent_valve": MAIN_VALVE,
-			 "company": MAIN},
+			{"valve_id": LATERAL, "valve_type": "Lateral", "parent_valve": MAIN_VALVE, "company": MAIN},
 		)
 		self.assertEqual(created["zone"], ZONE)
 		self.assertIn("inherited", created["zone_source"])
@@ -396,8 +399,7 @@ class TheRankMustMatchTheLine(ValveTestCase):
 	def test_a_zone_that_does_not_exist_is_refused(self):
 		message = self.tool_error(
 			"create_irrigation_valve",
-			{"valve_id": LATERAL, "valve_type": "Lateral", "zone": "No Such Zone",
-			 "company": MAIN},
+			{"valve_id": LATERAL, "valve_type": "Lateral", "zone": "No Such Zone", "company": MAIN},
 		)
 		self.assertIn("No Such Zone", message)
 		self.assertIn("Nothing was created", message)
@@ -463,9 +465,7 @@ class TheDefaultStateIsReal(ValveTestCase):
 	def test_the_list_narrows_to_the_children_of_one_valve(self):
 		self.a_line()
 		listed = self.tool_data("list_irrigation_valves", {"parent_valve": SUB_VALVE})
-		self.assertEqual(
-			sorted(valve["name"] for valve in listed["valves"]), sorted([LATERAL, LATERAL_TWO])
-		)
+		self.assertEqual(sorted(valve["name"] for valve in listed["valves"]), sorted([LATERAL, LATERAL_TWO]))
 
 	def test_the_list_carries_a_child_count_per_valve(self):
 		self.a_line()
@@ -488,9 +488,7 @@ class TheDefaultStateIsReal(ValveTestCase):
 
 	def test_only_valves_are_listed(self):
 		self.a_valve(LATERAL)
-		self.tool_data(
-			"register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN})
 		listed = self.tool_data("list_irrigation_valves", {})
 		self.assertEqual([valve["name"] for valve in listed["valves"]], [LATERAL])
 
@@ -535,9 +533,7 @@ class TheScanResolvesTheTag(ValveTestCase):
 		self.assertEqual(data["zone_detail"]["flow_rate_gpm"], 45.0)
 
 	def test_a_tag_that_is_not_a_valve_is_refused_by_naming_what_it_is(self):
-		self.tool_data(
-			"register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN}
-		)
+		self.tool_data("register_asset", {"name": "HR-Tractor-1", "asset_type": "Tractor", "company": MAIN})
 		message = self.tool_error("scan_valve_qr", {"qr_data": "HR-Tractor-1"})
 		self.assertIn("Tractor", message)
 
@@ -618,8 +614,7 @@ class TheRuntimeIsTheSameSum(ValveTestCase):
 	def test_the_zone_rollup_can_be_switched_off(self):
 		data = self.tool_data(
 			"get_valve_runtime",
-			{"name": LATERAL, "date_from": "2026-07-01", "date_to": "2026-07-31",
-			 "include_zone": False},
+			{"name": LATERAL, "date_from": "2026-07-01", "date_to": "2026-07-31", "include_zone": False},
 		)
 		self.assertIsNone(data["zone_rollup"])
 
@@ -726,8 +721,7 @@ class TheHandsetScansAndCanAct(MobileAPITestCase):
 		)
 		self.tool_data(
 			"create_irrigation_valve",
-			{"valve_id": LATERAL, "valve_type": "Lateral", "parent_valve": MAIN_VALVE,
-			 "company": MAIN},
+			{"valve_id": LATERAL, "valve_type": "Lateral", "parent_valve": MAIN_VALVE, "company": MAIN},
 		)
 
 	def test_a_scan_alone_reads_the_gate_and_leaves_it_alone(self):
@@ -747,9 +741,7 @@ class TheHandsetScansAndCanAct(MobileAPITestCase):
 
 	def test_a_printed_tag_url_is_what_the_camera_actually_sends(self):
 		self.be()
-		data = mobile_api.scan_valve(
-			qr_data=f"https://umbrel.tail4a2b.ts.net/scan/{LATERAL}"
-		)
+		data = mobile_api.scan_valve(qr_data=f"https://umbrel.tail4a2b.ts.net/scan/{LATERAL}")
 		self.assertEqual(data["name"], LATERAL)
 
 	def test_toggle_true_opens_it_in_the_same_post(self):
@@ -804,9 +796,7 @@ class TheHandsetScansAndCanAct(MobileAPITestCase):
 		with self.assertRaises(frappe.ValidationError):
 			mobile_api.scan_valve(qr_data=LATERAL, toggle=True, expect_state="closed")
 
-		refusals = [
-			row for row in self.audit_rows("scan_valve") if row.get("result_status") == "Error"
-		]
+		refusals = [row for row in self.audit_rows("scan_valve") if row.get("result_status") == "Error"]
 		self.assertTrue(refusals, "a refused scan_valve left no audit row")
 
 	def test_an_empty_scan_is_refused(self):

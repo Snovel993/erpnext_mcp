@@ -211,9 +211,7 @@ class TheCascadeResolves(ScanTestCase):
 		self.assertEqual(data["entity_type"], "asset")
 		self.assertEqual(data["entity_name"], VALVE)
 		self.assertEqual(data["entity"]["asset_type"], "Irrigation Valve")
-		self.assertEqual(
-			data["available_actions"], ["create_task", "log_state_change", "report_issue"]
-		)
+		self.assertEqual(data["available_actions"], ["create_task", "log_state_change", "report_issue"])
 
 	def test_a_housing_unit_resolves_to_the_cabin_with_its_occupancy(self):
 		unit = self.a_cabin()
@@ -222,9 +220,7 @@ class TheCascadeResolves(ScanTestCase):
 		self.assertEqual(data["entity_name"], unit)
 		self.assertEqual(data["entity"]["capacity"], 4)
 		self.assertEqual(data["entity"]["open_beds"], 4)
-		self.assertEqual(
-			data["available_actions"], ["create_task", "start_inspection", "log_state_change"]
-		)
+		self.assertEqual(data["available_actions"], ["create_task", "start_inspection", "log_state_change"])
 
 	def test_a_block_resolves_to_the_field_with_its_irrigation(self):
 		block = self.a_block()
@@ -333,9 +329,7 @@ class TagURLsAreUnwrapped(ScanTestCase):
 
 	def test_a_query_string_the_scanner_appended_is_dropped(self):
 		self.an_asset()
-		self.assertEqual(
-			self.scan(f"https://erp.example.com/scan/{VALVE}?src=qr")["entity_name"], VALVE
-		)
+		self.assertEqual(self.scan(f"https://erp.example.com/scan/{VALVE}?src=qr")["entity_name"], VALVE)
 
 	def test_a_bare_docname_is_left_exactly_as_it_arrived(self):
 		self.assertEqual(universal_scan.scan_target("MC-Valve-05"), "MC-Valve-05")
@@ -480,14 +474,16 @@ class WhatIsOutstanding(ScanTestCase):
 		unit = self.a_cabin()
 		STORE.seed(
 			"Housing Inspection",
-			[{
-				"name": "HI-0001",
-				"unit": unit,
-				"company": MAIN,
-				"inspection_date": "2026-05-01",
-				"inspector_name": "Sam Ortiz",
-				"workflow_state": "Recorded",
-			}],
+			[
+				{
+					"name": "HI-0001",
+					"unit": unit,
+					"company": MAIN,
+					"inspection_date": "2026-05-01",
+					"inspector_name": "Sam Ortiz",
+					"workflow_state": "Recorded",
+				}
+			],
 		)
 		history = self.scan(unit)["recent_history"]
 		self.assertEqual(len(history), 1)
@@ -583,9 +579,7 @@ class TheScanCarriesTheStateMachine(ScanTestCase):
 
 	def test_the_actions_carry_the_transition_they_would_make(self):
 		self.an_asset()
-		action = next(
-			entry for entry in self.scan(VALVE)["state_actions"] if entry["action"] == "open_valve"
-		)
+		action = next(entry for entry in self.scan(VALVE)["state_actions"] if entry["action"] == "open_valve")
 		self.assertEqual(action["from_state"], "closed")
 		self.assertEqual(action["to_state"], "open")
 
@@ -601,9 +595,7 @@ class TheScanCarriesTheStateMachine(ScanTestCase):
 	def test_an_offered_action_is_one_the_log_tool_accepts(self):
 		self.an_asset()
 		offered = self.scan(VALVE)["state_actions"][0]["action"]
-		data = self.tool_data(
-			"log_asset_state_change", {"asset_name": VALVE, "action": offered}
-		)
+		data = self.tool_data("log_asset_state_change", {"asset_name": VALVE, "action": offered})
 		self.assertEqual(data["action"], offered)
 
 	def test_the_state_is_read_after_the_scans_own_write(self):

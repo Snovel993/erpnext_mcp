@@ -1554,59 +1554,59 @@ MIN_RECOVERY_REASON = 8
 def recover_mobile_access(args: dict) -> ToolResult:
 	"""A worker lost their phone: kill the old credential, mint a new one, keep the person.
 
-	WHAT EXISTED AND WHY IT WAS NOT A RECOVERY PATH. Every mechanical piece has
-	been here since v0.17.0 — `revoke_api_token` even says in its own result that
-	it is "the 'they lost their phone' one" — and a manager holding a lost-phone
-	report still had to do three things in the right order, keyed on a value they
-	usually do not have.
+	  WHAT EXISTED AND WHY IT WAS NOT A RECOVERY PATH. Every mechanical piece has
+	  been here since v0.17.0 — `revoke_api_token` even says in its own result that
+	  it is "the 'they lost their phone' one" — and a manager holding a lost-phone
+	  report still had to do three things in the right order, keyed on a value they
+	  usually do not have.
 
-      1. THEY DO NOT KNOW THE LOGIN. A foreman knows a face and a badge. Every
-         tool in this module takes `user`, which is an email address on a system
-         the worker has never signed into from a keyboard.
+	1. THEY DO NOT KNOW THE LOGIN. A foreman knows a face and a badge. Every
+	   tool in this module takes `user`, which is an email address on a system
+	   the worker has never signed into from a keyboard.
 
-      2. THE ORDER MATTERS AND NOTHING ENFORCED IT. The phone is in somebody
-         else's pocket right now. Minting the replacement first and revoking
-         afterwards leaves the old credential live for as long as the second call
-         takes — and if the second call never happens, forever. This revokes
-         FIRST, always, and reports it as a separate outcome.
+	2. THE ORDER MATTERS AND NOTHING ENFORCED IT. The phone is in somebody
+	   else's pocket right now. Minting the replacement first and revoking
+	   afterwards leaves the old credential live for as long as the second call
+	   takes — and if the second call never happens, forever. This revokes
+	   FIRST, always, and reports it as a separate outcome.
 
-      3. NOTHING ASKED WHO IT WAS FOR. `generate_api_token` mints a credential
-         for whatever login it is given. That is right for a tool an
-         administrator drives, and wrong as the whole of an account-recovery
-         path, because the request arrives as somebody at a farm office saying
-         they are somebody.
+	3. NOTHING ASKED WHO IT WAS FOR. `generate_api_token` mints a credential
+	   for whatever login it is given. That is right for a tool an
+	   administrator drives, and wrong as the whole of an account-recovery
+	   path, because the request arrives as somebody at a farm office saying
+	   they are somebody.
 
-	────────────────────────────────────────────────────────────────────────
-	THE BADGE IS THE IDENTITY PROOF, AND ITS ABSENCE IS RECORDED RATHER THAN
-	REFUSED
-	────────────────────────────────────────────────────────────────────────
+	  ────────────────────────────────────────────────────────────────────────
+	  THE BADGE IS THE IDENTITY PROOF, AND ITS ABSENCE IS RECORDED RATHER THAN
+	  REFUSED
+	  ────────────────────────────────────────────────────────────────────────
 
-	A badge is a physical card the worker still has when the phone is gone, and
-	scanning it proves possession of something this site issued to one person.
-	When `badge` is given it resolves through the same register a crew clock
-	uses — so a retired card, an unknown card and a card belonging to somebody
-	who has left are three different refusals rather than one — and when the
-	caller ALSO names an employee or a login, the two must agree. A badge that
-	resolves to somebody else stops the reset, because that is either the wrong
-	card or the wrong person and neither should end in a working credential.
+	  A badge is a physical card the worker still has when the phone is gone, and
+	  scanning it proves possession of something this site issued to one person.
+	  When `badge` is given it resolves through the same register a crew clock
+	  uses — so a retired card, an unknown card and a card belonging to somebody
+	  who has left are three different refusals rather than one — and when the
+	  caller ALSO names an employee or a login, the two must agree. A badge that
+	  resolves to somebody else stops the reset, because that is either the wrong
+	  card or the wrong person and neither should end in a working credential.
 
-	THE NO-BADGE PATH IS NOT REFUSED. A worker who lost the phone AND the card is
-	an ordinary Tuesday, and a recovery tool that could not serve it is a recovery
-	tool a farm routes around. What it does instead is SAY SO:
-	`identity_verified_by` is `"badge"` or `"manager assertion"`, and the second
-	is a fact about how much this reset is worth, recorded on the grant and in
-	the audit row rather than left to be inferred from an absent argument.
+	  THE NO-BADGE PATH IS NOT REFUSED. A worker who lost the phone AND the card is
+	  an ordinary Tuesday, and a recovery tool that could not serve it is a recovery
+	  tool a farm routes around. What it does instead is SAY SO:
+	  `identity_verified_by` is `"badge"` or `"manager assertion"`, and the second
+	  is a fact about how much this reset is worth, recorded on the grant and in
+	  the audit row rather than left to be inferred from an absent argument.
 
-	────────────────────────────────────────────────────────────────────────
-	THE EMPLOYEE RECORD IS NEVER TOUCHED
-	────────────────────────────────────────────────────────────────────────
+	  ────────────────────────────────────────────────────────────────────────
+	  THE EMPLOYEE RECORD IS NEVER TOUCHED
+	  ────────────────────────────────────────────────────────────────────────
 
-	Not re-created, not duplicated, not re-onboarded. Their badge, their shifts,
-	their buckets, their housing, their I-9 and their W-4 all hang off an Employee
-	docname that does not change here — which is the whole difference between
-	recovering an account and hiring somebody twice. A person with no login at all
-	is REFUSED and pointed at `onboard_employee(employee=...)`, which reuses the
-	same record for exactly this reason.
+	  Not re-created, not duplicated, not re-onboarded. Their badge, their shifts,
+	  their buckets, their housing, their I-9 and their W-4 all hang off an Employee
+	  docname that does not change here — which is the whole difference between
+	  recovering an account and hiring somebody twice. A person with no login at all
+	  is REFUSED and pointed at `onboard_employee(employee=...)`, which reuses the
+	  same record for exactly this reason.
 	"""
 	reason = as_str(args, "reason", required=True).strip()
 	if len(reason) < MIN_RECOVERY_REASON:

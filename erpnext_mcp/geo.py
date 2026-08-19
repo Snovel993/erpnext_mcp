@@ -361,7 +361,9 @@ def cell_for_point(lat: float, lon: float, resolution: int) -> str:
 POINT_RESOLUTION = 9
 
 
-def coordinates(args: dict, *, prefix: str = "", required: bool = True, tail: str = "Nothing was created.") -> tuple:
+def coordinates(
+	args: dict, *, prefix: str = "", required: bool = True, tail: str = "Nothing was created."
+) -> tuple:
 	"""`(latitude, longitude)` in decimal degrees from a call, or `(None, None)`.
 
 	ONE READING OF A PAIR OF COORDINATES FOR THE WHOLE APP. `log_shift_location`

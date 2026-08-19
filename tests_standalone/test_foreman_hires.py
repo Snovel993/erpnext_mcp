@@ -107,9 +107,7 @@ class AForemanWalksTheWholeHire(MobileAPITestCase):
 		self.as_foreman()
 
 		# 1. Create the worker.
-		hire = mobile_api.create_employee(
-			first_name="Elena", last_name="Marquez", company=MAIN
-		)
+		hire = mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN)
 		employee = hire.get("employee") or hire.get("name")
 		self.assertTrue(employee, "step 1: a foreman could not create the Employee")
 
@@ -179,9 +177,7 @@ class AForemanWalksTheWholeHire(MobileAPITestCase):
 		"""
 		employee = self._through_section_1()
 		self.as_foreman()
-		signers.add_authorized_signer(
-			{"user": WORKER, "full_name": "Ana Ramos", "title": "Manager"}
-		)
+		signers.add_authorized_signer({"user": WORKER, "full_name": "Ana Ramos", "title": "Manager"})
 		self.as_foreman()
 		with self.assertRaises(Exception) as caught:
 			mobile_api.submit_i9_section_2(
@@ -203,9 +199,7 @@ class AForemanWalksTheWholeHire(MobileAPITestCase):
 		are. One row is the whole difference."""
 		employee = self._through_section_1()
 		self.as_foreman()
-		signers.add_authorized_signer(
-			{"user": FOREMAN, "full_name": "Flor Diaz", "title": "Foreman"}
-		)
+		signers.add_authorized_signer({"user": FOREMAN, "full_name": "Flor Diaz", "title": "Foreman"})
 		self.as_foreman()
 		self.assertTrue(
 			mobile_api.submit_i9_section_2(
@@ -234,9 +228,7 @@ class AForemanWalksTheWholeHire(MobileAPITestCase):
 		self.as_foreman()
 		mobile_api.create_i9_form(employee=employee, company=MAIN, hire_date=str(frappe.utils.today()))
 		self.as_foreman()
-		mobile_api.submit_i9_section_1(
-			employee=employee, citizenship_status="US Citizen"
-		)
+		mobile_api.submit_i9_section_1(employee=employee, citizenship_status="US Citizen")
 		# READ OFF THE STORED DOCUMENT rather than through `get_i9_form`, which is
 		# self-or-HR and correctly refuses a foreman reading somebody ELSE's
 		# immigration paperwork. That refusal is not incidental to this test — it

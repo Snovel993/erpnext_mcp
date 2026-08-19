@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-""""Generate QR Sheet" on the Asset Register list, as a record and not as a hook. v0.83.0.
+""" "Generate QR Sheet" on the Asset Register list, as a record and not as a hook. v0.83.0.
 
 `asset_tag_sheet.render_asset_qr_sheet` turns a list of assets into a printable
 sheet of labels. The place somebody selects a list of assets is the Asset Register

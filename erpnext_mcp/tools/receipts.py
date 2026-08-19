@@ -1373,7 +1373,9 @@ _CARD_RE = re.compile(
 
 #: A store or location number. Anchored on the word or on a `#`, for the same
 #: reason the card pattern is anchored: an unanchored number run is a coin toss.
-_STORE_RE = re.compile(r"(?:store|str|loc|location|shop|unit)\s*(?:no\.?|number|#)?\s*#?\s*(\d{1,6})\b", re.IGNORECASE)
+_STORE_RE = re.compile(
+	r"(?:store|str|loc|location|shop|unit)\s*(?:no\.?|number|#)?\s*#?\s*(\d{1,6})\b", re.IGNORECASE
+)
 
 _BARE_STORE_RE = re.compile(r"#\s?(\d{2,6})\b")
 
@@ -1811,7 +1813,9 @@ def find_alias(merchant: str) -> dict | None:
 	return dict(row)
 
 
-def learn_merchant_alias(merchant: str, supplier: str, *, source: str = ALIAS_MANUAL, receipt: str = "") -> dict:
+def learn_merchant_alias(
+	merchant: str, supplier: str, *, source: str = ALIAS_MANUAL, receipt: str = ""
+) -> dict:
 	"""Record that this spelling means this Supplier. Returns what happened, always.
 
 	CALLED WHENEVER A PERSON SETS A SUPPLIER LINK BY HAND, which is what makes
@@ -2015,9 +2019,7 @@ def _supplier_by_domain(domain: str) -> dict | None:
 		)
 	except Exception:
 		return None
-	matches = [
-		dict(row) for row in rows if _domains_agree(normalize_domain(row.get("website")), domain)
-	]
+	matches = [dict(row) for row in rows if _domains_agree(normalize_domain(row.get("website")), domain)]
 	if len(matches) != 1:
 		return None
 	return {"supplier": matches[0]["name"], "supplier_name": matches[0].get("supplier_name")}
@@ -2037,9 +2039,7 @@ def _supplier_by_phone(phone: str) -> dict | None:
 	except Exception:
 		return None
 	matches = [
-		dict(row)
-		for row in rows
-		if any(normalize_phone(row.get(column)) == phone for column in columns)
+		dict(row) for row in rows if any(normalize_phone(row.get(column)) == phone for column in columns)
 	]
 	if len(matches) != 1:
 		return None
@@ -2197,9 +2197,7 @@ def resolve_merchant(
 		if row:
 			out["alias"] = row
 			source = str(row.get("source") or ALIAS_MANUAL)
-			confidence = (
-				_ALIAS_MANUAL_CONFIDENCE if source == ALIAS_MANUAL else _ALIAS_LEARNED_CONFIDENCE
-			)
+			confidence = _ALIAS_MANUAL_CONFIDENCE if source == ALIAS_MANUAL else _ALIAS_LEARNED_CONFIDENCE
 			label = _supplier_label(row["canonical_supplier"])
 			return settle(
 				_step(
@@ -2300,7 +2298,13 @@ def _deterministic_steps(out: dict, merchant: str, domain: str, phone: str, *, r
 		corpus = None if hit else _corpus_supplier(MERCHANT_URL_FIELD, domain, _url_matches)
 		if hit:
 			out["steps"].append(
-				_step("url", "URL", tried=True, matched=hit["supplier"], why=f"{domain!r} is on that Supplier's website")
+				_step(
+					"url",
+					"URL",
+					tried=True,
+					matched=hit["supplier"],
+					why=f"{domain!r} is on that Supplier's website",
+				)
 			)
 			winner = winner or {
 				"step": out["steps"][-1],
@@ -2337,14 +2341,22 @@ def _deterministic_steps(out: dict, merchant: str, domain: str, phone: str, *, r
 	# ── step 3: a phone number rings in one building ────────────────────────
 	if not phone:
 		out["steps"].append(
-			_step("phone", "Phone", tried=False, why="no phone number was given and none was read off the text")
+			_step(
+				"phone", "Phone", tried=False, why="no phone number was given and none was read off the text"
+			)
 		)
 	else:
 		hit = _supplier_by_phone(phone)
 		corpus = None if hit else _corpus_supplier(MERCHANT_PHONE_FIELD, phone, _phone_matches)
 		if hit:
 			out["steps"].append(
-				_step("phone", "Phone", tried=True, matched=hit["supplier"], why=f"{phone} is that Supplier's number")
+				_step(
+					"phone",
+					"Phone",
+					tried=True,
+					matched=hit["supplier"],
+					why=f"{phone} is that Supplier's number",
+				)
 			)
 			if winner is None:
 				winner = {
@@ -2533,7 +2545,12 @@ def list_merchant_aliases(args: dict) -> ToolResult:
 
 	names = sorted(by_supplier)
 	labels = (
-		{r["name"]: r.get("supplier_name") for r in frappe.db.get_all(masters.SUPPLIER, filters={"name": ("in", names)}, fields=["name", "supplier_name"])}
+		{
+			r["name"]: r.get("supplier_name")
+			for r in frappe.db.get_all(
+				masters.SUPPLIER, filters={"name": ("in", names)}, fields=["name", "supplier_name"]
+			)
+		}
 		if names
 		else {}
 	)
@@ -2800,7 +2817,9 @@ def create_purchase_invoice_from_receipt(args: dict) -> ToolResult:
 		explicit_supplier = as_str(args, "supplier")
 		if explicit_supplier:
 			if not frappe.db.exists(masters.SUPPLIER, explicit_supplier):
-				raise ToolError(f"no Supplier called {explicit_supplier!r} on this site. Nothing was created.")
+				raise ToolError(
+					f"no Supplier called {explicit_supplier!r} on this site. Nothing was created."
+				)
 			supplier = explicit_supplier
 			supplier_resolved_by = "argument"
 			persist_supplier = True

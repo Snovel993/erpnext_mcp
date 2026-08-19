@@ -3,4 +3,4 @@ from frappe.model.document import Document
 
 
 class StateTaxConfiguration(Document):
-    pass
+	pass

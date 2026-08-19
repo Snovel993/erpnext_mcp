@@ -63,7 +63,6 @@ import zlib
 from typing import ClassVar
 
 import frappe
-from pypdf import PdfReader
 
 from erpnext_mcp import compliance_rules, i9_pdf, w4_pdf
 from erpnext_mcp.api import files as files_api
@@ -100,6 +99,7 @@ def _a_real_png(size: int = 64) -> bytes:
 	PNG takes the same silent path as the bug, and the test passes while the
 	page comes back blank.
 	"""
+
 	def chunk(kind: bytes, payload: bytes) -> bytes:
 		body = kind + payload
 		return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body))
@@ -1425,11 +1425,14 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 	def test_13_scan_asset(self):
 		self.configure(enabled=1, allow_scan_asset=1, allow_register_asset=1)
-		self.tool_data("register_asset", {
-			"name": "MC-Valve-05",
-			"asset_type": "Irrigation Valve",
-			"company": MAIN,
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Valve-05",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+			},
+		)
 		self.be()
 		row = self.wire("scan_asset", asset_name="MC-Valve-05")
 		ScanAssetModel.decode(row, "scan_asset")
@@ -1437,11 +1440,14 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 	def test_14_get_asset_detail(self):
 		self.configure(enabled=1, allow_get_asset_detail=1, allow_register_asset=1)
-		self.tool_data("register_asset", {
-			"name": "MC-Valve-05",
-			"asset_type": "Irrigation Valve",
-			"company": MAIN,
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Valve-05",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+			},
+		)
 		self.be()
 		row = self.wire("get_asset_detail", asset_name="MC-Valve-05")
 		AssetDetailModel.decode(row, "get_asset_detail")
@@ -1449,11 +1455,14 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 	def test_15_log_asset_state_change(self):
 		self.configure(enabled=1, allow_log_asset_state_change=1, allow_register_asset=1)
-		self.tool_data("register_asset", {
-			"name": "MC-Valve-05",
-			"asset_type": "Irrigation Valve",
-			"company": MAIN,
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Valve-05",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+			},
+		)
 		self.be()
 		row = self.wire("log_asset_state_change", asset_name="MC-Valve-05", action="open_valve")
 		StateChangeModel.decode(row, "log_asset_state_change")
@@ -1462,11 +1471,14 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 	def test_16_get_available_actions(self):
 		self.configure(enabled=1, allow_get_available_actions=1, allow_register_asset=1)
-		self.tool_data("register_asset", {
-			"name": "MC-Valve-05",
-			"asset_type": "Irrigation Valve",
-			"company": MAIN,
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Valve-05",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+			},
+		)
 		self.be()
 		row = self.wire("get_available_actions", asset_name="MC-Valve-05")
 		AvailableActionsModel.decode(row, "get_available_actions")
@@ -1474,14 +1486,19 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 	def test_17_report_asset_issue(self):
 		self.configure(
-			enabled=1, allow_report_asset_issue=1, allow_register_asset=1,
+			enabled=1,
+			allow_report_asset_issue=1,
+			allow_register_asset=1,
 			allow_report_field_task=1,
 		)
-		self.tool_data("register_asset", {
-			"name": "MC-Valve-05",
-			"asset_type": "Irrigation Valve",
-			"company": MAIN,
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Valve-05",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+			},
+		)
 		self.be()
 		_staged, photo = self.upload("photo", "AI_photo.jpg")
 		row = self.wire(
@@ -1710,11 +1727,9 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		# would put a live api_secret in a ValidationError, on a screen in an
 		# orchard, and in the audit row below.
 		self.assertNotIn("s3cr3t", str(caught.exception))
-		row = [
-			row
-			for row in STORE.rows("MCP Action Log")
-			if row.get("tool_name") == "mobile:resolve_badge"
-		][-1]
+		row = [row for row in STORE.rows("MCP Action Log") if row.get("tool_name") == "mobile:resolve_badge"][
+			-1
+		]
 		self.assertNotIn("s3cr3t", str(row.get("arguments_json")))
 		self.assertIn("redacted", str(row.get("arguments_json")))
 
@@ -1924,8 +1939,11 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		stop on one the worker cannot fill."""
 		self.the_hr_furniture()
 		row = self.wire(
-			"create_employee", first_name="Elena", last_name="Marquez",
-			employee_name="Elena Marquez", company=MAIN,
+			"create_employee",
+			first_name="Elena",
+			last_name="Marquez",
+			employee_name="Elena Marquez",
+			company=MAIN,
 		)
 		self.assertFalse(STORE.tables["Employee"][row["name"]].get("middle_name"))
 
@@ -1937,11 +1955,13 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.the_hr_furniture()
 		created = self.wire(
 			"create_employee",
-			first_name="Elena", middle_name="Sofia", last_name="Marquez",
-			employee_name="Elena Marquez", company=MAIN,
+			first_name="Elena",
+			middle_name="Sofia",
+			last_name="Marquez",
+			employee_name="Elena Marquez",
+			company=MAIN,
 		)
-		self.wire("create_i9_form", employee=created["name"], company=MAIN,
-		          hire_date=frappe.utils.today())
+		self.wire("create_i9_form", employee=created["name"], company=MAIN, hire_date=frappe.utils.today())
 		self.wire(
 			"submit_i9_section_1",
 			employee=created["name"],
@@ -1952,8 +1972,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			address_zip="98901",
 		)
 		form = next(
-			row for row in STORE.tables["I-9 Form"].values()
-			if row.get("employee") == created["name"]
+			row for row in STORE.tables["I-9 Form"].values() if row.get("employee") == created["name"]
 		)
 		self.assertEqual(form["legal_middle_name"], "Sofia")
 
@@ -2267,9 +2286,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			["Employment Authorization Document (Form I-766)", "U.S. Passport"],
 		)
 		self.assertEqual([d["doc_title"] for d in row["list_b"]], ["Driver's License"])
-		self.assertEqual(
-			[d["doc_title"] for d in row["list_c"]], ["Social Security Card (Unrestricted)"]
-		)
+		self.assertEqual([d["doc_title"] for d in row["list_c"]], ["Social Security Card (Unrestricted)"])
 		self.assertIsNone(row["list_category"])
 		# What a picker cell renders. A title with no `requires_photo` beside it
 		# is a row the foreman cannot tell a photo document from.
@@ -2519,9 +2536,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		anywhere, and it needs a retention decision an operator makes."""
 		import inspect
 
-		self.assertNotIn(
-			"include_full_ssn", inspect.signature(mobile_api.generate_i9_pdf).parameters
-		)
+		self.assertNotIn("include_full_ssn", inspect.signature(mobile_api.generate_i9_pdf).parameters)
 
 	def test_35_upload_signed_i9(self):
 		"""The photograph of the signed sheet, filed against the record.
@@ -2535,9 +2550,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.wire("create_i9_form", employee=self.NEW_HIRE, company=MAIN, hire_date=frappe.utils.today())
 		_staged, finalized = self.upload(kind="signed-i9", name="signed-i9.pdf")
 
-		row = self.wire(
-			"upload_signed_i9", employee=self.NEW_HIRE, file_token=finalized["file_token"]
-		)
+		row = self.wire("upload_signed_i9", employee=self.NEW_HIRE, file_token=finalized["file_token"])
 		SignedI9Model.decode(row, "upload_signed_i9")
 
 		self.assertEqual(row["file_token"], finalized["file_token"])
@@ -2546,9 +2559,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 		name = frappe.db.get_value("I-9 Form", {"employee": self.NEW_HIRE}, "name")
 		self.assertEqual(frappe.db.get_value("I-9 Form", name, "signed_pdf"), row["signed_pdf"])
-		self.assertEqual(
-			int(frappe.db.get_value("File", finalized["file_token"], "is_private") or 0), 1
-		)
+		self.assertEqual(int(frappe.db.get_value("File", finalized["file_token"], "is_private") or 0), 1)
 
 	def test_35_a_call_with_no_token_says_what_to_upload_first(self):
 		self.the_hr_furniture()
@@ -2941,9 +2952,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertIs(row["image_set"], True)
 		self.assertTrue(row["photo_url"])
 		# The whole point: the Employee now points AT the file.
-		self.assertEqual(
-			frappe.db.get_value("Employee", self.NEW_HIRE, "image"), row["photo_url"]
-		)
+		self.assertEqual(frappe.db.get_value("Employee", self.NEW_HIRE, "image"), row["photo_url"])
 		# And it is still private — a workforce's faces on a guessable public
 		# URL is a breach nobody needs a password for.
 		filed = frappe.db.get_value(
@@ -2973,9 +2982,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 
 		self.assertIs(one["replaced"], False)
 		self.assertIs(two["replaced"], True)
-		self.assertEqual(
-			frappe.db.get_value("Employee", self.NEW_HIRE, "image"), two["photo_url"]
-		)
+		self.assertEqual(frappe.db.get_value("Employee", self.NEW_HIRE, "image"), two["photo_url"])
 		self.assertNotEqual(one["photo_url"], two["photo_url"])
 
 	def test_44_a_pdf_is_not_a_face(self):
@@ -3114,14 +3121,19 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			"every other alert should still be closable by nobody",
 		)
 
-		row = self.wire("dismiss_compliance_alert", alert=alert, reason="Raised against a lease we ended in May.")
+		row = self.wire(
+			"dismiss_compliance_alert", alert=alert, reason="Raised against a lease we ended in May."
+		)
 		VoidResponseModel.decode(row, "dismiss_compliance_alert")
 		self.assertIs(row["dismissed"], True)
 		self.assertEqual(row["reason"], "Raised against a lease we ended in May.")
 		# The whole audit trail: who, when, why — on the alert, not in a log line
 		# somebody has to correlate.
 		stored = frappe.db.get_value(
-			"Compliance Alert", alert, ["dismissed", "auto_dismissed", "dismissed_by", "dismissed_reason"], as_dict=True
+			"Compliance Alert",
+			alert,
+			["dismissed", "auto_dismissed", "dismissed_by", "dismissed_reason"],
+			as_dict=True,
 		)
 		self.assertEqual(int(stored["dismissed"] or 0), 1)
 		self.assertEqual(int(stored["auto_dismissed"] or 0), 0)
@@ -3169,9 +3181,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.be()
 
 		alert = next(
-			row
-			for row in self.wire("list_compliance_alerts")["alerts"]
-			if row.get("signature_request")
+			row for row in self.wire("list_compliance_alerts")["alerts"] if row.get("signature_request")
 		)
 		ComplianceAlertSummaryModel.decode(alert, "list_compliance_alerts")
 		request = alert["signature_request"]
@@ -3199,10 +3209,13 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		# The alert the phone tapped is named back, so the row it opened comes off
 		# the tab it was opened from.
 		self.assertEqual(row["dismissed_alert"], alert["name"])
-		self.assertTrue(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
-		)
+		self.assertTrue(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature"))
 
+	@unittest.skipUnless(
+		i9_pdf.available(),
+		"the rendered page needs pypdf and the shipped USCIS template; this bench "
+		"has one or neither, which is what render_i9_pdf goes unavailable for.",
+	)
 	def test_47_the_signed_page_comes_back_in_the_answer(self):
 		"""v0.57.1. The artefact the whole flow exists to produce, in the hands of
 		the person who just signed it.
@@ -3241,6 +3254,11 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf"), pdf["file_url"]
 		)
 
+	@unittest.skipUnless(
+		i9_pdf.available(),
+		"reading the page back needs pypdf and the shipped USCIS template; this bench "
+		"has one or neither, which is what render_i9_pdf goes unavailable for.",
+	)
 	def test_47_the_page_that_comes_back_carries_the_ink(self):
 		"""THE PAGE IS ONLY WORTH SENDING IF THE SIGNATURE IS ON IT, and from
 		v0.51.0 to v0.57.0 it was not — on any site, for any form.
@@ -3271,6 +3289,8 @@ class EveryMobileMethodDecodes(ContractTestCase):
 			signature_field="section_1_signature",
 			signature_image=base64.b64encode(A_REAL_PNG).decode(),
 		)
+		from pypdf import PdfReader
+
 		page = base64.b64decode(row["pdf"]["base64"])
 		reader = PdfReader(io.BytesIO(page))
 		self.assertEqual(
@@ -3306,12 +3326,8 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertIsNone(row["pdf"])
 		# The signature is on the record regardless — the page was the only
 		# thing turned off.
-		self.assertTrue(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
-		)
-		self.assertFalse(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or ""
-		)
+		self.assertTrue(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature"))
+		self.assertFalse(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or "")
 
 	def test_47_a_page_that_cannot_be_drawn_is_reported_and_is_not_fatal(self):
 		"""NEVER FATAL. A site without `pypdf` or the blank federal form has a
@@ -3342,10 +3358,13 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		# THE SIGNATURE LANDED. That is the whole point of the assertion above.
 		self.assertIs(row["already_signed"], False)
 		self.assertTrue(row["file_url"])
-		self.assertTrue(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature")
-		)
+		self.assertTrue(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature"))
 
+	@unittest.skipUnless(
+		i9_pdf.available(),
+		"the rendered page needs pypdf and the shipped USCIS template; this bench "
+		"has one or neither, which is what render_i9_pdf goes unavailable for.",
+	)
 	def test_47_a_retry_gets_the_page_back_without_drawing_a_second_one(self):
 		"""§14.4's idempotent path stays a READ. The worker is standing there and
 		wants the same page; rendering one here would make the branch that exists
@@ -3396,9 +3415,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		)
 		self.assertIs(second["already_signed"], True)
 		self.assertIs(second["pdf"]["available"], False)
-		self.assertFalse(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or ""
-		)
+		self.assertFalse(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "generated_pdf") or "")
 
 	def test_47_a_retry_whose_answer_was_lost_reports_success(self):
 		"""§14.4. A worker shown an error for a signature that landed is a worker
@@ -3505,9 +3522,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 				signer_badge="ETC-0008",
 			)
 		self.assertIn("Nothing was changed", str(caught.exception))
-		self.assertFalse(
-			frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature") or ""
-		)
+		self.assertFalse(frappe.db.get_value("I-9 Form", "I9-2026-CONTRACT", "section_1_signature") or "")
 		self.assertEqual(STORE.rows("Signing Evidence"), [])
 
 	def test_45_the_photo_and_the_badge_meet_on_the_card(self):
@@ -3516,14 +3531,11 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		print template reads. This is the join the feature is for."""
 		self.the_hr_furniture()
 		_staged, finalized = self.upload(kind="profile-photo", name="employee_photo.jpg")
-		photo = self.wire(
-			"set_employee_photo", employee=self.NEW_HIRE, file_token=finalized["file_token"]
-		)
+		photo = self.wire("set_employee_photo", employee=self.NEW_HIRE, file_token=finalized["file_token"])
 
 		row = self.wire("generate_employee_badge_qr", employee=self.NEW_HIRE, company=MAIN)
 		IssuedBadgeModel.decode(row, "generate_employee_badge_qr")
 		self.assertEqual(row["photo_url"], photo["photo_url"])
-
 
 	# ── v0.62.0: the seven the handset called and this surface 404'd on ─────
 	#
@@ -3867,9 +3879,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		STORE.seed("Branch", [{"name": "Mill Creek Camp", "branch": "Mill Creek Camp"}])
 		STORE.seed("Department", [{"name": "Orchard", "department_name": "Orchard", "company": MAIN}])
 		STORE.seed("Designation", [{"name": "Picker", "designation_name": "Picker"}])
-		STORE.seed(
-			"Employment Type", [{"name": "Seasonal Worker", "employee_type_name": "Seasonal Worker"}]
-		)
+		STORE.seed("Employment Type", [{"name": "Seasonal Worker", "employee_type_name": "Seasonal Worker"}])
 
 		row = self.wire(
 			"set_employee_org_fields",
@@ -3888,9 +3898,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(row["skipped"], [])
 		# READ BACK OFF THE RECORD, not echoed off the request — which is the
 		# whole reason this method answers with anything at all.
-		self.assertEqual(
-			frappe.db.get_value("Employee", self.NEW_HIRE, "designation"), "Picker"
-		)
+		self.assertEqual(frappe.db.get_value("Employee", self.NEW_HIRE, "designation"), "Picker")
 
 	def test_51_an_unsent_field_is_left_alone(self):
 		"""The step is shown to returning workers whose department was set in the
@@ -3928,9 +3936,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(row["cell_phone"], "5415550143")
 		self.assertEqual(row["emergency_contact_name"], "Marisol Delgado")
 		self.assertEqual(row["skipped"], [])
-		self.assertEqual(
-			frappe.db.get_value("Employee", self.NEW_HIRE, "cell_number"), "5415550143"
-		)
+		self.assertEqual(frappe.db.get_value("Employee", self.NEW_HIRE, "cell_number"), "5415550143")
 		self.assertEqual(
 			frappe.db.get_value("Employee", self.NEW_HIRE, "person_to_be_contacted"),
 			"Marisol Delgado",
@@ -4089,9 +4095,7 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		to "everybody's"."""
 		self.the_hr_furniture()
 		self.a_shift(crew_employees=[self.NEW_HIRE])
-		STORE.tables["Farm Shift"][
-			next(iter(STORE.tables["Farm Shift"]))
-		]["foreman"] = "EMP-SOMEBODY-ELSE"
+		STORE.tables["Farm Shift"][next(iter(STORE.tables["Farm Shift"]))]["foreman"] = "EMP-SOMEBODY-ELSE"
 
 		self.assertEqual(self.wire("list_shifts", mine="false")["mine"], False)
 		self.assertEqual(self.wire("list_shifts", mine="true")["mine"], True)

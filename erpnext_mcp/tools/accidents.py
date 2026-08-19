@@ -1274,9 +1274,7 @@ def get_osha_300a_summary(args: dict) -> ToolResult:
 		try:
 			hours = float(stated_hours)
 		except (TypeError, ValueError):
-			raise ToolError(
-				f"total_hours_worked must be a number of hours, got {stated_hours!r}."
-			) from None
+			raise ToolError(f"total_hours_worked must be a number of hours, got {stated_hours!r}.") from None
 		if hours < 0:
 			raise ToolError("total_hours_worked cannot be negative.")
 		hours_source = "supplied by the caller"
@@ -1287,9 +1285,7 @@ def get_osha_300a_summary(args: dict) -> ToolResult:
 		try:
 			heads = float(stated_heads)
 		except (TypeError, ValueError):
-			raise ToolError(
-				f"average_employees must be a number, got {stated_heads!r}."
-			) from None
+			raise ToolError(f"average_employees must be a number, got {stated_heads!r}.") from None
 		if heads < 0:
 			raise ToolError("average_employees cannot be negative.")
 		heads_source = "supplied by the caller"

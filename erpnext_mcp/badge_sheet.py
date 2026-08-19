@@ -145,9 +145,7 @@ def card_html(card: dict) -> str:
 	if photo:
 		parts.append(f'<img class="bc-abs bc-photo" src="{_esc(photo)}" alt="">')
 	else:
-		parts.append(
-			f'<div class="bc-abs bc-initials">{_esc(card.get("photo_placeholder") or "?")}</div>'
-		)
+		parts.append(f'<div class="bc-abs bc-initials">{_esc(card.get("photo_placeholder") or "?")}</div>')
 	parts.append(f'<div class="bc-abs bc-name">{_esc(card.get("employee_name"))}</div>')
 	if card.get("designation"):
 		parts.append(f'<div class="bc-abs bc-role">{_esc(card.get("designation"))}</div>')
@@ -176,7 +174,7 @@ def paginate(cards: list) -> list:
 	return [rows[start : start + CARDS_PER_PAGE] for start in range(0, len(rows), CARDS_PER_PAGE)]
 
 
-def sheet_html(cards: list, errors: list = None, title: str = "Badge Sheet") -> str:
+def sheet_html(cards: list, errors: list | None = None, title: str = "Badge Sheet") -> str:
 	"""The whole printable document, as a string. A PURE FUNCTION — no site needed.
 
 	THE ERRORS ARE ON THE PAGE AND NOT ONLY IN THE CONSOLE. The sheet tool's own

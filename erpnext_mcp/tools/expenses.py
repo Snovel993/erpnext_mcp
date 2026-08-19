@@ -735,8 +735,7 @@ def update_expense_receipt(args: dict) -> ToolResult:
 	present = [key for key in UPDATABLE_FIELDS if key in args]
 	if not present:
 		raise ToolError(
-			f"nothing to update — pass at least one of: {', '.join(UPDATABLE_FIELDS)}. "
-			"Nothing was changed."
+			f"nothing to update — pass at least one of: {', '.join(UPDATABLE_FIELDS)}. Nothing was changed."
 		)
 
 	doc = frappe.get_doc(EXPENSE_RECEIPT, name)

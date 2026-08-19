@@ -27,12 +27,13 @@ so it inherits the property and the reader.
 """
 
 import unittest
+from typing import ClassVar
 
 import frappe
 
 from erpnext_mcp import form_pdf_renderer, pay_stub_pdf
 
-from .fixtures import MAIN, OTHER, V12TestCase
+from .fixtures import MAIN, V12TestCase
 from .harness import STORE
 from .test_payroll_register import entry, slip
 from .test_tax_form_pdfs import text_of
@@ -153,7 +154,10 @@ class StubIsNotAWorkingCopy(unittest.TestCase):
 		from .test_tax_forms import or_slip
 
 		form_data = generators.generate_941_data(
-			[or_slip(employee="E1")], TAX_COMPANY, "Q1", 2025,
+			[or_slip(employee="E1")],
+			TAX_COMPANY,
+			"Q1",
+			2025,
 		)
 		page = text_of(form_pdf_renderer.render_941_pdf(form_data, TAX_COMPANY))
 		self.assertIn("WORKING COPY", page)
@@ -166,9 +170,12 @@ class StubIsNotAWorkingCopy(unittest.TestCase):
 		The digits are chosen not to occur in the fixture's EIN, which is a
 		number the page IS meant to carry — an assertion that failed on the
 		employer's own tax ID would prove nothing about the employee's."""
-		page = text_of(pay_stub_pdf.render_pay_stub(
-			a_stub(ssn="987-65-4321", ssn_last4="4321"), COMPANY_INFO,
-		))
+		page = text_of(
+			pay_stub_pdf.render_pay_stub(
+				a_stub(ssn="987-65-4321", ssn_last4="4321"),
+				COMPANY_INFO,
+			)
+		)
 		self.assertNotIn("987-65-4321", page)
 		self.assertNotIn("4321", page)
 
@@ -186,11 +193,7 @@ class EarningsBalance(unittest.TestCase):
 		figure, and summing it as zero would be the same mistake as printing it
 		as zero — see `_row`."""
 		return round(
-			sum(
-				line["amount"]
-				for line in pay_stub_pdf.earnings_lines(stub)
-				if line["amount"] is not None
-			),
+			sum(line["amount"] for line in pay_stub_pdf.earnings_lines(stub) if line["amount"] is not None),
 			2,
 		)
 
@@ -225,9 +228,15 @@ class EarningsBalance(unittest.TestCase):
 
 	def test_piece_work_itemises_units_at_the_piece_rate(self):
 		stub = a_stub(
-			pay_type="Piece Rate", hourly_rate=0.0, regular_hours=0.0, overtime_hours=0.0,
-			total_hours=0.0, piece_units=400.0, piece_rate=3.0,
-			earned_gross=1200.0, gross_pay=1200.0,
+			pay_type="Piece Rate",
+			hourly_rate=0.0,
+			regular_hours=0.0,
+			overtime_hours=0.0,
+			total_hours=0.0,
+			piece_units=400.0,
+			piece_rate=3.0,
+			earned_gross=1200.0,
+			gross_pay=1200.0,
 		)
 		lines = pay_stub_pdf.earnings_lines(stub)
 		self.assertEqual(lines[0]["label"], "Piece work")
@@ -239,9 +248,15 @@ class EarningsBalance(unittest.TestCase):
 		stub showing units and no hours gives a worker no way to check it. A
 		figure beside them would be an hour worked for nothing."""
 		stub = a_stub(
-			pay_type="Piece Rate", hourly_rate=0.0, regular_hours=80.0, overtime_hours=0.0,
-			total_hours=80.0, piece_units=400.0, piece_rate=3.0,
-			earned_gross=1200.0, gross_pay=1200.0,
+			pay_type="Piece Rate",
+			hourly_rate=0.0,
+			regular_hours=80.0,
+			overtime_hours=0.0,
+			total_hours=80.0,
+			piece_units=400.0,
+			piece_rate=3.0,
+			earned_gross=1200.0,
+			gross_pay=1200.0,
 		)
 		hours_row = pay_stub_pdf.earnings_lines(stub)[1]
 		self.assertIn("Hours worked", hours_row["label"])
@@ -260,13 +275,18 @@ class EarningsBalance(unittest.TestCase):
 		The record cannot say how the hours split, so the hourly half rides the
 		balancing line under a label that names it."""
 		stub = a_stub(
-			pay_type="Piece Rate", hourly_rate=18.50,
-			regular_hours=72.0, overtime_hours=8.0, total_hours=80.0,
-			piece_units=386.0, piece_rate=3.25,
-			earned_gross=1462.75, gross_pay=1462.75,
+			pay_type="Piece Rate",
+			hourly_rate=18.50,
+			regular_hours=72.0,
+			overtime_hours=8.0,
+			total_hours=80.0,
+			piece_units=386.0,
+			piece_rate=3.25,
+			earned_gross=1462.75,
+			gross_pay=1462.75,
 		)
 		lines = pay_stub_pdf.earnings_lines(stub)
-		self.assertEqual([line["label"] for line in lines[:2]][0], "Piece work")
+		self.assertEqual(next(line["label"] for line in lines[:2]), "Piece work")
 		self.assertNotIn("Regular hours", [line["label"] for line in lines])
 		self.assertNotIn("Overtime hours at 1.5x", [line["label"] for line in lines])
 		self.assertEqual(lines[-1]["label"], "Other earnings (hourly work, break pay, overtime premium)")
@@ -276,10 +296,16 @@ class EarningsBalance(unittest.TestCase):
 		"""On piece work the premium is the §778.111 HALF-time one, not the 1.5x
 		this module knows how to print, so a 1.5x line there would be wrong twice
 		over — wrong rate and double-counted."""
-		lines = pay_stub_pdf.earnings_lines(a_stub(
-			pay_type="Piece Rate", hourly_rate=18.50, overtime_hours=8.0,
-			piece_units=386.0, piece_rate=3.25, earned_gross=1462.75,
-		))
+		lines = pay_stub_pdf.earnings_lines(
+			a_stub(
+				pay_type="Piece Rate",
+				hourly_rate=18.50,
+				overtime_hours=8.0,
+				piece_units=386.0,
+				piece_rate=3.25,
+				earned_gross=1462.75,
+			)
+		)
 		self.assertFalse([line for line in lines if "1.5x" in line["label"]])
 
 	def test_with_no_rate_at_all_everything_lands_on_one_unnamed_earnings_line(self):
@@ -326,20 +352,25 @@ class DeductionItemisation(unittest.TestCase):
 		)
 
 	def test_an_itemised_list_is_printed_by_name_instead_of_as_a_lump(self):
-		lines = pay_stub_pdf.deduction_lines(a_stub(
-			total_deductions=451.17,
-			deduction_lines=[
-				{"label": "Child Support", "amount": 50.0},
-				{"label": "401(k)", "amount": 25.0},
-			],
-		))
+		lines = pay_stub_pdf.deduction_lines(
+			a_stub(
+				total_deductions=451.17,
+				deduction_lines=[
+					{"label": "Child Support", "amount": 50.0},
+					{"label": "401(k)", "amount": 25.0},
+				],
+			)
+		)
 		self.assertEqual([line["label"] for line in lines[4:]], ["Child Support", "401(k)"])
 		self.assertNotIn("Other deductions", [line["label"] for line in lines])
 
 	def test_a_zero_tax_is_left_off_rather_than_printed_as_zero(self):
-		labels = [line["label"] for line in pay_stub_pdf.deduction_lines(
-			a_stub(state_withholding=0.0, total_deductions=286.17),
-		)]
+		labels = [
+			line["label"]
+			for line in pay_stub_pdf.deduction_lines(
+				a_stub(state_withholding=0.0, total_deductions=286.17),
+			)
+		]
 		self.assertNotIn("State income tax", labels)
 
 	def test_a_partly_withheld_garnishment_prints_at_the_reduced_amount(self):
@@ -351,10 +382,12 @@ class DeductionItemisation(unittest.TestCase):
 		`if amount` that skips a zero line below, and a future edit tightening one
 		would silently take the other with it — leaving a real withholding off a
 		wage statement, which is the failure the statute exists to prevent."""
-		lines = pay_stub_pdf.deduction_lines(a_stub(
-			total_deductions=626.17,
-			deduction_lines=[{"label": "Child Support", "amount": 250.0, "shortfall": 250.0}],
-		))
+		lines = pay_stub_pdf.deduction_lines(
+			a_stub(
+				total_deductions=626.17,
+				deduction_lines=[{"label": "Child Support", "amount": 250.0, "shortfall": 250.0}],
+			)
+		)
 		self.assertIn(("Child Support", 250.0), [(line["label"], line["amount"]) for line in lines])
 
 	def test_a_fully_shortfalled_garnishment_is_omitted_rather_than_printed_as_zero(self):
@@ -367,18 +400,28 @@ class DeductionItemisation(unittest.TestCase):
 		employer to notify the issuer when the CCPA limit prevents full
 		withholding. That is the payroll clerk's action and the clerk's view is
 		`deduction_shortfalls` on the slip, not this page."""
-		labels = [line["label"] for line in pay_stub_pdf.deduction_lines(a_stub(
-			total_deductions=376.17,
-			deduction_lines=[{"label": "Child Support", "amount": 0.0, "shortfall": 300.0}],
-		))]
+		labels = [
+			line["label"]
+			for line in pay_stub_pdf.deduction_lines(
+				a_stub(
+					total_deductions=376.17,
+					deduction_lines=[{"label": "Child Support", "amount": 0.0, "shortfall": 300.0}],
+				)
+			)
+		]
 		self.assertNotIn("Child Support", labels)
 
 	def test_a_stub_with_no_deductions_itemises_nothing(self):
 		self.assertEqual(
-			pay_stub_pdf.deduction_lines(a_stub(
-				federal_withholding=0.0, state_withholding=0.0,
-				social_security=0.0, medicare=0.0, total_deductions=0.0,
-			)),
+			pay_stub_pdf.deduction_lines(
+				a_stub(
+					federal_withholding=0.0,
+					state_withholding=0.0,
+					social_security=0.0,
+					medicare=0.0,
+					total_deductions=0.0,
+				)
+			),
 			[],
 		)
 
@@ -427,9 +470,13 @@ class StubPage(unittest.TestCase):
 		self.assertNotIn("173.21", self.page)
 
 	def test_asking_for_it_draws_it_with_the_sentence_that_prevents_the_misreading(self):
-		page = text_of(pay_stub_pdf.render_pay_stub(
-			a_stub(), COMPANY_INFO, show_employer_contributions=True,
-		))
+		page = text_of(
+			pay_stub_pdf.render_pay_stub(
+				a_stub(),
+				COMPANY_INFO,
+				show_employer_contributions=True,
+			)
+		)
 		self.assertIn("Employer contributions", page)
 		self.assertIn("NOT DEDUCTED FROM YOUR PAY", page)
 		self.assertIn("173.21", page)
@@ -438,9 +485,12 @@ class StubPage(unittest.TestCase):
 		"""Anything other than zero here is a rate set below what the hours are
 		worth. The worker was paid lawfully and the page must not read as though
 		something was taken."""
-		page = text_of(pay_stub_pdf.render_pay_stub(
-			a_stub(earned_gross=1700.0, minimum_wage_makeup=80.0), COMPANY_INFO,
-		))
+		page = text_of(
+			pay_stub_pdf.render_pay_stub(
+				a_stub(earned_gross=1700.0, minimum_wage_makeup=80.0),
+				COMPANY_INFO,
+			)
+		)
 		self.assertIn("Minimum wage adjustment", page)
 		self.assertIn("Nothing was deducted", page)
 
@@ -458,7 +508,7 @@ class StubPage(unittest.TestCase):
 class YearToDate(unittest.TestCase):
 	"""The calendar year, said to be the calendar year, or absent."""
 
-	YTD = {
+	YTD: ClassVar[dict] = {
 		"year": "2026",
 		"periods": 12,
 		"gross_pay": 21360.0,
@@ -497,24 +547,46 @@ class StubToolTestCase(V12TestCase):
 	def setUp(self):
 		super().setUp()
 		self.configure(enabled=1, **STUB_ON)
-		STORE.seed("Farm Salary Structure", [{
-			"name": "SAL-0001",
-			"employee": "HR-EMP-00001",
-			"employee_name": "Maria Garcia",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"hourly_rate": 0.0,
-			"is_active": 1,
-			"effective_from": "2026-01-01",
-		}])
+		STORE.seed(
+			"Farm Salary Structure",
+			[
+				{
+					"name": "SAL-0001",
+					"employee": "HR-EMP-00001",
+					"employee_name": "Maria Garcia",
+					"company": MAIN,
+					"pay_type": "Hourly",
+					"base_rate": 20.0,
+					"hourly_rate": 0.0,
+					"is_active": 1,
+					"effective_from": "2026-01-01",
+				}
+			],
+		)
 
 	def a_run(self, name="PAY-2026-0002", start="2026-06-15", end="2026-06-28", **kwargs):
-		STORE.seed("Farm Payroll Entry", [entry(name, start, end, [
-			slip("HR-EMP-00001", name="Maria Garcia", gross=1600.0,
-			     salary_structure="SAL-0001", regular_hours=80.0, hours=80.0),
-			slip("HR-EMP-00002", name="Ana Ruiz", gross=2000.0),
-		], **kwargs)])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					name,
+					start,
+					end,
+					[
+						slip(
+							"HR-EMP-00001",
+							name="Maria Garcia",
+							gross=1600.0,
+							salary_structure="SAL-0001",
+							regular_hours=80.0,
+							hours=80.0,
+						),
+						slip("HR-EMP-00002", name="Ana Ruiz", gross=2000.0),
+					],
+					**kwargs,
+				)
+			],
+		)
 		return name
 
 	def attached(self, run: str, index: int = 0) -> bytes:
@@ -533,9 +605,13 @@ class StubTool(StubToolTestCase):
 
 	def test_it_attaches_a_private_pdf_to_the_payroll_entry(self):
 		run = self.a_run()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["payroll_entry"], run)
 		self.assertEqual(data["employee"], "HR-EMP-00001")
 		self.assertTrue(data["file_url"])
@@ -560,9 +636,13 @@ class StubTool(StubToolTestCase):
 		"""The slip stores hours and not a wage, so the rate has to be resolved
 		at render time — and it is the only thing that is."""
 		run = self.a_run()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["hourly_rate"], 20.0)
 		self.assertIn("20.00", text_of(self.attached(run)))
 
@@ -570,9 +650,13 @@ class StubTool(StubToolTestCase):
 		"""Everything lands on the balancing line. A stub that refused over a
 		missing rate would leave the worker with no statement at all."""
 		run = self.a_run()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00002",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00002",
+			},
+		)
 		self.assertIsNone(data["hourly_rate"])
 		self.assertIn("2,000.00", text_of(self.attached(run, index=0)))
 
@@ -580,9 +664,13 @@ class StubTool(StubToolTestCase):
 		"""The person asking for a stub is holding a piece of paper with a name
 		on it rather than a docname."""
 		run = self.a_run()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "Maria Garcia",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "Maria Garcia",
+			},
+		)
 		self.assertEqual(data["employee"], "HR-EMP-00001")
 
 	def test_rendering_moves_no_status_and_changes_no_figure(self):
@@ -594,17 +682,25 @@ class StubTool(StubToolTestCase):
 
 	def test_the_result_says_the_ytd_year_is_the_calendar_year(self):
 		run = self.a_run()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertIn("CALENDAR", data["note"])
 
 	def test_the_employer_section_is_a_choice_on_this_surface(self):
 		run = self.a_run()
-		self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-			"show_employer_contributions": True,
-		})
+		self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+				"show_employer_contributions": True,
+			},
+		)
 		self.assertIn("Employer contributions", text_of(self.attached(run)))
 
 
@@ -613,24 +709,39 @@ class StubYearToDate(StubToolTestCase):
 	"""What the tool sums for the YTD block, and from which runs."""
 
 	def two_runs(self):
-		STORE.seed("Farm Payroll Entry", [
-			entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=1000.0,
-				     salary_structure="SAL-0001"),
-			]),
-			entry("PAY-2026-0002", "2026-06-15", "2026-06-28", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=1600.0,
-				     salary_structure="SAL-0001"),
-			]),
-		])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					"PAY-2026-0001",
+					"2026-06-01",
+					"2026-06-14",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=1000.0, salary_structure="SAL-0001"),
+					],
+				),
+				entry(
+					"PAY-2026-0002",
+					"2026-06-15",
+					"2026-06-28",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=1600.0, salary_structure="SAL-0001"),
+					],
+				),
+			],
+		)
 
 	def test_it_sums_the_prior_runs_and_includes_this_one(self):
 		"""'Year to date' on a stub means through today's cheque, not one period
 		behind it."""
 		self.two_runs()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": "PAY-2026-0002", "employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-2026-0002",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["ytd"]["periods"], 2)
 		self.assertEqual(data["ytd"]["gross_pay"], 2600.0)
 		self.assertEqual(data["ytd"]["year"], "2026")
@@ -638,22 +749,37 @@ class StubYearToDate(StubToolTestCase):
 
 	def test_a_prior_calendar_year_is_not_summed_into_it(self):
 		self.two_runs()
-		STORE.seed("Farm Payroll Entry", [
-			entry("PAY-2025-0026", "2025-12-15", "2025-12-28", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=9000.0,
-				     salary_structure="SAL-0001"),
-			]),
-		])
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": "PAY-2026-0002", "employee": "HR-EMP-00001",
-		})
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					"PAY-2025-0026",
+					"2025-12-15",
+					"2025-12-28",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=9000.0, salary_structure="SAL-0001"),
+					],
+				),
+			],
+		)
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-2026-0002",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["ytd"]["gross_pay"], 2600.0)
 
 	def test_a_later_run_is_not_summed_into_it(self):
 		self.two_runs()
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": "PAY-2026-0001", "employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-2026-0001",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["ytd"]["periods"], 1)
 		self.assertEqual(data["ytd"]["gross_pay"], 1000.0)
 
@@ -661,34 +787,62 @@ class StubYearToDate(StubToolTestCase):
 		"""A Draft has not been paid and a Cancelled one was not — the rule
 		`_load_ytd` applies for the same reason."""
 		self.two_runs()
-		STORE.seed("Farm Payroll Entry", [
-			entry("PAY-2026-0003", "2026-06-15", "2026-06-28", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=7000.0,
-				     salary_structure="SAL-0001"),
-			], status="Cancelled"),
-		])
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": "PAY-2026-0002", "employee": "HR-EMP-00001",
-		})
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					"PAY-2026-0003",
+					"2026-06-15",
+					"2026-06-28",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=7000.0, salary_structure="SAL-0001"),
+					],
+					status="Cancelled",
+				),
+			],
+		)
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-2026-0002",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["ytd"]["gross_pay"], 2600.0)
 
 	def test_a_draft_run_reports_that_it_is_not_in_its_own_year_to_date(self):
 		"""Rendering a stub for a run that has not been paid is legitimate — it
 		is what a review looks at — and the page must not claim the figure it is
 		showing has been counted."""
-		STORE.seed("Farm Payroll Entry", [
-			entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=1000.0,
-				     salary_structure="SAL-0001"),
-			]),
-			entry("PAY-2026-0002", "2026-06-15", "2026-06-28", [
-				slip("HR-EMP-00001", name="Maria Garcia", gross=1600.0,
-				     salary_structure="SAL-0001"),
-			], status="Draft"),
-		])
-		data = self.tool_data("render_pay_stub", {
-			"payroll_entry": "PAY-2026-0002", "employee": "HR-EMP-00001",
-		})
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					"PAY-2026-0001",
+					"2026-06-01",
+					"2026-06-14",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=1000.0, salary_structure="SAL-0001"),
+					],
+				),
+				entry(
+					"PAY-2026-0002",
+					"2026-06-15",
+					"2026-06-28",
+					[
+						slip("HR-EMP-00001", name="Maria Garcia", gross=1600.0, salary_structure="SAL-0001"),
+					],
+					status="Draft",
+				),
+			],
+		)
+		data = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-2026-0002",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertFalse(data["ytd"]["includes_this_period"])
 		self.assertEqual(data["ytd"]["gross_pay"], 1000.0)
 
@@ -699,20 +853,34 @@ class StubYearToDate(StubToolTestCase):
 class StubRefusals(StubToolTestCase):
 	"""Every way of asking wrongly, and what each is told."""
 
+	@unittest.skipUnless(
+		form_pdf_renderer.available(),
+		"without reportlab the tool is unavailable for the PACKAGE, and the refusal "
+		"names that rather than the switch — a different sentence to a different "
+		"person, and not the one this test is about.",
+	)
 	def test_the_switch_ships_off_and_refuses_with_the_field_to_tick(self):
 		"""A mutating tool, and it writes a File naming somebody's wages."""
 		run = self.a_run()
 		self.configure(enabled=1, allow_render_pay_stub=0)
-		message = self.tool_error("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
+		message = self.tool_error(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertIn("allow_render_pay_stub", message)
 
 	@NEEDS_REPORTLAB
 	def test_an_unknown_run_is_refused_by_name(self):
-		message = self.tool_error("render_pay_stub", {
-			"payroll_entry": "PAY-NOPE", "employee": "HR-EMP-00001",
-		})
+		message = self.tool_error(
+			"render_pay_stub",
+			{
+				"payroll_entry": "PAY-NOPE",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertIn("PAY-NOPE", message)
 
 	@NEEDS_REPORTLAB
@@ -720,9 +888,13 @@ class StubRefusals(StubToolTestCase):
 		"""'Not on this run' and 'spelled differently' are the two things it can
 		be, and only one of them is the caller's mistake."""
 		run = self.a_run()
-		message = self.tool_error("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00099",
-		})
+		message = self.tool_error(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00099",
+			},
+		)
 		self.assertIn("HR-EMP-00001", message)
 		self.assertIn("Ana Ruiz", message)
 		self.assertIn("Nothing was rendered", message)
@@ -736,12 +908,20 @@ class StubRefusals(StubToolTestCase):
 	@NEEDS_REPORTLAB
 	def test_a_second_render_is_refused_and_names_what_is_already_there(self):
 		run = self.a_run()
-		first = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
-		message = self.tool_error("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
+		first = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
+		message = self.tool_error(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertIn(first["file_url"], message)
 		self.assertIn("overwrite=true", message)
 		self.assertIn("Nothing was changed", message)
@@ -751,12 +931,21 @@ class StubRefusals(StubToolTestCase):
 		"""A stub somebody was handed is a statement that was made, and deleting
 		it would not unmake it."""
 		run = self.a_run()
-		first = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001",
-		})
-		second = self.tool_data("render_pay_stub", {
-			"payroll_entry": run, "employee": "HR-EMP-00001", "overwrite": True,
-		})
+		first = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+			},
+		)
+		second = self.tool_data(
+			"render_pay_stub",
+			{
+				"payroll_entry": run,
+				"employee": "HR-EMP-00001",
+				"overwrite": True,
+			},
+		)
 		self.assertEqual(second["replaced"], first["file_url"])
 		rows = frappe.db.get_all(
 			"File",

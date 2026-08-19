@@ -6,6 +6,7 @@ every subsequent write. Delete is allowed in permissions so operators can
 prune under a retention policy; Frappe's own Deleted Document records each
 deletion.
 """
+
 import frappe
 from frappe import _
 from frappe.model.document import Document

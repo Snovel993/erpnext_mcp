@@ -108,9 +108,7 @@ GRANT = "Mobile Access Grant"
 #: it goes red naming Crew Leader. Compliance Officer is its negative control —
 #: a role with desk access is deliberately NOT required to be in this set, so the
 #: invariant cannot be satisfied by simply listing all seven.
-FARM_OPS_ROLES = frozenset(
-	{"Field Worker", "Farm Worker", "Foreman", "Crew Leader", "Farm Manager"}
-)
+FARM_OPS_ROLES = frozenset({"Field Worker", "Farm Worker", "Foreman", "Crew Leader", "Farm Manager"})
 
 #: The roles that may DISPATCH: raise work, send somebody to it, or read a board
 #: that is not their own. A SUBSET of the list above rather than a second list

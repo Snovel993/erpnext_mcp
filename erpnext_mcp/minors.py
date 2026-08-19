@@ -213,7 +213,7 @@ def _as_datetime(value):
 
 
 def _minutes(clock: str):
-	""""07:00" → 420. Empty or unparseable → None, which reads as "no limit"."""
+	""" "07:00" → 420. Empty or unparseable → None, which reads as "no limit"."""
 	parts = str(clock or "").strip().split(":")
 	if len(parts) < 2:
 		return None

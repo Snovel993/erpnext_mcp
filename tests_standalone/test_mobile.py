@@ -713,27 +713,27 @@ class Revocation(MobileTestCase):
 class LosingThePhone(MobileTestCase):
 	"""v0.93.0: `recover_mobile_access`, and what it refuses.
 
-	EVERY MECHANICAL PIECE ALREADY EXISTED — `revoke_api_token` says in its own
-	result that it is "the 'they lost their phone' one" — and a manager holding a
-	lost-phone report still had to do three things in the right order, keyed on a
-	login they usually do not have. A foreman knows a face and a badge.
+	  EVERY MECHANICAL PIECE ALREADY EXISTED — `revoke_api_token` says in its own
+	  result that it is "the 'they lost their phone' one" — and a manager holding a
+	  lost-phone report still had to do three things in the right order, keyed on a
+	  login they usually do not have. A foreman knows a face and a badge.
 
-	THE THREE CLAIMS:
+	  THE THREE CLAIMS:
 
-      IT REVOKES BEFORE IT MINTS. The lost handset is in somebody else's pocket
-      while this call runs, and a failure after the revocation leaves the account
-      with no credential — which is the safe side of the trade. Minting first
-      would leave the old credential live for as long as the second step took.
+	IT REVOKES BEFORE IT MINTS. The lost handset is in somebody else's pocket
+	while this call runs, and a failure after the revocation leaves the account
+	with no credential — which is the safe side of the trade. Minting first
+	would leave the old credential live for as long as the second step took.
 
-      THE BADGE IS THE IDENTITY PROOF, AND A MISMATCH STOPS EVERYTHING. A card
-      that resolves to somebody else is either the wrong card or the wrong
-      person, and neither ends in a working credential. The absence of a badge is
-      RECORDED rather than refused — somebody who lost the phone and the card is
-      an ordinary Tuesday.
+	THE BADGE IS THE IDENTITY PROOF, AND A MISMATCH STOPS EVERYTHING. A card
+	that resolves to somebody else is either the wrong card or the wrong
+	person, and neither ends in a working credential. The absence of a badge is
+	RECORDED rather than refused — somebody who lost the phone and the card is
+	an ordinary Tuesday.
 
-      THE EMPLOYEE RECORD IS NEVER TOUCHED. Recovering an account and hiring
-      somebody twice are different acts, and only one of them puts a person on
-      the dispatch board twice and in the payroll register once.
+	THE EMPLOYEE RECORD IS NEVER TOUCHED. Recovering an account and hiring
+	somebody twice are different acts, and only one of them puts a person on
+	the dispatch board twice and in the payroll register once.
 	"""
 
 	REASON = "phone lost at Yellow Camp on 2026-08-18"
@@ -916,9 +916,7 @@ class LosingThePhone(MobileTestCase):
 		"""The re-onboarding path, and it REUSES the Employee — which is the whole
 		reason it is named here rather than create_employee."""
 		self.an_employee("HR-EMP-BETO", user="", employee_name="Beto Cruz")
-		error = self.tool_error(
-			"recover_mobile_access", {"employee": "HR-EMP-BETO", "reason": self.REASON}
-		)
+		error = self.tool_error("recover_mobile_access", {"employee": "HR-EMP-BETO", "reason": self.REASON})
 		self.assertIn("onboard_employee(employee=...)", error)
 		self.assertIn("REUSES", error)
 

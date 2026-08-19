@@ -1403,16 +1403,6 @@ class TheMetadataEndpoint(ConsolidationTestCase):
 		self.assertEqual(self.history(), ["acc_one", "acc_two"])
 
 	def test_the_metadata_endpoint_takes_a_pushed_history_too(self):
-		"""It declares the key. An endpoint that did not would have Frappe drop
-		it before the method ever saw it, and answer 200."""
-		self.push(
-			bank_account=BROKERAGE,
-			plaid_account_id="acc_three",
-			plaid_account_id_history=json.dumps(["acc_one", "acc_two"]),
-		)
-		self.assertEqual(self.history(), ["acc_one", "acc_two"])
-
-	def test_the_metadata_endpoint_takes_a_pushed_history_too(self):
 		"""Declared on both, because Frappe drops a kwarg a whitelisted method
 		does not name and answers 200 anyway."""
 		self.push(

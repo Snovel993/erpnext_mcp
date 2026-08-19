@@ -197,7 +197,12 @@ def box_for(writer, wanted: set) -> dict:
 		for name, rect in rects:
 			if name not in wanted or name in found:
 				continue
-			x0, y0, x1, y1 = min(rect[0], rect[2]), min(rect[1], rect[3]), max(rect[0], rect[2]), max(rect[1], rect[3])
+			x0, y0, x1, y1 = (
+				min(rect[0], rect[2]),
+				min(rect[1], rect[3]),
+				max(rect[0], rect[2]),
+				max(rect[1], rect[3]),
+			)
 			ceiling = float(page.mediabox.height)
 			for other_name, other in rects:
 				if other_name == name:
@@ -219,8 +224,9 @@ def box_for(writer, wanted: set) -> dict:
 # ── stamping ─────────────────────────────────────────────────────────────
 
 
-def stamp(writer, page_index: int, rect, image_bytes: bytes, max_height: float = 0.0,
-          align: str = "left") -> dict | None:
+def stamp(
+	writer, page_index: int, rect, image_bytes: bytes, max_height: float = 0.0, align: str = "left"
+) -> dict | None:
 	"""Draw the signature into the page's CONTENT STREAM. Returns where it went.
 
 	None when there was nothing to draw or this bench cannot draw it — see
@@ -265,8 +271,13 @@ def stamp(writer, page_index: int, rect, image_bytes: bytes, max_height: float =
 	overlay.save()
 	page.merge_page(PdfReader(io.BytesIO(buffer.getvalue())).pages[0])
 
-	return {"page": page_index, "x": round(x, 2), "y": round(y, 2),
-	        "width": round(width, 2), "height": round(height, 2)}
+	return {
+		"page": page_index,
+		"x": round(x, 2),
+		"y": round(y, 2),
+		"width": round(width, 2),
+		"height": round(height, 2),
+	}
 
 
 # ── flattening ───────────────────────────────────────────────────────────
@@ -276,7 +287,7 @@ def _appearance_matrix(bbox, matrix, rect):
 	"""PDF 32000-1 12.5.5: map the transformed appearance BBox onto the Rect."""
 	a, b, c, d, e, f = matrix
 	xs, ys = [], []
-	for (x, y) in ((bbox[0], bbox[1]), (bbox[2], bbox[1]), (bbox[2], bbox[3]), (bbox[0], bbox[3])):
+	for x, y in ((bbox[0], bbox[1]), (bbox[2], bbox[1]), (bbox[2], bbox[3]), (bbox[0], bbox[3])):
 		xs.append(a * x + c * y + e)
 		ys.append(b * x + d * y + f)
 	bx0, bx1, by0, by1 = min(xs), max(xs), min(ys), max(ys)
@@ -345,7 +356,8 @@ def flatten(writer) -> int:
 		if not operations:
 			continue
 		overlay = PageObject.create_blank_page(
-			width=float(page.mediabox.width), height=float(page.mediabox.height))
+			width=float(page.mediabox.width), height=float(page.mediabox.height)
+		)
 		overlay[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): xobjects})
 		content = DecodedStreamObject()
 		content.set_data("\n".join(operations).encode("ascii"))

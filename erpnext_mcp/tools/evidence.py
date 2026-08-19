@@ -286,18 +286,25 @@ def _policy_attachments(names) -> dict:
 	if not names or not compat.doctype_exists("File"):  # pragma: no cover - every site has File
 		return {}
 	found: dict = {}
-	for row in frappe.db.get_all(
-		"File",
-		filters={"attached_to_doctype": POLICY, "attached_to_name": ("in", names)},
-		# `attached_to_name` is a framework column rather than one of File's own
-		# fields on some sites, so it is asked for by name: a batched read that
-		# lost it would file every attachment under one empty key.
-		fields=["name", "attached_to_name", "file_name", "file_url"],
-		limit=REGISTER_CAP * 4,
-	) or []:
+	for row in (
+		frappe.db.get_all(
+			"File",
+			filters={"attached_to_doctype": POLICY, "attached_to_name": ("in", names)},
+			# `attached_to_name` is a framework column rather than one of File's own
+			# fields on some sites, so it is asked for by name: a batched read that
+			# lost it would file every attachment under one empty key.
+			fields=["name", "attached_to_name", "file_name", "file_url"],
+			limit=REGISTER_CAP * 4,
+		)
+		or []
+	):
 		entry = dict(row)
 		found.setdefault(str(entry.get("attached_to_name") or ""), []).append(
-			{"file": entry.get("name"), "file_name": entry.get("file_name"), "file_url": entry.get("file_url")}
+			{
+				"file": entry.get("name"),
+				"file_name": entry.get("file_name"),
+				"file_url": entry.get("file_url"),
+			}
 		)
 	return found
 
@@ -390,8 +397,7 @@ def list_compliance_policies(args: dict) -> ToolResult:
 	)
 	attachments = _policy_attachments(dict(row).get("name") for row in rows)
 	policies = [
-		_describe_policy(dict(row), today, attachments.get(str(dict(row).get("name")), []))
-		for row in rows
+		_describe_policy(dict(row), today, attachments.get(str(dict(row).get("name")), [])) for row in rows
 	]
 	if as_bool(args, "in_force_only", False):
 		policies = [policy for policy in policies if policy["in_force"]]
@@ -473,13 +479,16 @@ def get_policy_coverage(args: dict) -> ToolResult:
 		specs = [audit_packets.TYPES[key] for key in audit_packets.names()]
 	specs = [spec for spec in specs if "policies" in spec.sections]
 
-	rows = frappe.db.get_all(
-		POLICY,
-		filters={"company": company} if company else {},
-		fields=compat.existing_fields(POLICY, _POLICY_FIELDS),
-		order_by="category asc, policy_name asc",
-		limit=REGISTER_CAP,
-	) or []
+	rows = (
+		frappe.db.get_all(
+			POLICY,
+			filters={"company": company} if company else {},
+			fields=compat.existing_fields(POLICY, _POLICY_FIELDS),
+			order_by="category asc, policy_name asc",
+			limit=REGISTER_CAP,
+		)
+		or []
+	)
 	attachments = _policy_attachments(dict(row).get("name") for row in rows)
 
 	#: `{category: [policy, ...]}` for the policies actually in force on the day.
@@ -543,9 +552,7 @@ def get_policy_coverage(args: dict) -> ToolResult:
 	work_list = [
 		{
 			"category": category,
-			"needed_by": sorted(
-				spec.key for spec in specs if category in (spec.policy_categories or ())
-			),
+			"needed_by": sorted(spec.key for spec in specs if category in (spec.policy_categories or ())),
 			"register_it_with": (
 				"create_compliance_policy(policy_name=…, category="
 				f"{category!r}, company=…, version=…, effective_date=…, review_due_date=…, "

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-""""Print Badge Sheet" on the Employee list, as a record and not as a hook. v0.56.1.
+""" "Print Badge Sheet" on the Employee list, as a record and not as a hook. v0.56.1.
 
 `badge_sheet.render_badge_sheet` turns a list of employees into a printable sheet
 of CR-80 cards. The place an HR manager selects a list of employees is the

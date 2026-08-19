@@ -37,7 +37,7 @@ than a join somebody has to write a report for.
 import frappe
 
 from .. import compat, controls, enforcement
-from ..args import as_bool, as_date, as_int, as_limit, as_str, resolve_company
+from ..args import as_bool, as_date, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -132,8 +132,7 @@ def _threshold_doc(reference: str, company: str = ""):
 			"Pass the docname, or set company to narrow it."
 		)
 	raise ToolError(
-		f"no Approval Threshold called {reference!r} on this site. list_approval_thresholds has "
-		"the register."
+		f"no Approval Threshold called {reference!r} on this site. list_approval_thresholds has the register."
 	)
 
 
@@ -181,7 +180,9 @@ def _requested_levels(raw) -> list[dict]:
 			raise ToolError(f"levels[{index}] must be an object, got {type(entry).__name__}")
 		role = str(entry.get("approver_role") or "").strip()
 		if not role:
-			raise ToolError(f"levels[{index}] needs an approver_role — a rung with no approver cannot release anything.")
+			raise ToolError(
+				f"levels[{index}] needs an approver_role — a rung with no approver cannot release anything."
+			)
 		if not frappe.db.exists("Role", role):
 			raise ToolError(
 				f"levels[{index}] names role {role!r}, which is not a Role on this site. Create the "
@@ -247,7 +248,11 @@ def create_approval_threshold(args: dict) -> ToolResult:
 		summary=(
 			f"created Approval Threshold {doc.name} for {company} covering {document_type}: "
 			f"{described['level_count']} level(s)"
-			+ (f", auto-approve below {described['auto_approve_below']}" if described["auto_approve_below"] else "")
+			+ (
+				f", auto-approve below {described['auto_approve_below']}"
+				if described["auto_approve_below"]
+				else ""
+			)
 		),
 		docstatus_delta="none → 0 (draft)",
 	)
@@ -382,7 +387,12 @@ def update_approval_threshold(args: dict) -> ToolResult:
 
 	after = _describe_threshold(doc)
 	return ToolResult(
-		data={"threshold": after, "changed": changed, "was": before, "control": enforcement.status("approval_threshold")},
+		data={
+			"threshold": after,
+			"changed": changed,
+			"was": before,
+			"control": enforcement.status("approval_threshold"),
+		},
 		summary=f"updated Approval Threshold {doc.name}: {', '.join(changed)}",
 		docstatus_delta="0 → 0 (draft, edited)",
 	)
@@ -497,7 +507,9 @@ def create_closing_checklist(args: dict) -> ToolResult:
 	period_end = as_date(args, "period_end", required=True)
 	period_type = as_str(args, "period_type") or "Month"
 	if period_type not in ("Month", "Quarter", "Year"):
-		raise ToolError(f"period_type must be Month, Quarter or Year. Got {period_type!r}. Nothing was created.")
+		raise ToolError(
+			f"period_type must be Month, Quarter or Year. Got {period_type!r}. Nothing was created."
+		)
 
 	doc = frappe.new_doc(CHECKLIST)
 	doc.company = company
@@ -822,7 +834,11 @@ def close_accounting_period(args: dict) -> ToolResult:
 		summary=(
 			f"locked {doc.period_type} close {doc.name} ({doc.company}) covering "
 			f"{after['period_start']} to {after['period_end']}"
-			+ (f" — {len(findings)} required step(s) were still outstanding" if findings else " — checklist clean")
+			+ (
+				f" — {len(findings)} required step(s) were still outstanding"
+				if findings
+				else " — checklist clean"
+			)
 		),
 		docstatus_delta="0 → 0 (draft, locked)",
 	)
@@ -890,9 +906,7 @@ def _locked_periods(company: str) -> list[dict]:
 
 
 def _entry_accounts(name: str) -> list[str]:
-	rows = frappe.db.get_all(
-		"Journal Entry Account", filters={"parent": name}, fields=["account"], limit=200
-	)
+	rows = frappe.db.get_all("Journal Entry Account", filters={"parent": name}, fields=["account"], limit=200)
 	return sorted({str(row.get("account") or "") for row in rows or [] if row.get("account")})
 
 
@@ -1013,9 +1027,7 @@ def journal_entry_findings(
 	# The median is taken over entries touching THE SAME ACCOUNTS. A median over
 	# every entry on the company would compare a payroll accrual against a fuel
 	# receipt and call one of them unusual every month.
-	same_accounts = [
-		row["total"] for row in history if accounts and set(row["accounts"]) == set(accounts)
-	]
+	same_accounts = [row["total"] for row in history if accounts and set(row["accounts"]) == set(accounts)]
 	verdict = controls.unusual_amount(total, same_accounts)
 	if verdict["unusual"]:
 		out["journal_entry_unusual_amount"].append(
@@ -1297,9 +1309,7 @@ def check_journal_entry_controls(args: dict) -> ToolResult:
 	for control_point, rows in findings.items():
 		# `raise_on_enforced=False` is the whole point of this tool: the same
 		# evaluation, reported rather than acted on.
-		block = enforcement.evaluate(
-			control_point, [], company=company, raise_on_enforced=False
-		)
+		block = enforcement.evaluate(control_point, [], company=company, raise_on_enforced=False)
 		block["findings"] = [finding.as_dict() for finding in rows]
 		block["finding_count"] = len(rows)
 		block["clear"] = not rows
@@ -1329,7 +1339,11 @@ def check_journal_entry_controls(args: dict) -> ToolResult:
 		},
 		summary=(
 			f"{total_findings} control finding(s) for an entry of {total} on {posting_date} ({company})"
-			+ (f"; {len(would_block)} control(s) would refuse it" if would_block else "; nothing would be refused")
+			+ (
+				f"; {len(would_block)} control(s) would refuse it"
+				if would_block
+				else "; nothing would be refused"
+			)
 		),
 	)
 

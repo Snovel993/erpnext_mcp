@@ -165,7 +165,9 @@ def validate_piecework_rate(row: dict) -> list:
 		)
 	rate = _as_float(row.get("rate_per_unit"), -1.0)
 	if rate < 0:
-		errors.append(f"rate_per_unit must be a number and cannot be negative, got {row.get('rate_per_unit')!r}")
+		errors.append(
+			f"rate_per_unit must be a number and cannot be negative, got {row.get('rate_per_unit')!r}"
+		)
 	_validate_window(row, errors)
 	return errors
 
@@ -238,7 +240,9 @@ def activities_available(rows, on_date=None) -> list:
 	What the refusal below lists, so a caller told to name an activity is told
 	which activities there are.
 	"""
-	return sorted({normalize_activity(row.get("activity")) for row in (rows or []) if covers(row, on_date)} - {""})
+	return sorted(
+		{normalize_activity(row.get("activity")) for row in (rows or []) if covers(row, on_date)} - {""}
+	)
 
 
 def piecework_rate_for(rows, activity=None, on_date=None) -> dict | None:

@@ -45,7 +45,9 @@ class FarmPayrollDeduction(Document):
 		if not self.employee:
 			frappe.throw(_("Employee is required — a deduction with nobody to deduct from is not a record."))
 		if not self.effective_from:
-			frappe.throw(_("Effective From is required. A deduction with no start date has no period to apply to."))
+			frappe.throw(
+				_("Effective From is required. A deduction with no start date has no period to apply to.")
+			)
 
 		if self.effective_to and str(self.effective_to) < str(self.effective_from):
 			frappe.throw(
@@ -64,9 +66,7 @@ class FarmPayrollDeduction(Document):
 			)
 
 		if self.amount_type == "Percentage" and amount > 100:
-			frappe.throw(
-				_("A percentage deduction cannot exceed 100% (got {0}).").format(amount)
-			)
+			frappe.throw(_("A percentage deduction cannot exceed 100% (got {0}).").format(amount))
 
 		# A garnishment is never pre-tax. Money taken under a court order is
 		# wages the worker earned and was taxed on; the order reaches what is
@@ -114,4 +114,6 @@ class FarmPayrollDeduction(Document):
 			)
 
 		if self.priority and int(self.priority) < 0:
-			frappe.throw(_("Priority cannot be negative. Leave it at 0 to use the order the law gives the category."))
+			frappe.throw(
+				_("Priority cannot be negative. Leave it at 0 to use the order the law gives the category.")
+			)

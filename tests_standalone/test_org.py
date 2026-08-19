@@ -93,9 +93,7 @@ class CreatingThem(OrgTestCase):
 			"create_employee",
 			{"employee_name": "Ana Ramos", "company": MAIN, "designation": "Tractor Driver"},
 		)
-		self.assertEqual(
-			frappe.db.get_value("Employee", hire["employee"], "designation"), "Tractor Driver"
-		)
+		self.assertEqual(frappe.db.get_value("Employee", hire["employee"], "designation"), "Tractor Driver")
 
 	def test_branch_and_employment_type_and_grade_all_insert(self):
 		self.assertEqual(self.tool_data("create_branch", {"branch": "Mill Creek"})["name"], "Mill Creek")
@@ -114,9 +112,7 @@ class CreatingThem(OrgTestCase):
 		error = self.tool_error("create_designation", {"designation_name": "Checker"})
 		self.assertIn("already a Designation called 'Checker'", error)
 		self.assertIn("Nothing was created", error)
-		self.assertEqual(
-			len([row for row in STORE.rows("Designation") if row["name"] == "Checker"]), 1
-		)
+		self.assertEqual(len([row for row in STORE.rows("Designation") if row["name"] == "Checker"]), 1)
 
 	def test_creating_needs_an_hr_role(self):
 		self.strip_role()
@@ -213,7 +209,9 @@ class Renaming(OrgTestCase):
 		"""A `field:`-named doctype whose column disagreed with its key is half a rename."""
 		self.tool_data("create_designation", {"designation_name": "Trakter Driver"})
 		self.tool_data("update_designation", {"designation": "Trakter Driver", "new_name": "Tractor Driver"})
-		self.assertEqual(frappe.db.get_value("Designation", "Tractor Driver", "designation_name"), "Tractor Driver")
+		self.assertEqual(
+			frappe.db.get_value("Designation", "Tractor Driver", "designation_name"), "Tractor Driver"
+		)
 
 	def test_renaming_onto_an_existing_name_is_refused(self):
 		self.tool_data("create_branch", {"branch": "Mill Creek"})
@@ -288,22 +286,16 @@ class ReportsTo(OrgTestCase):
 	def test_update_writes_it_and_resolves_the_supervisor_four_ways(self):
 		hire = self.tool_data("create_employee", {"employee_name": "Ana Ramos", "company": MAIN})
 		# By employee_name rather than by docname: a badge scan gives a name.
-		data = self.tool_data(
-			"update_employee", {"name": hire["employee"], "reports_to": "Ada Orchard"}
-		)
+		data = self.tool_data("update_employee", {"name": hire["employee"], "reports_to": "Ada Orchard"})
 		self.assertEqual(
 			[entry["field"] for entry in data["changed"]],
 			["reports_to"],
 		)
-		self.assertEqual(
-			frappe.db.get_value("Employee", hire["employee"], "reports_to"), self.supervisor()
-		)
+		self.assertEqual(frappe.db.get_value("Employee", hire["employee"], "reports_to"), self.supervisor())
 
 	def test_reporting_to_yourself_is_refused(self):
 		hire = self.tool_data("create_employee", {"employee_name": "Ana Ramos", "company": MAIN})
-		error = self.tool_error(
-			"update_employee", {"name": hire["employee"], "reports_to": hire["employee"]}
-		)
+		error = self.tool_error("update_employee", {"name": hire["employee"], "reports_to": hire["employee"]})
 		self.assertIn("cannot report to themselves", error)
 		self.assertFalse(frappe.db.get_value("Employee", hire["employee"], "reports_to"))
 
@@ -321,7 +313,5 @@ class ReportsTo(OrgTestCase):
 
 	def test_an_unknown_supervisor_is_refused_by_name(self):
 		hire = self.tool_data("create_employee", {"employee_name": "Ana Ramos", "company": MAIN})
-		error = self.tool_error(
-			"update_employee", {"name": hire["employee"], "reports_to": "Nobody At All"}
-		)
+		error = self.tool_error("update_employee", {"name": hire["employee"], "reports_to": "Nobody At All"})
 		self.assertIn("no Employee matching 'Nobody At All'", error)

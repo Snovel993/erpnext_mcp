@@ -16,6 +16,7 @@ TWELVE CLAIMS.
 11. `TaxFormLifecycle` — Draft to Generated to Filed, and regeneration reports what moved.
 12. `TaxFormRefusals` — the settings gates, the duplicate guard, and every argument check.
 """
+
 import json
 
 import frappe
@@ -438,8 +439,9 @@ class Form941(V12TestCase):
 		self.assertEqual(form["line5c_tax"], 290.0)
 
 	def test_line_5e_is_the_sum_of_5a_through_5d(self):
-		form = generate_941_data([or_slip(gross=10000.0, social_security=620.0, medicare=145.0)],
-		                         COMPANY_INFO, "Q1", 2025)
+		form = generate_941_data(
+			[or_slip(gross=10000.0, social_security=620.0, medicare=145.0)], COMPANY_INFO, "Q1", 2025
+		)
 		self.assertEqual(
 			form["line5e_total_social_security_and_medicare"],
 			round(form["line5a_tax"] + form["line5b_tax"] + form["line5c_tax"] + form["line5d_tax"], 2),
@@ -461,8 +463,7 @@ class Form941(V12TestCase):
 		self.assertEqual(form["line7_fractions_of_cents_adjustment"], 0.02)
 
 	def test_line_5d_needs_the_surcharge_stored_apart(self):
-		slips = [or_slip(gross=250000.0, additional_medicare=450.0,
-		                 social_security=15500.0, medicare=4075.0)]
+		slips = [or_slip(gross=250000.0, additional_medicare=450.0, social_security=15500.0, medicare=4075.0)]
 		form = generate_941_data(slips, COMPANY_INFO, "Q1", 2025)
 		self.assertEqual(form["line5d_tax"], 450.0)
 		self.assertEqual(form["line5d_wages_subject_to_additional_medicare"], 50000.0)
@@ -492,7 +493,9 @@ class Form941(V12TestCase):
 		info = {**COMPANY_INFO, "small_business_payroll_tax_credit": 500.0}
 		form = generate_941_data(slips, info, "Q1", 2025)
 		self.assertEqual(form["line11_small_business_payroll_tax_credit"], 500.0)
-		self.assertEqual(form["line12_total_taxes_after_credits"], form["line10_total_taxes_after_adjustments"] - 500.0)
+		self.assertEqual(
+			form["line12_total_taxes_after_credits"], form["line10_total_taxes_after_adjustments"] - 500.0
+		)
 
 	def test_the_due_date_is_on_the_form(self):
 		form = generate_941_data([or_slip()], COMPANY_INFO, "Q4", 2025)
@@ -817,42 +820,48 @@ class TaxFormToolTestCase(V12TestCase):
 		self._seed_state_configs()
 
 	def _seed_employees(self):
-		STORE.seed("Employee", [
-			{
-				"name": "HR-EMP-00001",
-				"employee_name": "Test Worker",
-				"company": MAIN,
-				"status": "Active",
-				"date_of_joining": "2025-01-15",
-			},
-			{
-				"name": "HR-EMP-00002",
-				"employee_name": "Second Worker",
-				"company": MAIN,
-				"status": "Active",
-				"date_of_joining": "2025-01-15",
-			},
-		])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "HR-EMP-00001",
+					"employee_name": "Test Worker",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				},
+				{
+					"name": "HR-EMP-00002",
+					"employee_name": "Second Worker",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				},
+			],
+		)
 
 	def _seed_state_configs(self):
-		STORE.seed("State Tax Configuration", [
-			{
-				"name": "STC-OR-2025",
-				"company": MAIN,
-				"state": "OR",
-				"tax_year": 2025,
-				"status": "Active",
-				"employer_account_number": "1234567-8",
-			},
-			{
-				"name": "STC-WA-2025",
-				"company": MAIN,
-				"state": "WA",
-				"tax_year": 2025,
-				"status": "Active",
-				"employer_account_number": "000123456",
-			},
-		])
+		STORE.seed(
+			"State Tax Configuration",
+			[
+				{
+					"name": "STC-OR-2025",
+					"company": MAIN,
+					"state": "OR",
+					"tax_year": 2025,
+					"status": "Active",
+					"employer_account_number": "1234567-8",
+				},
+				{
+					"name": "STC-WA-2025",
+					"company": MAIN,
+					"state": "WA",
+					"tax_year": 2025,
+					"status": "Active",
+					"employer_account_number": "000123456",
+				},
+			],
+		)
 
 	def seed_payroll(self, name, period_start, period_end, slips, status="Submitted", company=MAIN):
 		"""One Farm Payroll Entry with its slips, as `calculate_payroll` leaves it."""
@@ -863,30 +872,39 @@ class TaxFormToolTestCase(V12TestCase):
 			row.pop("period_start", None)
 			row.pop("period_end", None)
 			rows.append(row)
-		STORE.seed("Farm Payroll Entry", [{
-			"name": name,
-			"company": company,
-			"pay_period_start": period_start,
-			"pay_period_end": period_end,
-			"pay_frequency": "Biweekly",
-			"status": status,
-			"total_gross": sum(s.get("gross_pay", 0) for s in slips),
-			"total_deductions": 0,
-			"total_net": 0,
-			"employee_count": len({s.get("employee") for s in slips}),
-			"slips": rows,
-		}])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				{
+					"name": name,
+					"company": company,
+					"pay_period_start": period_start,
+					"pay_period_end": period_end,
+					"pay_frequency": "Biweekly",
+					"status": status,
+					"total_gross": sum(s.get("gross_pay", 0) for s in slips),
+					"total_deductions": 0,
+					"total_net": 0,
+					"employee_count": len({s.get("employee") for s in slips}),
+					"slips": rows,
+				}
+			],
+		)
 
 	def seed_a_year(self, employee="HR-EMP-00001"):
 		"""Four Oregon pay periods, one in each quarter."""
-		for index, (start, end) in enumerate((
-			("2025-02-01", "2025-02-14"),
-			("2025-05-01", "2025-05-16"),
-			("2025-08-01", "2025-08-15"),
-			("2025-11-01", "2025-11-14"),
-		)):
+		for index, (start, end) in enumerate(
+			(
+				("2025-02-01", "2025-02-14"),
+				("2025-05-01", "2025-05-16"),
+				("2025-08-01", "2025-08-15"),
+				("2025-11-01", "2025-11-14"),
+			)
+		):
 			self.seed_payroll(
-				f"PAY-2025-{index:04d}", start, end,
+				f"PAY-2025-{index:04d}",
+				start,
+				end,
 				[or_slip(employee=employee, gross=1000.0)],
 			)
 
@@ -899,12 +917,15 @@ class TaxFormTools(TaxFormToolTestCase):
 
 	def test_generate_a_w2(self):
 		self.seed_a_year()
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2",
-			"company": MAIN,
-			"fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["status"], "Generated")
 		self.assertEqual(data["slip_count"], 4)
 		self.assertEqual(data["form_data"]["box1_wages"], 4000.0)
@@ -913,119 +934,219 @@ class TaxFormTools(TaxFormToolTestCase):
 
 	def test_the_employer_state_id_comes_off_the_state_tax_configuration(self):
 		self.seed_a_year()
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["form_data"]["state_boxes"][0]["box15_employer_state_id"], "1234567-8")
 
 	def test_a_state_ids_argument_overrides_the_configuration(self):
 		self.seed_a_year()
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001", "state_ids": {"OR": "9999999-9"},
-		})
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+				"state_ids": {"OR": "9999999-9"},
+			},
+		)
 		self.assertEqual(data["form_data"]["state_boxes"][0]["box15_employer_state_id"], "9999999-9")
 
 	def test_generate_a_941(self):
-		self.seed_payroll("PAY-Q1-A", "2025-02-01", "2025-02-14", [
-			or_slip(employee="HR-EMP-00001", gross=1000.0),
-			or_slip(employee="HR-EMP-00002", gross=2000.0),
-		])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.seed_payroll(
+			"PAY-Q1-A",
+			"2025-02-01",
+			"2025-02-14",
+			[
+				or_slip(employee="HR-EMP-00001", gross=1000.0),
+				or_slip(employee="HR-EMP-00002", gross=2000.0),
+			],
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["form_data"]["line1_number_of_employees"], 2)
 		self.assertEqual(data["form_data"]["line2_wages_tips_other_compensation"], 3000.0)
 		self.assertEqual(data["quarter"], "Q1")
 
 	def test_generate_an_oregon_oq(self):
-		self.seed_payroll("PAY-Q1-A", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=1000.0)])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "OQ", "company": MAIN, "fiscal_year": "2025",
-			"quarter": "Q1", "ui_rate": 2.4,
-		})
+		self.seed_payroll(
+			"PAY-Q1-A", "2025-02-01", "2025-02-14", [or_slip(employee="HR-EMP-00001", gross=1000.0)]
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "OQ",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"ui_rate": 2.4,
+			},
+		)
 		self.assertEqual(data["form_data"]["subject_wages"], 1000.0)
 		self.assertEqual(data["form_data"]["ui_tax"], 24.0)
 		self.assertEqual(data["form_data"]["oregon_bin"], "1234567-8")
 
 	def test_generate_a_wa_esd(self):
-		self.seed_payroll("PAY-Q1-A", "2025-02-01", "2025-02-14",
-		                  [wa_slip(employee="HR-EMP-00001", gross=1000.0, total_hours=80.0)])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "WA-ESD", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.seed_payroll(
+			"PAY-Q1-A",
+			"2025-02-01",
+			"2025-02-14",
+			[wa_slip(employee="HR-EMP-00001", gross=1000.0, total_hours=80.0)],
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "WA-ESD",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["form_data"]["total_wages"], 1000.0)
 		self.assertEqual(data["form_data"]["total_hours"], 80)
 		self.assertEqual(data["form_data"]["esd_account_number"], "000123456")
 
 	def test_generate_an_or_wr(self):
 		self.seed_a_year()
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025",
-		})
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertEqual(data["form_data"]["annual"]["or_wages"], 4000.0)
 		self.assertEqual(data["form_data"]["by_quarter"]["Q2"]["or_wages"], 1000.0)
 
 	def test_only_the_named_employee_lands_on_a_w2(self):
-		self.seed_payroll("PAY-A", "2025-02-01", "2025-02-14", [
-			or_slip(employee="HR-EMP-00001", gross=1000.0),
-			or_slip(employee="HR-EMP-00002", gross=9000.0),
-		])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		self.seed_payroll(
+			"PAY-A",
+			"2025-02-01",
+			"2025-02-14",
+			[
+				or_slip(employee="HR-EMP-00001", gross=1000.0),
+				or_slip(employee="HR-EMP-00002", gross=9000.0),
+			],
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["form_data"]["box1_wages"], 1000.0)
 
 	def test_a_draft_payroll_is_not_counted(self):
 		"""A draft payroll has not been paid."""
-		self.seed_payroll("PAY-DRAFT", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=5000.0)], status="Draft")
-		self.seed_payroll("PAY-REAL", "2025-03-01", "2025-03-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=1000.0)])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		self.seed_payroll(
+			"PAY-DRAFT",
+			"2025-02-01",
+			"2025-02-14",
+			[or_slip(employee="HR-EMP-00001", gross=5000.0)],
+			status="Draft",
+		)
+		self.seed_payroll(
+			"PAY-REAL", "2025-03-01", "2025-03-14", [or_slip(employee="HR-EMP-00001", gross=1000.0)]
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["form_data"]["box1_wages"], 1000.0)
 
 	def test_a_cancelled_payroll_is_not_counted(self):
-		self.seed_payroll("PAY-X", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=5000.0)], status="Cancelled")
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		self.seed_payroll(
+			"PAY-X",
+			"2025-02-01",
+			"2025-02-14",
+			[or_slip(employee="HR-EMP-00001", gross=5000.0)],
+			status="Cancelled",
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		self.assertEqual(data["form_data"]["box1_wages"], 0.0)
 
 	def test_a_payroll_outside_the_period_is_not_counted(self):
-		self.seed_payroll("PAY-Q1", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=1000.0)])
-		self.seed_payroll("PAY-Q2", "2025-05-01", "2025-05-16",
-		                  [or_slip(employee="HR-EMP-00001", gross=7000.0)])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.seed_payroll(
+			"PAY-Q1", "2025-02-01", "2025-02-14", [or_slip(employee="HR-EMP-00001", gross=1000.0)]
+		)
+		self.seed_payroll(
+			"PAY-Q2", "2025-05-01", "2025-05-16", [or_slip(employee="HR-EMP-00001", gross=7000.0)]
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["form_data"]["line2_wages_tips_other_compensation"], 1000.0)
 
 	def test_another_company_s_payroll_is_not_counted(self):
-		self.seed_payroll("PAY-OTHER", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=9000.0)], company=OTHER)
-		self.seed_payroll("PAY-MAIN", "2025-02-15", "2025-02-28",
-		                  [or_slip(employee="HR-EMP-00001", gross=1000.0)])
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.seed_payroll(
+			"PAY-OTHER",
+			"2025-02-01",
+			"2025-02-14",
+			[or_slip(employee="HR-EMP-00001", gross=9000.0)],
+			company=OTHER,
+		)
+		self.seed_payroll(
+			"PAY-MAIN", "2025-02-15", "2025-02-28", [or_slip(employee="HR-EMP-00001", gross=1000.0)]
+		)
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["form_data"]["line2_wages_tips_other_compensation"], 1000.0)
 
 	def test_get_reads_back_every_computed_value(self):
 		self.seed_a_year()
-		created = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
+		created = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
 		data = self.tool_data("get_tax_form", {"name": created["name"]})
 		self.assertEqual(data["form_type"], "W-2")
 		self.assertEqual(data["status"], "Generated")
@@ -1035,39 +1156,67 @@ class TaxFormTools(TaxFormToolTestCase):
 
 	def test_list_and_filter(self):
 		self.seed_a_year()
-		self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
-		self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
-		self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q2",
-		})
+		self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
+		self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
+		self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q2",
+			},
+		)
 
 		self.assertEqual(self.tool_data("list_tax_forms", {})["count"], 3)
 		self.assertEqual(self.tool_data("list_tax_forms", {"form_type": "941"})["count"], 2)
 		self.assertEqual(self.tool_data("list_tax_forms", {"quarter": "Q1"})["count"], 1)
 		self.assertEqual(
-			self.tool_data("list_tax_forms", {"employee": "HR-EMP-00001"})["count"], 1,
+			self.tool_data("list_tax_forms", {"employee": "HR-EMP-00001"})["count"],
+			1,
 		)
 		self.assertEqual(self.tool_data("list_tax_forms", {"fiscal_year": "2024"})["count"], 0)
 
 	def test_list_counts_by_status(self):
 		self.seed_a_year()
-		created = self.tool_data("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025",
-		})
+		created = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.tool_data("mark_tax_form_filed", {"name": created["name"]})
 		data = self.tool_data("list_tax_forms", {})
 		self.assertEqual(data["by_status"], {"Filed": 1})
 
 	def test_a_generated_form_is_audited(self):
 		self.seed_a_year()
-		self.tool_data("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025",
-		})
+		self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertAudited("generate_tax_form", "Success")
 
 
@@ -1078,22 +1227,32 @@ class TaxFormLifecycle(TaxFormToolTestCase):
 	"""Generated to Filed, and what regeneration reports."""
 
 	def _a_941(self, gross=1000.0):
-		self.seed_payroll("PAY-Q1", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=gross)])
-		return self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.seed_payroll(
+			"PAY-Q1", "2025-02-01", "2025-02-14", [or_slip(employee="HR-EMP-00001", gross=gross)]
+		)
+		return self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 
 	def test_a_new_form_is_generated_not_draft(self):
 		self.assertEqual(self._a_941()["status"], "Generated")
 
 	def test_mark_filed(self):
 		created = self._a_941()
-		data = self.tool_data("mark_tax_form_filed", {
-			"name": created["name"],
-			"filed_date": "2025-04-25",
-			"confirmation_number": "EFTPS-99887766",
-		})
+		data = self.tool_data(
+			"mark_tax_form_filed",
+			{
+				"name": created["name"],
+				"filed_date": "2025-04-25",
+				"confirmation_number": "EFTPS-99887766",
+			},
+		)
 		self.assertEqual(data["status"], "Filed")
 		self.assertEqual(data["filed_date"], "2025-04-25")
 		self.assertEqual(data["confirmation_number"], "EFTPS-99887766")
@@ -1119,8 +1278,9 @@ class TaxFormLifecycle(TaxFormToolTestCase):
 		self.assertEqual(created["form_data"]["line2_wages_tips_other_compensation"], 1000.0)
 
 		# A correction lands: the same period, more wages.
-		self.seed_payroll("PAY-Q1-FIX", "2025-03-01", "2025-03-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=500.0)])
+		self.seed_payroll(
+			"PAY-Q1-FIX", "2025-03-01", "2025-03-14", [or_slip(employee="HR-EMP-00001", gross=500.0)]
+		)
 
 		data = self.tool_data("regenerate_tax_form", {"name": created["name"]})
 		self.assertTrue(data["changed"])
@@ -1137,8 +1297,9 @@ class TaxFormLifecycle(TaxFormToolTestCase):
 
 	def test_regeneration_rewrites_the_stored_values(self):
 		created = self._a_941(gross=1000.0)
-		self.seed_payroll("PAY-Q1-FIX", "2025-03-01", "2025-03-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=500.0)])
+		self.seed_payroll(
+			"PAY-Q1-FIX", "2025-03-01", "2025-03-14", [or_slip(employee="HR-EMP-00001", gross=500.0)]
+		)
 		self.tool_data("regenerate_tax_form", {"name": created["name"]})
 		read_back = self.tool_data("get_tax_form", {"name": created["name"]})
 		self.assertEqual(read_back["form_data"]["line2_wages_tips_other_compensation"], 1500.0)
@@ -1168,16 +1329,23 @@ class TaxFormLifecycle(TaxFormToolTestCase):
 		"""Superseding one form and generating its correction is the whole point."""
 		created = self._a_941()
 		frappe.db.set_value("Tax Form", created["name"], "status", "Amended")
-		replacement = self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		replacement = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertNotEqual(replacement["name"], created["name"])
 
 	def test_get_returns_the_values_as_generated_not_as_recomputed(self):
 		"""A filed form is a statement about a date, not a live query."""
 		created = self._a_941(gross=1000.0)
-		self.seed_payroll("PAY-Q1-LATE", "2025-03-01", "2025-03-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=9000.0)])
+		self.seed_payroll(
+			"PAY-Q1-LATE", "2025-03-01", "2025-03-14", [or_slip(employee="HR-EMP-00001", gross=9000.0)]
+		)
 		read_back = self.tool_data("get_tax_form", {"name": created["name"]})
 		self.assertEqual(read_back["form_data"]["line2_wages_tips_other_compensation"], 1000.0)
 
@@ -1210,29 +1378,51 @@ class TaxFormRefusals(TaxFormToolTestCase):
 		self.assertIn("switched off", error.lower())
 
 	def test_an_unknown_form_type_is_refused_by_name(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "W-4", "company": MAIN, "fiscal_year": "2025",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "W-4",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn("form_type must be one of", error)
 		self.assertIn("WA-ESD", error)
 
 	def test_a_quarterly_form_needs_a_quarter(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn("quarter is required", error)
 
 	def test_an_annual_form_refuses_a_quarter(self):
 		"""Silently ignoring it would produce a year's figures under a quarter's label."""
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertIn("annual form", error)
 
 	def test_a_bad_quarter_is_refused(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q5",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q5",
+			},
+		)
 		self.assertIn("quarter must be one of", error)
 
 	def test_a_missing_year_is_refused(self):
@@ -1240,62 +1430,112 @@ class TaxFormRefusals(TaxFormToolTestCase):
 		self.assertIn("fiscal_year is required", error)
 
 	def test_a_bad_year_is_refused(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "twenty-five",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "twenty-five",
+			},
+		)
 		self.assertIn("four-digit year", error)
 
 	def test_a_w2_needs_an_employee(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn("employee is required", error)
 
 	def test_an_unknown_employee_is_refused(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "Nobody At All",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "Nobody At All",
+			},
+		)
 		self.assertIn("no Employee", error)
 
 	def test_a_1099_needs_a_related_party(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "1099-NEC", "company": MAIN, "fiscal_year": "2025",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "1099-NEC",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn("related_party is required", error)
 
 	def test_an_unknown_related_party_is_refused(self):
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "1099-NEC", "company": MAIN, "fiscal_year": "2025",
-			"related_party": "RP-NOPE",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "1099-NEC",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"related_party": "RP-NOPE",
+			},
+		)
 		self.assertIn("no Related Party", error)
 
 	def test_a_duplicate_form_is_refused_and_points_at_the_original(self):
 		self.seed_a_year()
-		created = self.tool_data("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025",
-		})
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "OR-WR", "company": MAIN, "fiscal_year": "2025",
-		})
+		created = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "OR-WR",
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn(created["name"], error)
 		self.assertIn("regenerate_tax_form", error)
 
 	def test_two_employees_get_their_own_w2s(self):
 		"""The duplicate guard is per recipient, not per company and year."""
-		self.seed_payroll("PAY-A", "2025-02-01", "2025-02-14", [
-			or_slip(employee="HR-EMP-00001", gross=1000.0),
-			or_slip(employee="HR-EMP-00002", gross=2000.0),
-		])
-		first = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00001",
-		})
-		second = self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025",
-			"employee": "HR-EMP-00002",
-		})
+		self.seed_payroll(
+			"PAY-A",
+			"2025-02-01",
+			"2025-02-14",
+			[
+				or_slip(employee="HR-EMP-00001", gross=1000.0),
+				or_slip(employee="HR-EMP-00002", gross=2000.0),
+			],
+		)
+		first = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00001",
+			},
+		)
+		second = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": "HR-EMP-00002",
+			},
+		)
 		self.assertNotEqual(first["name"], second["name"])
 		self.assertEqual(second["form_data"]["box1_wages"], 2000.0)
 
@@ -1303,10 +1543,15 @@ class TaxFormRefusals(TaxFormToolTestCase):
 		self.seed_a_year()
 		for quarter in ("Q1", "Q2", "Q3", "Q4"):
 			with self.subTest(quarter=quarter):
-				self.tool_data("generate_tax_form", {
-					"form_type": "941", "company": MAIN,
-					"fiscal_year": "2025", "quarter": quarter,
-				})
+				self.tool_data(
+					"generate_tax_form",
+					{
+						"form_type": "941",
+						"company": MAIN,
+						"fiscal_year": "2025",
+						"quarter": quarter,
+					},
+				)
 		self.assertEqual(self.tool_data("list_tax_forms", {"form_type": "941"})["count"], 4)
 
 	def test_a_nonexistent_form_is_refused_cleanly(self):
@@ -1319,17 +1564,29 @@ class TaxFormRefusals(TaxFormToolTestCase):
 
 	def test_a_bad_numeric_argument_is_refused_by_name(self):
 		self.seed_a_year()
-		error = self.tool_error("generate_tax_form", {
-			"form_type": "OQ", "company": MAIN, "fiscal_year": "2025",
-			"quarter": "Q1", "ui_rate": "two point four",
-		})
+		error = self.tool_error(
+			"generate_tax_form",
+			{
+				"form_type": "OQ",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"ui_rate": "two point four",
+			},
+		)
 		self.assertIn("ui_rate must be a number", error)
 
 	def test_generating_with_no_payroll_at_all_still_produces_a_form(self):
 		"""A quarter with nobody on it is a return that has to be filed anyway."""
-		data = self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["slip_count"], 0)
 		self.assertEqual(data["form_data"]["line2_wages_tips_other_compensation"], 0.0)
 		self.assertTrue(data["form_data"]["line4_no_wages_subject_to_ss_medicare"])

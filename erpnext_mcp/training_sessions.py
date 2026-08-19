@@ -484,7 +484,11 @@ def alert_names(raw) -> list:
 	"""
 	if not raw:
 		return []
-	pieces = [str(entry) for entry in raw] if isinstance(raw, (list, tuple)) else str(raw).replace(",", "\n").split("\n")
+	pieces = (
+		[str(entry) for entry in raw]
+		if isinstance(raw, (list, tuple))
+		else str(raw).replace(",", "\n").split("\n")
+	)
 	out = []
 	for piece in pieces:
 		name = piece.strip()
@@ -526,7 +530,7 @@ def attendees_for_parents(names, limit_per_parent: int = 200) -> dict:
 		frappe.db.get_all(
 			ATTENDEE_DOCTYPE,
 			filters={"parenttype": DOCTYPE, "parentfield": "attendees", "parent": ("in", wanted)},
-			fields=["parent"] + compat.existing_fields(ATTENDEE_DOCTYPE, ATTENDEE_FIELDS),
+			fields=["parent", *compat.existing_fields(ATTENDEE_DOCTYPE, ATTENDEE_FIELDS)],
 			order_by="idx asc",
 			limit=len(wanted) * limit_per_parent,
 		)

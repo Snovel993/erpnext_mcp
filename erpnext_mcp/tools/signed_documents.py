@@ -98,11 +98,7 @@ def resolve_document(args: dict) -> tuple[str, str]:
 	`render_i9_pdf`, and a returning picker's form can be named by the person it
 	belongs to rather than by a docname nobody on a handset has.
 	"""
-	raw = (
-		as_str(args, "document_type")
-		or as_str(args, "doctype")
-		or as_str(args, "form_doctype")
-	)
+	raw = as_str(args, "document_type") or as_str(args, "doctype") or as_str(args, "form_doctype")
 	unsigned = signatures.UNSIGNED_FORMS.get(raw.casefold())
 	if unsigned:
 		raise ToolError(
@@ -381,10 +377,7 @@ def _boxes_for(doctype: str, name: str) -> list:
 
 def _preview_note(doctype: str, url: str, stale: bool) -> str:
 	if not url:
-		return (
-			f"no page is on this {doctype} and none could be drawn. The signer cannot be shown "
-			f"the form."
-		)
+		return f"no page is on this {doctype} and none could be drawn. The signer cannot be shown the form."
 	if stale:
 		return (
 			"this page was drawn before the record's last change, so it is not what the record "
@@ -461,10 +454,14 @@ def seal_signed_document(args: dict) -> ToolResult:
 		)
 
 	content = base64.b64decode(base["content"])
-	note = "" if rows else (
-		"This document carries a signature and no Signing Evidence row. It was signed before "
-		"the evidence register existed (erpnext_mcp v0.60.0); the identity, device and location "
-		"of that signing were never captured and are not recoverable."
+	note = (
+		""
+		if rows
+		else (
+			"This document carries a signature and no Signing Evidence row. It was signed before "
+			"the evidence register existed (erpnext_mcp v0.60.0); the identity, device and location "
+			"of that signing were never captured and are not recoverable."
+		)
 	)
 	sealed = pdf_seal.seal(content, rows, note=note)
 	digest = pdf_seal.sha256_of(sealed)
@@ -663,9 +660,7 @@ def evidence_for(doctype: str, name: str) -> list:
 	"""
 	if not signing_evidence.available():
 		return []
-	fields = compat.existing_fields(
-		signing_evidence.SIGNING_EVIDENCE, list(signing_evidence.DETAIL_FIELDS)
-	)
+	fields = compat.existing_fields(signing_evidence.SIGNING_EVIDENCE, list(signing_evidence.DETAIL_FIELDS))
 	try:
 		rows = frappe.db.get_all(
 			signing_evidence.SIGNING_EVIDENCE,
@@ -783,9 +778,7 @@ def _record_seal(rows: list, file_url, digest: str) -> dict:
 		if not name:
 			continue
 		try:
-			frappe.db.set_value(
-				signing_evidence.SIGNING_EVIDENCE, name, payload, update_modified=False
-			)
+			frappe.db.set_value(signing_evidence.SIGNING_EVIDENCE, name, payload, update_modified=False)
 			updated.append(name)
 		except Exception:  # pragma: no cover - a site mid-migrate
 			failed.append(name)

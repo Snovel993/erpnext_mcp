@@ -182,9 +182,7 @@ class TheBuildersReadRealRows(RectifyTestCase):
 	def test_i9_expired_treats_the_row_as_an_employee(self):
 		"""`i9_expired` reads the status column on the Employee, so
 		`source_docname` IS the employee — no lookup."""
-		built = rectify.describe_rectification(
-			{"alert_type": "i9_expired", "source_docname": "HR-EMP-00042"}
-		)
+		built = rectify.describe_rectification({"alert_type": "i9_expired", "source_docname": "HR-EMP-00042"})
 		self.assertEqual(built["action_type"], "reverify_i9")
 		self.assertEqual(built["action_params"]["employee"], "HR-EMP-00042")
 

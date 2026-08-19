@@ -27,68 +27,65 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-
 ASSET_TYPES = (
-    "Housing Unit",
-    "Irrigation Zone",
-    "Irrigation Valve",
-    "Sprayer",
-    "Tractor",
-    "Block",
-    "Water Source",
-    "Storage",
-    "Cold Storage",
-    "General",
+	"Housing Unit",
+	"Irrigation Zone",
+	"Irrigation Valve",
+	"Sprayer",
+	"Tractor",
+	"Block",
+	"Water Source",
+	"Storage",
+	"Cold Storage",
+	"General",
 )
 
 
 class AssetRegister(Document):
-    def validate(self):
-        if not self.asset_type:
-            frappe.throw(_("Asset Type is required."))
-        if not self.company:
-            frappe.throw(_("Company is required — every asset belongs to somebody."))
+	def validate(self):
+		if not self.asset_type:
+			frappe.throw(_("Asset Type is required."))
+		if not self.company:
+			frappe.throw(_("Company is required — every asset belongs to somebody."))
 
-        if self.location:
-            if self.location == self.name:
-                frappe.throw(_("An asset cannot be its own parent."))
-            if not frappe.db.exists("Asset Register", self.location):
-                frappe.throw(
-                    _("Location {0} does not exist in Asset Register.").format(self.location)
-                )
+		if self.location:
+			if self.location == self.name:
+				frappe.throw(_("An asset cannot be its own parent."))
+			if not frappe.db.exists("Asset Register", self.location):
+				frappe.throw(_("Location {0} does not exist in Asset Register.").format(self.location))
 
-        if self.gps_latitude is not None and self.gps_latitude != 0:
-            lat = float(self.gps_latitude or 0)
-            if lat < -90 or lat > 90:
-                frappe.throw(_("GPS Latitude must be between -90 and 90."))
-        if self.gps_longitude is not None and self.gps_longitude != 0:
-            lon = float(self.gps_longitude or 0)
-            if lon < -180 or lon > 180:
-                frappe.throw(_("GPS Longitude must be between -180 and 180."))
+		if self.gps_latitude is not None and self.gps_latitude != 0:
+			lat = float(self.gps_latitude or 0)
+			if lat < -90 or lat > 90:
+				frappe.throw(_("GPS Latitude must be between -90 and 90."))
+		if self.gps_longitude is not None and self.gps_longitude != 0:
+			lon = float(self.gps_longitude or 0)
+			if lon < -180 or lon > 180:
+				frappe.throw(_("GPS Longitude must be between -180 and 180."))
 
-        self.qr_url = _build_qr_url(self.name)
+		self.qr_url = _build_qr_url(self.name)
 
-    def before_save(self):
-        if self.current_state and isinstance(self.current_state, str):
-            import json
+	def before_save(self):
+		if self.current_state and isinstance(self.current_state, str):
+			import json
 
-            try:
-                json.loads(self.current_state)
-            except (json.JSONDecodeError, ValueError):
-                frappe.throw(_("Current State must be valid JSON."))
+			try:
+				json.loads(self.current_state)
+			except (json.JSONDecodeError, ValueError):
+				frappe.throw(_("Current State must be valid JSON."))
 
 
 def _build_qr_url(asset_name: str) -> str:
-    """The URL the QR code encodes: /scan/<asset_name> on the site's public URL."""
-    try:
-        from erpnext_mcp import settings
+	"""The URL the QR code encodes: /scan/<asset_name> on the site's public URL."""
+	try:
+		from erpnext_mcp import settings
 
-        public_url = settings.public_url()
-    except Exception:
-        public_url = ""
-    base = (public_url or "").rstrip("/")
-    if not base:
-        base = frappe.utils.get_url()
-    from urllib.parse import quote
+		public_url = settings.public_url()
+	except Exception:
+		public_url = ""
+	base = (public_url or "").rstrip("/")
+	if not base:
+		base = frappe.utils.get_url()
+	from urllib.parse import quote
 
-    return f"{base}/scan/{quote(asset_name, safe='')}"
+	return f"{base}/scan/{quote(asset_name, safe='')}"

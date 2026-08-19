@@ -477,8 +477,9 @@ def plan(record: dict, employee: dict, employer: dict) -> dict:
 SIGNATURE_BOX = (102.0, 86.0, 400.0, 104.0)
 
 
-def fill_w4_pdf(record: dict, employee: dict, employer: dict,
-                signature: bytes | None = None, flatten: bool | None = None) -> bytes:
+def fill_w4_pdf(
+	record: dict, employee: dict, employer: dict, signature: bytes | None = None, flatten: bool | None = None
+) -> bytes:
 	"""The shipped IRS form with this record's values in its boxes.
 
 	Args:
@@ -518,9 +519,7 @@ def fill_w4_pdf(record: dict, employee: dict, employer: dict,
 	for page_index, values in plan(record, employee, employer).items():
 		if not values:
 			continue
-		writer.update_page_form_field_values(
-			writer.pages[page_index], values, auto_regenerate=False
-		)
+		writer.update_page_form_field_values(writer.pages[page_index], values, auto_regenerate=False)
 
 	# Flatten BEFORE stamping, the same order and for the same reason as the
 	# I-9: a widget's appearance painted after the ink covers the ink. There is

@@ -308,9 +308,7 @@ class InvoiceFromSettlement(SalesTestCase):
 			line_items=[{"packed_weight": 500, "price_per_unit": 1.0, "price_uom": "Lb"}],
 			deductions=[],
 		)
-		data = self.tool_data(
-			"create_sales_invoice_from_settlement", {"settlement_statement": settlement}
-		)
+		data = self.tool_data("create_sales_invoice_from_settlement", {"settlement_statement": settlement})
 		self.assertEqual(data["items"][0]["item_code"], "FRUIT-SALES")
 
 	def test_the_price_uom_is_carried_rather_than_the_weight_uom_assumed(self):
@@ -327,9 +325,7 @@ class InvoiceFromSettlement(SalesTestCase):
 			],
 			deductions=[],
 		)
-		data = self.tool_data(
-			"create_sales_invoice_from_settlement", {"settlement_statement": settlement}
-		)
+		data = self.tool_data("create_sales_invoice_from_settlement", {"settlement_statement": settlement})
 		self.assertEqual(data["items"][0]["uom"], "Box")
 
 	def test_the_dates_default_to_the_settlement_and_thirty_days_after(self):
@@ -454,9 +450,7 @@ class DeductionsAreChargeRows(SalesTestCase):
 
 	def test_a_settlement_with_no_deductions_needs_no_account(self):
 		settlement = self.submitted_settlement(deductions=[])
-		data = self.tool_data(
-			"create_sales_invoice_from_settlement", {"settlement_statement": settlement}
-		)
+		data = self.tool_data("create_sales_invoice_from_settlement", {"settlement_statement": settlement})
 		self.assertEqual(data["taxes"], [])
 		self.assertEqual(data["grand_total"], GROSS_REVENUE)
 
@@ -545,9 +539,7 @@ class SettlementInvoiceRefusals(SalesTestCase):
 
 	def test_a_line_with_no_packed_weight_is_refused_rather_than_priced_at_zero(self):
 		settlement = self.submitted_settlement(
-			line_items=[
-				{"variety": "Gala", "grade": "XF", "packed_weight": 0, "gross_amount": 500.0}
-			],
+			line_items=[{"variety": "Gala", "grade": "XF", "packed_weight": 0, "gross_amount": 500.0}],
 			deductions=[],
 		)
 		message = self.tool_error(
@@ -556,9 +548,7 @@ class SettlementInvoiceRefusals(SalesTestCase):
 		self.assertIn("packed weight", message)
 
 	def test_an_unknown_settlement_is_refused_by_name(self):
-		message = self.tool_error(
-			"create_sales_invoice_from_settlement", {"settlement_statement": "NOPE"}
-		)
+		message = self.tool_error("create_sales_invoice_from_settlement", {"settlement_statement": "NOPE"})
 		self.assertIn("no Settlement Statement called", message)
 
 	def test_a_due_date_before_the_posting_date_is_refused(self):
@@ -586,9 +576,7 @@ class StandaloneInvoice(SalesTestCase):
 		self.assertIsNone(data["linked_settlement"])
 
 	def test_items_are_required(self):
-		message = self.tool_error(
-			"create_sales_invoice", {"customer": MASTER_CUSTOMER, "company": MAIN}
-		)
+		message = self.tool_error("create_sales_invoice", {"customer": MASTER_CUSTOMER, "company": MAIN})
 		self.assertIn("items must be a non-empty list", message)
 
 	def test_a_zero_quantity_is_refused(self):
@@ -775,7 +763,8 @@ class ListingInvoices(SalesTestCase):
 		data = self.tool_data("list_sales_invoices", {"from_date": "2026-09-01"})
 		self.assertEqual(data["count"], 1)
 		self.assertIn(
-			"is after", self.tool_error("list_sales_invoices", {"from_date": "2026-12-01", "to_date": "2026-01-01"})
+			"is after",
+			self.tool_error("list_sales_invoices", {"from_date": "2026-12-01", "to_date": "2026-01-01"}),
 		)
 
 	def test_the_settlement_filter_finds_the_invoice_that_billed_it(self):
@@ -861,12 +850,8 @@ class SubmittingAnInvoice(SalesTestCase):
 class ReceivingPayment(SalesTestCase):
 	def two_open_invoices(self):
 		"""Two submitted invoices, the older one due first."""
-		old = self.standalone_invoice(
-			posting_date="2026-06-01", due_date="2026-07-01", submit=True
-		)
-		new = self.standalone_invoice(
-			posting_date="2026-10-01", due_date="2026-11-01", submit=True
-		)
+		old = self.standalone_invoice(posting_date="2026-06-01", due_date="2026-07-01", submit=True)
+		new = self.standalone_invoice(posting_date="2026-10-01", due_date="2026-11-01", submit=True)
 		return old, new
 
 	def test_an_unallocated_payment_walks_the_invoices_oldest_first(self):
@@ -1143,14 +1128,10 @@ class ShrinkByVarietyAndGrade(SalesTestCase):
 		self.assertIn("settlement lines", fancy["note"])
 
 	def test_a_ticket_in_another_unit_is_excluded_rather_than_converted(self):
-		bins = self.submitted_ticket(
-			ticket_number="44719", weight_uom="Bin", gross_weight=40, tare_weight=0
-		)
+		bins = self.submitted_ticket(ticket_number="44719", weight_uom="Bin", gross_weight=40, tare_weight=0)
 		name = self.submitted_settlement(scale_tickets=[bins])
 		data = self.tool_data("get_settlement_shrink", {"settlement_statement": name})
-		excluded = [
-			row for row in data["by_variety_grade"] if row.get("tickets_in_other_units_excluded")
-		]
+		excluded = [row for row in data["by_variety_grade"] if row.get("tickets_in_other_units_excluded")]
 		self.assertEqual(excluded[0]["tickets_in_other_units_excluded"], 1)
 
 
@@ -1255,9 +1236,7 @@ class Packout(SalesTestCase):
 		self.submitted_settlement()
 		for group_by in sales.PACKOUT_GROUP_BY:
 			with self.subTest(group_by=group_by):
-				data = self.tool_data(
-					"get_packout_summary", {"company": MAIN, "group_by": group_by}
-				)
+				data = self.tool_data("get_packout_summary", {"company": MAIN, "group_by": group_by})
 				self.assertTrue(data["basis"])
 
 
@@ -1585,13 +1564,9 @@ class SettlementToJournalEntry(SalesTestCase):
 
 	def test_it_stays_a_draft_until_the_separate_submit_tool_runs(self):
 		_, data = self.post()
-		self.assertEqual(
-			frappe.db.get_value("Journal Entry", data["journal_entry"], "docstatus"), 0
-		)
+		self.assertEqual(frappe.db.get_value("Journal Entry", data["journal_entry"], "docstatus"), 0)
 		self.tool_data("submit_journal_entry", {"name": data["journal_entry"]})
-		self.assertEqual(
-			frappe.db.get_value("Journal Entry", data["journal_entry"], "docstatus"), 1
-		)
+		self.assertEqual(frappe.db.get_value("Journal Entry", data["journal_entry"], "docstatus"), 1)
 
 
 # ── Claim 16: late tickets ────────────────────────────────────────────────
@@ -1616,9 +1591,7 @@ class LateTickets(SalesTestCase):
 			"reconcile_settlement_to_tickets",
 			{"settlement_statement": settlement, "scale_tickets": [ticket]},
 		)
-		self.assertEqual(
-			self.tool_data("list_scale_tickets", {"unmatched": True})["count"], 0
-		)
+		self.assertEqual(self.tool_data("list_scale_tickets", {"unmatched": True})["count"], 0)
 
 	def test_the_settlements_own_numbers_are_untouched(self):
 		settlement = self.submitted_settlement()
@@ -1691,18 +1664,14 @@ class LateTickets(SalesTestCase):
 
 	def test_a_ticket_in_another_unit_is_matched_and_still_excluded(self):
 		settlement = self.submitted_settlement()
-		bins = self.submitted_ticket(
-			ticket_number="7", weight_uom="Bin", gross_weight=40, tare_weight=0
-		)
+		bins = self.submitted_ticket(ticket_number="7", weight_uom="Bin", gross_weight=40, tare_weight=0)
 		data = self.tool_data(
 			"reconcile_settlement_to_tickets",
 			{"settlement_statement": settlement, "scale_tickets": [bins]},
 		)
 		self.assertEqual(data["matched_count"], 1)
 		self.assertEqual(data["variance_change"], 0.0)
-		self.assertEqual(
-			data["updated_reconciliation"]["tickets_in_other_units_excluded"], 1
-		)
+		self.assertEqual(data["updated_reconciliation"]["tickets_in_other_units_excluded"], 1)
 
 
 # ── Claim 17: the switches, and the schema behind them ────────────────────

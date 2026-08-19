@@ -123,17 +123,13 @@ FILING_CHANNEL = {
 		"Form 941 is filed on the official IRS form or electronically through an "
 		"authorised e-file provider, and deposits are made through EFTPS."
 	),
-	"OR-WR": (
-		"Form OR-WR is filed with the Oregon Department of Revenue through Revenue "
-		"Online."
-	),
+	"OR-WR": ("Form OR-WR is filed with the Oregon Department of Revenue through Revenue Online."),
 	"OQ": (
 		"Form OQ is filed with the Oregon Employment Department and the Department "
 		"of Revenue through Frances Online."
 	),
 	"WA-ESD": (
-		"The quarterly report is filed with the Washington Employment Security "
-		"Department through EAMS."
+		"The quarterly report is filed with the Washington Employment Security Department through EAMS."
 	),
 }
 
@@ -334,8 +330,15 @@ class _Sheet:
 			body = body[:-1]
 		return body + "."
 
-	def text(self, x: float, baseline_top: float, text: str, font: str = FONT_LABEL,
-	         size: float = SIZE_LABEL, align: str = "left") -> None:
+	def text(
+		self,
+		x: float,
+		baseline_top: float,
+		text: str,
+		font: str = FONT_LABEL,
+		size: float = SIZE_LABEL,
+		align: str = "left",
+	) -> None:
 		"""One string, its BASELINE at `baseline_top` points from the page top."""
 		body = _clean(text)
 		if not body:
@@ -391,8 +394,11 @@ class _Sheet:
 			allowed = max(1, min(3, int(room / (SIZE_LABEL + 1.5))))
 			for index, part in enumerate(self.wrap(label, width - 6, label_font, SIZE_LABEL)[:allowed]):
 				self.text(
-					x + 3, top + SIZE_LABEL + 2.5 + index * (SIZE_LABEL + 1.5),
-					part, label_font, SIZE_LABEL,
+					x + 3,
+					top + SIZE_LABEL + 2.5 + index * (SIZE_LABEL + 1.5),
+					part,
+					label_font,
+					SIZE_LABEL,
 				)
 
 		if not lines:
@@ -423,8 +429,9 @@ class _Sheet:
 		self.text(x + size + 3, top + size - 0.8, label, FONT_LABEL, SIZE_SMALL)
 		return size + 6 + self.width_of(label, FONT_LABEL, SIZE_SMALL)
 
-	def ink(self, x: float, baseline_top: float, image_bytes: bytes, max_width: float,
-	        max_height: float) -> bool:
+	def ink(
+		self, x: float, baseline_top: float, image_bytes: bytes, max_width: float, max_height: float
+	) -> bool:
 		"""Draw a signature capture sitting ON a ruled line. True if it landed.
 
 		THE CROPPING IS `pdf_signing.ink_only`, NOT A SECOND ONE. That function
@@ -460,8 +467,12 @@ class _Sheet:
 		width, height = ink_width * scale, ink_height * scale
 		try:
 			self._canvas.drawImage(
-				ImageReader(io.BytesIO(png)), x, self._y(baseline_top),
-				width=width, height=height, mask="auto",
+				ImageReader(io.BytesIO(png)),
+				x,
+				self._y(baseline_top),
+				width=width,
+				height=height,
+				mask="auto",
 			)
 		except Exception:  # pragma: no cover - an image reportlab will not decode
 			return False
@@ -472,8 +483,12 @@ class _Sheet:
 		"""The band every form opens with: what it is, for when, and which copy."""
 		self.text(MARGIN, self.top + SIZE_TITLE, title, FONT_LABEL_BOLD, SIZE_TITLE)
 		self.text(
-			PAGE_WIDTH - MARGIN, self.top + SIZE_TITLE, right,
-			FONT_LABEL_BOLD, SIZE_TITLE, align="right",
+			PAGE_WIDTH - MARGIN,
+			self.top + SIZE_TITLE,
+			right,
+			FONT_LABEL_BOLD,
+			SIZE_TITLE,
+			align="right",
 		)
 		self.top += SIZE_TITLE + 3
 		self.text(MARGIN, self.top + SIZE_SUBTITLE, form_line, FONT_LABEL, SIZE_SUBTITLE)
@@ -492,8 +507,9 @@ class _Sheet:
 		self.line(MARGIN, self.top, PAGE_WIDTH - MARGIN, line_width=0.75)
 		self.top += 5
 
-	def paragraph(self, text: str, size: float = SIZE_SMALL, font: str = FONT_LABEL,
-	              indent: float = 0.0) -> None:
+	def paragraph(
+		self, text: str, size: float = SIZE_SMALL, font: str = FONT_LABEL, indent: float = 0.0
+	) -> None:
 		for line in self.wrap(text, CONTENT_WIDTH - indent, font, size):
 			self.room_for(size + 2.5)
 			self.text(MARGIN + indent, self.top + size, line, font, size)
@@ -553,9 +569,12 @@ class _Sheet:
 		self._page_number += 1
 		self.text(MARGIN, HEADER_BASELINE, self._header_note, FONT_LABEL_BOLD, SIZE_SMALL)
 		self.text(
-			PAGE_WIDTH - MARGIN, HEADER_BASELINE,
+			PAGE_WIDTH - MARGIN,
+			HEADER_BASELINE,
 			f"{self._page_label} - page {self._page_number}",
-			FONT_LABEL, SIZE_SMALL, align="right",
+			FONT_LABEL,
+			SIZE_SMALL,
+			align="right",
 		)
 		self.line(MARGIN, HEADER_BASELINE + 4, PAGE_WIDTH - MARGIN, line_width=0.75)
 
@@ -670,7 +689,10 @@ def render_w2_pdf(form_data: dict, company_info: dict, employee_info: dict) -> b
 	address = _address_lines(_first(block.get("address"), info.get("address")), limit=2)
 
 	sheet.masthead(
-		"Form W-2", "Wage and Tax Statement", str(year), W2_COPY,
+		"Form W-2",
+		"Wage and Tax Statement",
+		str(year),
+		W2_COPY,
 	)
 
 	# The face is a TEN-ROW GRID of 26 points, and both halves are cut to it.
@@ -690,30 +712,48 @@ def render_w2_pdf(form_data: dict, company_info: dict, employee_info: dict) -> b
 	left_boxes = (
 		(30.0, "a  Employee's social security number", [ssn], FONT_VALUE, SIZE_VALUE),
 		(30.0, "b  Employer identification number (EIN)", [employer["ein"]], FONT_VALUE, SIZE_VALUE),
-		(64.0, "c  Employer's name, address, and ZIP code",
-		 [employer["name"], *employer["address"]][:3] or ["(not recorded on this site)"],
-		 FONT_PLAIN, 8.0),
+		(
+			64.0,
+			"c  Employer's name, address, and ZIP code",
+			[employer["name"], *employer["address"]][:3] or ["(not recorded on this site)"],
+			FONT_PLAIN,
+			8.0,
+		),
 		(28.0, "d  Control number", [str(form_data.get("control_number") or "")], FONT_VALUE, SIZE_VALUE),
-		(36.0, "e  Employee's first name and initial, last name, and suffix", [name],
-		 FONT_VALUE, SIZE_VALUE),
-		(72.0, "f  Employee's address and ZIP code",
-		 address or ["(not recorded on this site)"], FONT_PLAIN, 8.0),
+		(36.0, "e  Employee's first name and initial, last name, and suffix", [name], FONT_VALUE, SIZE_VALUE),
+		(
+			72.0,
+			"f  Employee's address and ZIP code",
+			address or ["(not recorded on this site)"],
+			FONT_PLAIN,
+			8.0,
+		),
 	)
 	offset = 0.0
 	for height, label, value, font, size in left_boxes:
-		sheet.box(MARGIN, top + offset, left_w, height, label, value,
-		          value_font=font, value_size=size)
+		sheet.box(MARGIN, top + offset, left_w, height, label, value, value_font=font, value_size=size)
 		offset += height
 
 	money_rows = (
-		("1  Wages, tips, other compensation", "box1_wages",
-		 "2  Federal income tax withheld", "box2_federal_income_tax_withheld"),
-		("3  Social security wages", "box3_social_security_wages",
-		 "4  Social security tax withheld", "box4_social_security_tax_withheld"),
-		("5  Medicare wages and tips", "box5_medicare_wages",
-		 "6  Medicare tax withheld", "box6_medicare_tax_withheld"),
-		("7  Social security tips", "box7_social_security_tips",
-		 "8  Allocated tips", "box8_allocated_tips"),
+		(
+			"1  Wages, tips, other compensation",
+			"box1_wages",
+			"2  Federal income tax withheld",
+			"box2_federal_income_tax_withheld",
+		),
+		(
+			"3  Social security wages",
+			"box3_social_security_wages",
+			"4  Social security tax withheld",
+			"box4_social_security_tax_withheld",
+		),
+		(
+			"5  Medicare wages and tips",
+			"box5_medicare_wages",
+			"6  Medicare tax withheld",
+			"box6_medicare_tax_withheld",
+		),
+		("7  Social security tips", "box7_social_security_tips", "8  Allocated tips", "box8_allocated_tips"),
 		("9", None, "10  Dependent care benefits", "box10_dependent_care_benefits"),
 		("11  Nonqualified plans", "box11_nonqualified_plans", None, None),
 	)
@@ -741,8 +781,13 @@ def render_w2_pdf(form_data: dict, company_info: dict, employee_info: dict) -> b
 		# rule as box 14 beside it.
 		height = row_h * (2 if index == 3 else 1)
 		sheet.box(
-			col2, top + (5 + index) * row_h, col_w, height,
-			f"12{letter}", f"{code}   {amount}".strip(), value_align="right",
+			col2,
+			top + (5 + index) * row_h,
+			col_w,
+			height,
+			f"12{letter}",
+			f"{code}   {amount}".strip(),
+			value_align="right",
 		)
 
 	# Box 13's three ticks STACK. Side by side they do not fit the column, and
@@ -751,11 +796,13 @@ def render_w2_pdf(form_data: dict, company_info: dict, employee_info: dict) -> b
 	box13 = dict(form_data.get("box13") or {})
 	b13_top = top + 6 * row_h
 	sheet.box(col1, b13_top, col_w, row_h * 2, "13", "")
-	for index, (label, key) in enumerate((
-		("Statutory employee", "statutory_employee"),
-		("Retirement plan", "retirement_plan"),
-		("Third-party sick pay", "third_party_sick_pay"),
-	)):
+	for index, (label, key) in enumerate(
+		(
+			("Statutory employee", "statutory_employee"),
+			("Retirement plan", "retirement_plan"),
+			("Third-party sick pay", "third_party_sick_pay"),
+		)
+	):
 		sheet.checkbox(col1 + 5, b13_top + 12 + index * 13, label, bool(box13.get(key)), size=6.5)
 
 	box14 = list(form_data.get("box14_other") or [])
@@ -821,8 +868,14 @@ def _w2_state_table(sheet: _Sheet, form_data: dict) -> None:
 		for _label, width, key, kind in columns:
 			value = _money(row.get(key)) if kind == "money" else _clean(row.get(key) or "")
 			sheet.box(
-				x, row_top, width, 20, "", value,
-				value_size=8.0, value_align="right" if kind == "money" else "left",
+				x,
+				row_top,
+				width,
+				20,
+				"",
+				value,
+				value_size=8.0,
+				value_align="right" if kind == "money" else "left",
 			)
 			x += width
 	sheet.top = top + 20 + 20 * len(rows)
@@ -868,15 +921,31 @@ def render_1099_nec_pdf(form_data: dict, company_info: dict, contractor_info: di
 	right_w = CONTENT_WIDTH - left_w
 
 	sheet.box(
-		MARGIN, top, left_w, 66,
+		MARGIN,
+		top,
+		left_w,
+		66,
 		"PAYER'S name, street address, city or town, state, ZIP code, and telephone no.",
 		[payer["name"], *payer["address"]][:4] or ["(not recorded on this site)"],
-		value_font=FONT_PLAIN, value_size=8.0,
+		value_font=FONT_PLAIN,
+		value_size=8.0,
 	)
-	sheet.money_box(right_x, top, right_w, 30, "1  Nonemployee compensation",
-	                form_data.get("box1_nonemployee_compensation"))
-	sheet.box(right_x, top + 30, right_w, 36, "2  Payer made direct sales totalling $5,000 or more "
-	          "of consumer products to recipient for resale", "")
+	sheet.money_box(
+		right_x,
+		top,
+		right_w,
+		30,
+		"1  Nonemployee compensation",
+		form_data.get("box1_nonemployee_compensation"),
+	)
+	sheet.box(
+		right_x,
+		top + 30,
+		right_w,
+		36,
+		"2  Payer made direct sales totalling $5,000 or more of consumer products to recipient for resale",
+		"",
+	)
 	sheet.checkbox(right_x + right_w - 18, top + 44, "", bool(form_data.get("box2_direct_sales_indicator")))
 
 	sheet.box(MARGIN, top + 66, left_w / 2, 28, "PAYER'S TIN", payer["ein"])
@@ -884,20 +953,43 @@ def render_1099_nec_pdf(form_data: dict, company_info: dict, contractor_info: di
 	sheet.box(right_x, top + 66, right_w, 28, "3", "")
 
 	sheet.box(MARGIN, top + 94, left_w, 26, "RECIPIENT'S name", name)
-	sheet.money_box(right_x, top + 94, right_w, 26, "4  Federal income tax withheld",
-	                form_data.get("box4_federal_income_tax_withheld"))
+	sheet.money_box(
+		right_x,
+		top + 94,
+		right_w,
+		26,
+		"4  Federal income tax withheld",
+		form_data.get("box4_federal_income_tax_withheld"),
+	)
 
 	sheet.box(
-		MARGIN, top + 120, left_w, 48,
+		MARGIN,
+		top + 120,
+		left_w,
+		48,
 		"Street address, city or town, state, ZIP code",
 		address or ["(not recorded on this site)"],
-		value_font=FONT_PLAIN, value_size=8.0,
+		value_font=FONT_PLAIN,
+		value_size=8.0,
 	)
-	sheet.box(right_x, top + 120, right_w, 24, "Account number (see instructions)",
-	          _clean(block.get("party") or info.get("party") or ""), value_size=7.5)
-	sheet.box(right_x, top + 144, right_w, 24, "Reportable at the $" +
-	          _money(form_data.get("reporting_threshold")) + " threshold",
-	          "YES" if form_data.get("reportable") else "NO", value_align="right")
+	sheet.box(
+		right_x,
+		top + 120,
+		right_w,
+		24,
+		"Account number (see instructions)",
+		_clean(block.get("party") or info.get("party") or ""),
+		value_size=7.5,
+	)
+	sheet.box(
+		right_x,
+		top + 144,
+		right_w,
+		24,
+		"Reportable at the $" + _money(form_data.get("reporting_threshold")) + " threshold",
+		"YES" if form_data.get("reportable") else "NO",
+		value_align="right",
+	)
 
 	sheet.top = top + 168 + 6
 	_nec_state_table(sheet, form_data)
@@ -947,8 +1039,14 @@ def _nec_state_table(sheet: _Sheet, form_data: dict) -> None:
 				number = _clean(row.get(key) or "")
 				value = f"{state}  {number}".strip()
 			sheet.box(
-				x, row_top, width, 20, "", value,
-				value_size=8.0, value_align="right" if kind == "money" else "left",
+				x,
+				row_top,
+				width,
+				20,
+				"",
+				value,
+				value_size=8.0,
+				value_align="right" if kind == "money" else "left",
 			)
 			x += width
 	sheet.top = top + 20 + 20 * len(rows)
@@ -960,47 +1058,97 @@ def _nec_state_table(sheet: _Sheet, form_data: dict) -> None:
 #: is (line label, key in form_data, kind). `kind` decides how it draws: a
 #: money line, a count, a two-part line with its own wage column, or a rule.
 _941_LINES = (
-	("1", "Number of employees who received wages, tips, or other compensation",
-	 "line1_number_of_employees", "count"),
-	("2", "Wages, tips, and other compensation",
-	 "line2_wages_tips_other_compensation", "money"),
-	("3", "Federal income tax withheld from wages, tips, and other compensation",
-	 "line3_federal_income_tax_withheld", "money"),
-	("4", "If no wages, tips, and other compensation are subject to social security "
-	      "or Medicare tax, check and go to line 6",
-	 "line4_no_wages_subject_to_ss_medicare", "check"),
-	("5a", "Taxable social security wages",
-	 ("line5a_taxable_social_security_wages", "line5a_tax"), "pair"),
-	("5b", "Taxable social security tips",
-	 ("line5b_taxable_social_security_tips", "line5b_tax"), "pair"),
-	("5c", "Taxable Medicare wages and tips",
-	 ("line5c_taxable_medicare_wages", "line5c_tax"), "pair"),
-	("5d", "Taxable wages and tips subject to Additional Medicare Tax withholding",
-	 ("line5d_wages_subject_to_additional_medicare", "line5d_tax"), "pair"),
-	("5e", "Total social security and Medicare taxes. Add lines 5a to 5d",
-	 "line5e_total_social_security_and_medicare", "money"),
-	("5f", "Section 3121(q) Notice and Demand - tax due on unreported tips",
-	 "line5f_section_3121q_notice_and_demand", "money"),
-	("6", "Total taxes before adjustments. Add lines 3, 5e, and 5f",
-	 "line6_total_taxes_before_adjustments", "money"),
-	("7", "Current quarter's adjustment for fractions of cents",
-	 "line7_fractions_of_cents_adjustment", "money"),
-	("8", "Current quarter's adjustment for sick pay",
-	 "line8_sick_pay_adjustment", "money"),
-	("9", "Current quarter's adjustments for tips and group-term life insurance",
-	 "line9_tips_and_group_term_life_adjustment", "money"),
-	("10", "Total taxes after adjustments. Combine lines 6 through 9",
-	 "line10_total_taxes_after_adjustments", "money"),
-	("11", "Qualified small business payroll tax credit for increasing research activities",
-	 "line11_small_business_payroll_tax_credit", "money"),
-	("12", "Total taxes after adjustments and nonrefundable credits. Subtract line 11 from line 10",
-	 "line12_total_taxes_after_credits", "money"),
-	("13", "Total deposits for this quarter",
-	 "line13_total_deposits", "money"),
-	("14", "Balance due. If line 12 is more than line 13, enter the difference",
-	 "line14_balance_due", "money"),
-	("15", "Overpayment. If line 13 is more than line 12, enter the difference",
-	 "line15_overpayment", "money"),
+	(
+		"1",
+		"Number of employees who received wages, tips, or other compensation",
+		"line1_number_of_employees",
+		"count",
+	),
+	("2", "Wages, tips, and other compensation", "line2_wages_tips_other_compensation", "money"),
+	(
+		"3",
+		"Federal income tax withheld from wages, tips, and other compensation",
+		"line3_federal_income_tax_withheld",
+		"money",
+	),
+	(
+		"4",
+		"If no wages, tips, and other compensation are subject to social security "
+		"or Medicare tax, check and go to line 6",
+		"line4_no_wages_subject_to_ss_medicare",
+		"check",
+	),
+	("5a", "Taxable social security wages", ("line5a_taxable_social_security_wages", "line5a_tax"), "pair"),
+	("5b", "Taxable social security tips", ("line5b_taxable_social_security_tips", "line5b_tax"), "pair"),
+	("5c", "Taxable Medicare wages and tips", ("line5c_taxable_medicare_wages", "line5c_tax"), "pair"),
+	(
+		"5d",
+		"Taxable wages and tips subject to Additional Medicare Tax withholding",
+		("line5d_wages_subject_to_additional_medicare", "line5d_tax"),
+		"pair",
+	),
+	(
+		"5e",
+		"Total social security and Medicare taxes. Add lines 5a to 5d",
+		"line5e_total_social_security_and_medicare",
+		"money",
+	),
+	(
+		"5f",
+		"Section 3121(q) Notice and Demand - tax due on unreported tips",
+		"line5f_section_3121q_notice_and_demand",
+		"money",
+	),
+	(
+		"6",
+		"Total taxes before adjustments. Add lines 3, 5e, and 5f",
+		"line6_total_taxes_before_adjustments",
+		"money",
+	),
+	(
+		"7",
+		"Current quarter's adjustment for fractions of cents",
+		"line7_fractions_of_cents_adjustment",
+		"money",
+	),
+	("8", "Current quarter's adjustment for sick pay", "line8_sick_pay_adjustment", "money"),
+	(
+		"9",
+		"Current quarter's adjustments for tips and group-term life insurance",
+		"line9_tips_and_group_term_life_adjustment",
+		"money",
+	),
+	(
+		"10",
+		"Total taxes after adjustments. Combine lines 6 through 9",
+		"line10_total_taxes_after_adjustments",
+		"money",
+	),
+	(
+		"11",
+		"Qualified small business payroll tax credit for increasing research activities",
+		"line11_small_business_payroll_tax_credit",
+		"money",
+	),
+	(
+		"12",
+		"Total taxes after adjustments and nonrefundable credits. Subtract line 11 from line 10",
+		"line12_total_taxes_after_credits",
+		"money",
+	),
+	("13", "Total deposits for this quarter", "line13_total_deposits", "money"),
+	(
+		"14",
+		"Balance due. If line 12 is more than line 13, enter the difference",
+		"line14_balance_due",
+		"money",
+	),
+	(
+		"15",
+		"Overpayment. If line 13 is more than line 12, enter the difference",
+		"line15_overpayment",
+		"money",
+	),
 )
 
 _QUARTER_LABELS = (
@@ -1036,12 +1184,16 @@ def render_941_pdf(form_data: dict, company_info: dict) -> bytes:
 
 	top = sheet.top
 	sheet.box(MARGIN, top, 170.0, 26, "Employer identification number (EIN)", employer["ein"])
-	sheet.box(MARGIN + 170.0, top, CONTENT_WIDTH - 170.0, 26, "Name (not your trade name)",
-	          employer["name"])
+	sheet.box(MARGIN + 170.0, top, CONTENT_WIDTH - 170.0, 26, "Name (not your trade name)", employer["name"])
 	sheet.box(
-		MARGIN, top + 26, CONTENT_WIDTH, 42, "Address",
+		MARGIN,
+		top + 26,
+		CONTENT_WIDTH,
+		42,
+		"Address",
 		employer["address"] or ["(no address recorded on this site)"],
-		value_font=FONT_PLAIN, value_size=8.0,
+		value_font=FONT_PLAIN,
+		value_size=8.0,
 	)
 
 	sheet.box(MARGIN, top + 68, CONTENT_WIDTH, 30, f"Report for this quarter of {year}", "")
@@ -1050,10 +1202,24 @@ def render_941_pdf(form_data: dict, company_info: dict) -> bytes:
 		tick_x += sheet.checkbox(tick_x, top + 84, label, code == quarter) + 12
 
 	due = _first(form_data.get("due_date"))
-	sheet.box(MARGIN, top + 98, CONTENT_WIDTH / 2, 22, "Period covered", _period_line(form_data)
-	          .replace("Period covered: ", ""), value_size=8.0)
-	sheet.box(MARGIN + CONTENT_WIDTH / 2, top + 98, CONTENT_WIDTH / 2, 22,
-	          "Return due date", due or "(not computed)", value_size=8.0)
+	sheet.box(
+		MARGIN,
+		top + 98,
+		CONTENT_WIDTH / 2,
+		22,
+		"Period covered",
+		_period_line(form_data).replace("Period covered: ", ""),
+		value_size=8.0,
+	)
+	sheet.box(
+		MARGIN + CONTENT_WIDTH / 2,
+		top + 98,
+		CONTENT_WIDTH / 2,
+		22,
+		"Return due date",
+		due or "(not computed)",
+		value_size=8.0,
+	)
 
 	sheet.top = top + 120 + 4
 	sheet.heading("Part 1: Answer these questions for this quarter")
@@ -1085,10 +1251,15 @@ def _941_line_table(sheet: _Sheet, form_data: dict) -> None:
 	sheet.fill_rect(MARGIN, head_top, CONTENT_WIDTH, 14)
 	sheet.rect(MARGIN, head_top, CONTENT_WIDTH, 14)
 	sheet.text(MARGIN + 4, head_top + 10, "Line", FONT_LABEL_BOLD, SIZE_LABEL)
-	sheet.text(wage_x + wage_w - 4, head_top + 10, "Column 1 - taxable wages",
-	           FONT_LABEL_BOLD, SIZE_LABEL, align="right")
-	sheet.text(tax_x + tax_w - 4, head_top + 10, "Column 2 - tax",
-	           FONT_LABEL_BOLD, SIZE_LABEL, align="right")
+	sheet.text(
+		wage_x + wage_w - 4,
+		head_top + 10,
+		"Column 1 - taxable wages",
+		FONT_LABEL_BOLD,
+		SIZE_LABEL,
+		align="right",
+	)
+	sheet.text(tax_x + tax_w - 4, head_top + 10, "Column 2 - tax", FONT_LABEL_BOLD, SIZE_LABEL, align="right")
 	sheet.top = head_top + 14
 
 	for number, label, key, kind in _941_LINES:
@@ -1100,28 +1271,64 @@ def _941_line_table(sheet: _Sheet, form_data: dict) -> None:
 		sheet.rect(MARGIN, row_top, label_w, height)
 		sheet.text(MARGIN + 4, row_top + SIZE_SMALL + 3, number, FONT_LABEL_BOLD, SIZE_SMALL)
 		for index, line in enumerate(wrapped):
-			sheet.text(MARGIN + 26, row_top + SIZE_SMALL + 3 + index * (SIZE_SMALL + 2.0),
-			           line, FONT_LABEL, SIZE_SMALL)
+			sheet.text(
+				MARGIN + 26,
+				row_top + SIZE_SMALL + 3 + index * (SIZE_SMALL + 2.0),
+				line,
+				FONT_LABEL,
+				SIZE_SMALL,
+			)
 
 		if kind == "pair":
 			wage_key, tax_key = key
-			sheet.box(wage_x, row_top, wage_w, height, "", _money(form_data.get(wage_key)),
-			          value_size=8.5, value_align="right")
-			sheet.box(tax_x, row_top, tax_w, height, "", _money(form_data.get(tax_key)),
-			          value_size=8.5, value_align="right")
+			sheet.box(
+				wage_x,
+				row_top,
+				wage_w,
+				height,
+				"",
+				_money(form_data.get(wage_key)),
+				value_size=8.5,
+				value_align="right",
+			)
+			sheet.box(
+				tax_x,
+				row_top,
+				tax_w,
+				height,
+				"",
+				_money(form_data.get(tax_key)),
+				value_size=8.5,
+				value_align="right",
+			)
 		elif kind == "count":
 			sheet.rect(wage_x, row_top, wage_w, height)
-			sheet.box(tax_x, row_top, tax_w, height, "", _whole(form_data.get(key)),
-			          value_size=8.5, value_align="right")
+			sheet.box(
+				tax_x,
+				row_top,
+				tax_w,
+				height,
+				"",
+				_whole(form_data.get(key)),
+				value_size=8.5,
+				value_align="right",
+			)
 		elif kind == "check":
 			sheet.rect(wage_x, row_top, wage_w, height)
 			sheet.rect(tax_x, row_top, tax_w, height)
-			sheet.checkbox(tax_x + tax_w - 22, row_top + (height - 7.5) / 2, "",
-			               bool(form_data.get(key)))
+			sheet.checkbox(tax_x + tax_w - 22, row_top + (height - 7.5) / 2, "", bool(form_data.get(key)))
 		else:
 			sheet.rect(wage_x, row_top, wage_w, height)
-			sheet.box(tax_x, row_top, tax_w, height, "", _money(form_data.get(key)),
-			          value_size=8.5, value_align="right")
+			sheet.box(
+				tax_x,
+				row_top,
+				tax_w,
+				height,
+				"",
+				_money(form_data.get(key)),
+				value_size=8.5,
+				value_align="right",
+			)
 		sheet.top = row_top + height
 
 
@@ -1176,11 +1383,24 @@ def render_or_wr_pdf(form_data: dict, company_info: dict) -> bytes:
 	)
 
 	top = sheet.top
-	sheet.box(MARGIN, top, 160.0, 26, "Oregon BIN",
-	          _first(form_data.get("oregon_bin")) or "(not recorded on this site)")
+	sheet.box(
+		MARGIN,
+		top,
+		160.0,
+		26,
+		"Oregon BIN",
+		_first(form_data.get("oregon_bin")) or "(not recorded on this site)",
+	)
 	sheet.box(MARGIN + 160.0, top, 160.0, 26, "Federal employer identification number", employer["ein"])
-	sheet.box(MARGIN + 320.0, top, CONTENT_WIDTH - 320.0, 26, "Return due date",
-	          _first(form_data.get("due_date")), value_size=8.0)
+	sheet.box(
+		MARGIN + 320.0,
+		top,
+		CONTENT_WIDTH - 320.0,
+		26,
+		"Return due date",
+		_first(form_data.get("due_date")),
+		value_size=8.0,
+	)
 	sheet.box(MARGIN, top + 26, CONTENT_WIDTH, 26, "Business name", employer["name"])
 	sheet.top = top + 52 + 4
 
@@ -1206,9 +1426,7 @@ def render_or_wr_pdf(form_data: dict, company_info: dict) -> bytes:
 			"unexplained difference is an assessment letter."
 		)
 	else:
-		extra.append(
-			"The computed annual totals agree with the four OQ reports as filed, to the cent."
-		)
+		extra.append("The computed annual totals agree with the four OQ reports as filed, to the cent.")
 	_notes(sheet, form_data, extra)
 	return sheet.render()
 
@@ -1230,19 +1448,20 @@ def _or_wr_quarter_table(sheet: _Sheet, form_data: dict) -> None:
 		x = MARGIN + label_w + index * column_w
 		sheet.rect(x, head_top, column_w, 26)
 		for line_index, line in enumerate(sheet.wrap(label, column_w - 6, FONT_LABEL_BOLD, SIZE_LABEL)[:3]):
-			sheet.text(x + 3, head_top + SIZE_LABEL + 2.5 + line_index * 7.5, line,
-			           FONT_LABEL_BOLD, SIZE_LABEL)
+			sheet.text(
+				x + 3, head_top + SIZE_LABEL + 2.5 + line_index * 7.5, line, FONT_LABEL_BOLD, SIZE_LABEL
+			)
 	sheet.top = head_top + 26
 
 	def data_row(label: str, values: dict, bold: bool = False) -> None:
 		row_top = sheet.top
 		sheet.rect(MARGIN, row_top, label_w, 18)
-		sheet.text(MARGIN + 4, row_top + 12.5, label,
-		           FONT_LABEL_BOLD if bold else FONT_LABEL, SIZE_SMALL)
+		sheet.text(MARGIN + 4, row_top + 12.5, label, FONT_LABEL_BOLD if bold else FONT_LABEL, SIZE_SMALL)
 		for index, (_label, key) in enumerate(_OR_WR_COLUMNS):
 			x = MARGIN + label_w + index * column_w
-			sheet.box(x, row_top, column_w, 18, "", _money(values.get(key)),
-			          value_size=8.0, value_align="right")
+			sheet.box(
+				x, row_top, column_w, 18, "", _money(values.get(key)), value_size=8.0, value_align="right"
+			)
 		sheet.top = row_top + 18
 
 	for code, label in _OR_WR_QUARTER_LABELS:
@@ -1274,8 +1493,9 @@ def _or_wr_reconciliation(sheet: _Sheet, form_data: dict) -> None:
 		sheet.text(MARGIN + 4, row_top + 12.5, label, FONT_LABEL, SIZE_SMALL)
 		for index, value_key in enumerate(("annual_total", "quarterly_filed", "difference")):
 			x = MARGIN + label_w + index * column_w
-			sheet.box(x, row_top, column_w, 18, "", _money(row.get(value_key)),
-			          value_size=8.0, value_align="right")
+			sheet.box(
+				x, row_top, column_w, 18, "", _money(row.get(value_key)), value_size=8.0, value_align="right"
+			)
 		sheet.top = row_top + 18
 
 	reconciles = form_data.get("reconciles")
@@ -1329,14 +1549,34 @@ def render_or_oq_pdf(form_data: dict, company_info: dict) -> bytes:
 	)
 
 	top = sheet.top
-	sheet.box(MARGIN, top, 160.0, 26, "Oregon BIN",
-	          _first(form_data.get("oregon_bin")) or "(not recorded on this site)")
+	sheet.box(
+		MARGIN,
+		top,
+		160.0,
+		26,
+		"Oregon BIN",
+		_first(form_data.get("oregon_bin")) or "(not recorded on this site)",
+	)
 	sheet.box(MARGIN + 160.0, top, 160.0, 26, "Federal employer identification number", employer["ein"])
-	sheet.box(MARGIN + 320.0, top, CONTENT_WIDTH - 320.0, 26, "Return due date",
-	          _first(form_data.get("due_date")), value_size=8.0)
+	sheet.box(
+		MARGIN + 320.0,
+		top,
+		CONTENT_WIDTH - 320.0,
+		26,
+		"Return due date",
+		_first(form_data.get("due_date")),
+		value_size=8.0,
+	)
 	sheet.box(MARGIN, top + 26, 330.0, 26, "Business name", employer["name"])
-	sheet.box(MARGIN + 330.0, top + 26, CONTENT_WIDTH - 330.0, 26, "Quarter covered",
-	          _period_line(form_data).replace("Period covered: ", ""), value_size=7.5)
+	sheet.box(
+		MARGIN + 330.0,
+		top + 26,
+		CONTENT_WIDTH - 330.0,
+		26,
+		"Quarter covered",
+		_period_line(form_data).replace("Period covered: ", ""),
+		value_size=7.5,
+	)
 	sheet.top = top + 52 + 4
 
 	sheet.heading("Monthly employee counts")
@@ -1348,11 +1588,25 @@ def render_or_oq_pdf(form_data: dict, company_info: dict) -> bytes:
 	sheet.spacer(4)
 	total_top = sheet.top
 	sheet.room_for(24)
-	sheet.box(MARGIN, total_top, 330.0, 22, "Unemployment insurance rate applied",
-	          f"{_money(form_data.get('ui_rate'))} %", value_align="right")
-	sheet.box(MARGIN + 330.0, total_top, CONTENT_WIDTH - 330.0, 22, "TOTAL DUE",
-	          _money(form_data.get("total_due")), value_align="right",
-	          label_font=FONT_LABEL_BOLD)
+	sheet.box(
+		MARGIN,
+		total_top,
+		330.0,
+		22,
+		"Unemployment insurance rate applied",
+		f"{_money(form_data.get('ui_rate'))} %",
+		value_align="right",
+	)
+	sheet.box(
+		MARGIN + 330.0,
+		total_top,
+		CONTENT_WIDTH - 330.0,
+		22,
+		"TOTAL DUE",
+		_money(form_data.get("total_due")),
+		value_align="right",
+		label_font=FONT_LABEL_BOLD,
+	)
 	sheet.top = total_top + 22
 
 	extra = [
@@ -1375,8 +1629,15 @@ def _oq_month_boxes(sheet: _Sheet, form_data: dict) -> None:
 	top = sheet.top
 	width = CONTENT_WIDTH / max(3, len(months))
 	for index, (month, count) in enumerate(months):
-		sheet.box(MARGIN + index * width, top, width, 26,
-		          f"Employees paid in {month}", _whole(count), value_align="right")
+		sheet.box(
+			MARGIN + index * width,
+			top,
+			width,
+			26,
+			f"Employees paid in {month}",
+			_whole(count),
+			value_align="right",
+		)
 	sheet.top = top + 26
 
 
@@ -1388,8 +1649,16 @@ def _amount_table(sheet: _Sheet, rows, form_data: dict) -> None:
 		row_top = sheet.top
 		sheet.rect(MARGIN, row_top, label_w, 18)
 		sheet.text(MARGIN + 4, row_top + 12.5, label, FONT_LABEL, SIZE_SMALL)
-		sheet.box(MARGIN + label_w, row_top, 130.0, 18, "", _money(form_data.get(key)),
-		          value_size=8.5, value_align="right")
+		sheet.box(
+			MARGIN + label_w,
+			row_top,
+			130.0,
+			18,
+			"",
+			_money(form_data.get(key)),
+			value_size=8.5,
+			value_align="right",
+		)
 		sheet.top = row_top + 18
 
 
@@ -1446,14 +1715,34 @@ def render_wa_esd_pdf(form_data: dict, company_info: dict) -> bytes:
 	)
 
 	top = sheet.top
-	sheet.box(MARGIN, top, 170.0, 26, "ESD account number",
-	          _first(form_data.get("esd_account_number")) or "(not recorded on this site)")
+	sheet.box(
+		MARGIN,
+		top,
+		170.0,
+		26,
+		"ESD account number",
+		_first(form_data.get("esd_account_number")) or "(not recorded on this site)",
+	)
 	sheet.box(MARGIN + 170.0, top, 170.0, 26, "Federal employer identification number", employer["ein"])
-	sheet.box(MARGIN + 340.0, top, CONTENT_WIDTH - 340.0, 26, "Return due date",
-	          _first(form_data.get("due_date")), value_size=8.0)
+	sheet.box(
+		MARGIN + 340.0,
+		top,
+		CONTENT_WIDTH - 340.0,
+		26,
+		"Return due date",
+		_first(form_data.get("due_date")),
+		value_size=8.0,
+	)
 	sheet.box(MARGIN, top + 26, 330.0, 26, "Business name", employer["name"])
-	sheet.box(MARGIN + 330.0, top + 26, CONTENT_WIDTH - 330.0, 26, "Quarter covered",
-	          _period_line(form_data).replace("Period covered: ", ""), value_size=7.5)
+	sheet.box(
+		MARGIN + 330.0,
+		top + 26,
+		CONTENT_WIDTH - 330.0,
+		26,
+		"Quarter covered",
+		_period_line(form_data).replace("Period covered: ", ""),
+		value_size=7.5,
+	)
 	sheet.top = top + 52 + 4
 
 	sheet.heading("Wage and hour detail - one row per employee")
@@ -1465,11 +1754,25 @@ def render_wa_esd_pdf(form_data: dict, company_info: dict) -> bytes:
 	sheet.spacer(4)
 	sheet.room_for(24)
 	total_top = sheet.top
-	sheet.box(MARGIN, total_top, 330.0, 22, "Unemployment insurance rate applied",
-	          f"{_money(form_data.get('ui_rate'))} %", value_align="right")
-	sheet.box(MARGIN + 330.0, total_top, CONTENT_WIDTH - 330.0, 22, "TOTAL DUE",
-	          _money(form_data.get("total_due")), value_align="right",
-	          label_font=FONT_LABEL_BOLD)
+	sheet.box(
+		MARGIN,
+		total_top,
+		330.0,
+		22,
+		"Unemployment insurance rate applied",
+		f"{_money(form_data.get('ui_rate'))} %",
+		value_align="right",
+	)
+	sheet.box(
+		MARGIN + 330.0,
+		total_top,
+		CONTENT_WIDTH - 330.0,
+		22,
+		"TOTAL DUE",
+		_money(form_data.get("total_due")),
+		value_align="right",
+		label_font=FONT_LABEL_BOLD,
+	)
 	sheet.top = total_top + 22
 
 	extra = [
@@ -1502,8 +1805,7 @@ def _wa_employee_table(sheet: _Sheet, form_data: dict) -> None:
 			if kind == "text":
 				sheet.text(x + 4, head_top + 11, label, FONT_LABEL_BOLD, SIZE_LABEL)
 			else:
-				sheet.text(x + width - 4, head_top + 11, label, FONT_LABEL_BOLD, SIZE_LABEL,
-				           align="right")
+				sheet.text(x + width - 4, head_top + 11, label, FONT_LABEL_BOLD, SIZE_LABEL, align="right")
 			x += width
 		sheet.top = head_top + 16
 
@@ -1512,8 +1814,7 @@ def _wa_employee_table(sheet: _Sheet, form_data: dict) -> None:
 		sheet.room_for(16)
 		row_top = sheet.top
 		sheet.rect(MARGIN, row_top, CONTENT_WIDTH, 16)
-		sheet.text(MARGIN + 4, row_top + 11.5,
-		           "No Washington wages in this quarter.", FONT_LABEL, SIZE_SMALL)
+		sheet.text(MARGIN + 4, row_top + 11.5, "No Washington wages in this quarter.", FONT_LABEL, SIZE_SMALL)
 		sheet.top = row_top + 16
 		return
 
@@ -1557,8 +1858,7 @@ def _wa_employee_table(sheet: _Sheet, form_data: dict) -> None:
 			value, align = _whole(totals.get(key)), "right"
 		else:
 			value, align = _clean(totals.get(key) or ""), "left"
-		sheet.box(x, row_top, width, 16, "", value, value_size=7.5, value_align=align,
-		          value_font=FONT_VALUE)
+		sheet.box(x, row_top, width, 16, "", value, value_size=7.5, value_align=align, value_font=FONT_VALUE)
 		x += width
 	sheet.top = row_top + 16
 
@@ -1593,8 +1893,7 @@ def render_form_pdf(
 	renderer = RENDERERS.get(form_type)
 	if renderer is None:
 		raise ToolError(
-			f"no PDF layout for form type {form_type!r}. Known forms: "
-			f"{', '.join(sorted(RENDERERS))}."
+			f"no PDF layout for form type {form_type!r}. Known forms: {', '.join(sorted(RENDERERS))}."
 		)
 	if form_type in PER_RECIPIENT:
 		return renderer(form_data or {}, company_info or {}, subject_info or {})

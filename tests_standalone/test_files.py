@@ -185,9 +185,10 @@ class ReadAttachedBytesUnchecked(V2TestCase):
 	def test_it_reads_a_file_whose_parent_the_caller_may_not_read(self):
 		"""THE WHOLE POINT. `get_attachment_content` refuses this exact case."""
 		STORE.denied_permissions.add(("Journal Entry", ATTACHED_JE))
-		self.assertIn("not permitted to read", self.tool_error(
-			"get_attachment_content", {"name": "file-public-invoice"}
-		))
+		self.assertIn(
+			"not permitted to read",
+			self.tool_error("get_attachment_content", {"name": "file-public-invoice"}),
+		)
 		self.assertEqual(self.reader("Journal Entry", ATTACHED_JE, "invoice.txt"), b"invoice line one\r\n---")
 
 	def test_a_file_name_that_is_not_on_that_parent_is_refused(self):

@@ -164,7 +164,9 @@ def _resolve_session(args: dict) -> dict:
 			"a docname looks like TRNS-2026-0001."
 		)
 	return dict(
-		frappe.db.get_value(DOCTYPE, name, compat.existing_fields(DOCTYPE, training_sessions.FIELDS), as_dict=True)
+		frappe.db.get_value(
+			DOCTYPE, name, compat.existing_fields(DOCTYPE, training_sessions.FIELDS), as_dict=True
+		)
 		or {}
 	)
 
@@ -307,8 +309,10 @@ def update_training_type(args: dict) -> ToolResult:
 			"happened, taken on the day."
 		),
 	}
-	if "delivery_method" in changed and described.get("delivery_method") == "Video" and not described.get(
-		"video_url"
+	if (
+		"delivery_method" in changed
+		and described.get("delivery_method") == "Video"
+		and not described.get("video_url")
 	):
 		data["content_note"] = (
 			"This curriculum is now marked as delivered by video and carries no video_url, so a "
@@ -701,9 +705,7 @@ def add_session_attendee(args: dict) -> ToolResult:
 	# grouped by place without comparing floats. `scan_latitude` is accepted
 	# alongside the plain pair because a handset sending several fixes in one
 	# call needs to say which is which.
-	latitude, longitude = geo.coordinates(
-		args, prefix="scan_", required=False, tail="Nothing was changed."
-	)
+	latitude, longitude = geo.coordinates(args, prefix="scan_", required=False, tail="Nothing was changed.")
 	if latitude is None and longitude is None:
 		latitude, longitude = geo.coordinates(args, required=False, tail="Nothing was changed.")
 
@@ -820,9 +822,7 @@ def sign_session_attendance(args: dict) -> ToolResult:
 			# that reached this function and a docname that reached the table
 			# would be two answers to "who signed".
 			"employee": (
-				employee_tool.resolve_employee(as_str(args, "employee"))
-				if as_str(args, "employee")
-				else ""
+				employee_tool.resolve_employee(as_str(args, "employee")) if as_str(args, "employee") else ""
 			),
 			# The badge goes in as the signer's identity rather than as a row
 			# selector: `_identity` resolves it and refuses one that belongs to
@@ -846,9 +846,7 @@ def sign_session_attendance(args: dict) -> ToolResult:
 	given = as_str(args, "signature")
 	if given and not (as_str(args, "signature_base64") or as_str(args, "file_token")):
 		inner.pop("signature", None)
-		looks_like_file = given.startswith(("/", "http://", "https://")) or frappe.db.exists(
-			"File", given
-		)
+		looks_like_file = given.startswith(("/", "http://", "https://")) or frappe.db.exists("File", given)
 		inner["file_token" if looks_like_file else "signature_base64"] = given
 
 	if not inner["employee"] and inner["signer_badge"]:
@@ -977,9 +975,7 @@ def render_training_sign_in_sheet(args: dict) -> ToolResult:
 	attachment = artifacts.attach_bytes(
 		DOCTYPE, row["name"], training_sheet_pdf.file_name_for(described), pdf, field="generated_pdf"
 	)
-	frappe.db.set_value(
-		DOCTYPE, row["name"], "generated_pdf_on", frappe.utils.now(), update_modified=False
-	)
+	frappe.db.set_value(DOCTYPE, row["name"], "generated_pdf_on", frappe.utils.now(), update_modified=False)
 
 	unsigned = [
 		item["employee"] for item in described["attendee_rows"] if item["attended"] and not item["signed"]
@@ -1107,7 +1103,11 @@ def complete_training_session(args: dict) -> ToolResult:
 		)
 
 	skip = as_bool(args, "skip_incomplete", False)
-	incomplete = [entry for entry in described["attendee_rows"] if entry["state"] == training_sessions.ATTENDEE_INCOMPLETE]
+	incomplete = [
+		entry
+		for entry in described["attendee_rows"]
+		if entry["state"] == training_sessions.ATTENDEE_INCOMPLETE
+	]
 	if incomplete and not skip:
 		raise ToolError(
 			f"{len(incomplete)} of {described['attendance']['attendees']} attendee(s) on "
@@ -1123,7 +1123,9 @@ def complete_training_session(args: dict) -> ToolResult:
 			"changed."
 		)
 
-	ready = [entry for entry in described["attendee_rows"] if entry["state"] == training_sessions.ATTENDEE_READY]
+	ready = [
+		entry for entry in described["attendee_rows"] if entry["state"] == training_sessions.ATTENDEE_READY
+	]
 	regimes = described["regimes"]
 	filed: list = []
 	failed: list = []
@@ -1149,7 +1151,9 @@ def complete_training_session(args: dict) -> ToolResult:
 		try:
 			result = training_tools.record_training(payload)
 		except ToolError as exc:
-			failed.append({"employee": entry["employee"], "employee_name": entry["employee_name"], "reason": str(exc)})
+			failed.append(
+				{"employee": entry["employee"], "employee_name": entry["employee_name"], "reason": str(exc)}
+			)
 			continue
 		filed.append(
 			{
@@ -1368,9 +1372,7 @@ def list_training_sessions(args: dict) -> ToolResult:
 	if status:
 		canonical = training_sessions.canon_status(status)
 		if not canonical:
-			raise ToolError(
-				f"status {status!r} is not one of {', '.join(training_sessions.STATUSES)}."
-			)
+			raise ToolError(f"status {status!r} is not one of {', '.join(training_sessions.STATUSES)}.")
 		filters["status"] = canonical
 
 	conductor = as_str(args, "conducted_by")
@@ -1389,17 +1391,14 @@ def list_training_sessions(args: dict) -> ToolResult:
 	found = training_sessions.rows(filters, limit=max(limit * 4, limit))
 	attendees = training_sessions.attendees_for_parents([entry.get("name") for entry in found])
 	described = [
-		training_sessions.describe(entry, attendees.get(str(entry.get("name") or ""), []))
-		for entry in found
+		training_sessions.describe(entry, attendees.get(str(entry.get("name") or ""), [])) for entry in found
 	]
 
 	person = as_str(args, "employee")
 	if person:
 		wanted = employee_tool.resolve_employee(person)
 		described = [
-			entry
-			for entry in described
-			if any(item["employee"] == wanted for item in entry["attendee_rows"])
+			entry for entry in described if any(item["employee"] == wanted for item in entry["attendee_rows"])
 		]
 
 	regime = as_str(args, "regime")

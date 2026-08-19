@@ -298,6 +298,7 @@ def resolve_template(value):
 		return value
 	return resolver()
 
+
 #: Evidence-contract keys, shared with Inspection Template sections so a rule's
 #: producer task and a template section ask for evidence in one vocabulary.
 CONTRACT_KEYS = (
@@ -1735,8 +1736,11 @@ def declarative_seed_specs() -> list:
 			"cadence_days": 0,
 			"scope_filters": [
 				{"field": "status", "op": "in", "value": ["Complete", "Reverification Needed"]},
-				{"field": "citizenship_status", "op": "in",
-				 "value": ["Alien Authorized to Work", "Lawful Permanent Resident"]},
+				{
+					"field": "citizenship_status",
+					"op": "in",
+					"value": ["Alien Authorized to Work", "Lawful Permanent Resident"],
+				},
 			],
 			"message_template": (
 				"Work authorization for {{ row.employee_name }} expires on "

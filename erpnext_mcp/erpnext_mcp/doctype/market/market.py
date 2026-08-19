@@ -68,9 +68,7 @@ class Market(Document):
 			seen[key] = index
 
 			if float(row.get("min_size_mm") or 0) < 0:
-				frappe.throw(
-					_("Row {0} ({1}): a minimum size cannot be negative.").format(index, grade_name)
-				)
+				frappe.throw(_("Row {0} ({1}): a minimum size cannot be negative.").format(index, grade_name))
 
 			defect = float(row.get("max_defect_pct") or 0)
 			if defect < 0 or defect > 100:

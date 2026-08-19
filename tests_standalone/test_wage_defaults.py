@@ -392,9 +392,7 @@ class PieceworkRateTools(WageTableTestCase):
 
 	def test_editing_a_live_rate_warns_that_a_rerun_will_now_differ(self):
 		created = self.create_rate(effective_from="2026-01-01")
-		data = self.tool_data(
-			"update_piecework_rate", {"name": created["name"], "rate_per_unit": 1.40}
-		)
+		data = self.tool_data("update_piecework_rate", {"name": created["name"], "rate_per_unit": 1.40})
 		self.assertEqual(data["changed"], ["rate_per_unit"])
 		self.assertIn("WARNING", data["note"])
 		self.assertIn("create_piecework_rate", data["note"])
@@ -412,9 +410,7 @@ class PieceworkRateTools(WageTableTestCase):
 		"""There is no delete. A rate that paid a period is the record of what
 		that period paid."""
 		created = self.create_rate()
-		data = self.tool_data(
-			"update_piecework_rate", {"name": created["name"], "is_active": False}
-		)
+		data = self.tool_data("update_piecework_rate", {"name": created["name"], "is_active": False})
 		self.assertFalse(data["is_active"])
 		listed = self.tool_data("list_piecework_rates", {"company": MAIN})
 		self.assertEqual(listed["count"], 1)
@@ -429,9 +425,7 @@ class PieceworkRateTools(WageTableTestCase):
 
 	def test_an_edit_that_changes_nothing_says_so_and_writes_nothing(self):
 		created = self.create_rate()
-		data = self.tool_data(
-			"update_piecework_rate", {"name": created["name"], "rate_per_unit": 1.25}
-		)
+		data = self.tool_data("update_piecework_rate", {"name": created["name"], "rate_per_unit": 1.25})
 		self.assertEqual(data["changed"], [])
 
 	def test_a_negative_rate_never_reaches_the_database(self):
@@ -501,9 +495,7 @@ class PositionWageDefaultTools(WageTableTestCase):
 
 	def test_an_edit_says_that_it_reaches_nothing_it_already_seeded(self):
 		created = self.create_default()
-		data = self.tool_data(
-			"update_position_wage_default", {"name": created["name"], "hourly_rate": 19.25}
-		)
+		data = self.tool_data("update_position_wage_default", {"name": created["name"], "hourly_rate": 19.25})
 		self.assertEqual(data["changed"], ["hourly_rate"])
 		self.assertIn("UNCHANGED", data["note"])
 
@@ -658,9 +650,7 @@ class PayrollReadsTheTable(PayrollTestCase):
 			"preview_payroll_for_period",
 			{"company": MAIN, "pay_period_start": "2026-06-01", "pay_period_end": "2026-06-15"},
 		)
-		self.assertEqual(
-			[row["piecework_rate"] for row in data["piece_rates_from_company"]], [rate["name"]]
-		)
+		self.assertEqual([row["piecework_rate"] for row in data["piece_rates_from_company"]], [rate["name"]])
 		self.assertEqual(data["employees_missing_piece_rates"], [])
 
 	def test_a_company_run_reports_a_missing_rate_and_does_not_abort(self):
@@ -669,13 +659,16 @@ class PayrollReadsTheTable(PayrollTestCase):
 		structure since v0.35.0."""
 		rate = self.create_rate()
 		self.create_structure()
-		self.tool_data("create_salary_structure", {
-			"employee": "HR-EMP-00001",
-			"company": MAIN,
-			"pay_type": "Hourly",
-			"base_rate": 20.0,
-			"effective_from": "2026-06-01",
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": "HR-EMP-00001",
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2026-06-01",
+			},
+		)
 		self.tool_data("update_piecework_rate", {"name": rate["name"], "is_active": False})
 		data = self.tool_data(
 			"preview_payroll_for_period",

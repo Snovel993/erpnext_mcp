@@ -508,9 +508,7 @@ class TheThirdEndingIsACancellation(ShiftTestCase):
 		was not worked while the rows saying it was stay on the register."""
 		shift = self.start()["name"]
 		self.close(shift)
-		message = self.tool_error(
-			"cancel_shift", {"shift": shift, "cancellation_reason": "changed my mind"}
-		)
+		message = self.tool_error("cancel_shift", {"shift": shift, "cancellation_reason": "changed my mind"})
 		self.assertIn("was CLOSED", message)
 		self.assertIn("Attendance", message)
 		self.assertEqual(len(self.attendance()), len([WORKER, *CREW]))
@@ -518,9 +516,7 @@ class TheThirdEndingIsACancellation(ShiftTestCase):
 	def test_a_second_cancellation_is_refused_and_names_the_first_reason(self):
 		shift = self.start()["name"]
 		self.cancel(shift)
-		message = self.tool_error(
-			"cancel_shift", {"shift": shift, "cancellation_reason": "again"}
-		)
+		message = self.tool_error("cancel_shift", {"shift": shift, "cancellation_reason": "again"})
 		self.assertIn("already cancelled", message)
 		self.assertIn("heat index", message)
 
@@ -595,9 +591,7 @@ class NobodyIsOnTwoOpenShiftsAtOnce(ShiftTestCase):
 		eleven and put on the packing line at noon is one person working one day,
 		and refusing that would be a guard nobody could work around."""
 		first = self.start()["name"]
-		self.tool_data(
-			"remove_worker_from_shift", {"shift": first, "employee": WORKER, "left_at": at(11)}
-		)
+		self.tool_data("remove_worker_from_shift", {"shift": first, "employee": WORKER, "left_at": at(11)})
 		second = self.start(start_datetime=at(12), crew_employees=[WORKER])
 		self.assertEqual(second["crew_size"], 1)
 
@@ -1093,9 +1087,7 @@ class TheGuards(ShiftTestCase):
 		created = self.tool_data(
 			"create_employee", {"employee_name": "New Hire", "company": MAIN, "date_of_joining": at(6)[:10]}
 		)["employee"]
-		message = self.tool_error(
-			"update_employee", {"employee": created, "department": "Harvest"}
-		)
+		message = self.tool_error("update_employee", {"employee": created, "department": "Harvest"})
 		self.assertIn("may not change the personnel register", message)
 
 	def test_and_a_picker_may_do_neither(self):

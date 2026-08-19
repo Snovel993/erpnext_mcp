@@ -34,6 +34,7 @@ and a run whose postings are still live is refused by name. A run whose drafts
 were deleted, or whose entries were cancelled, can be posted again — because
 then there is genuinely nothing in the ledger.
 """
+
 from __future__ import annotations
 
 import frappe
@@ -116,22 +117,20 @@ def _mapping_rows(doc) -> list[dict]:
 		component = str(_get(row, "component") or "").strip()
 		if not component:
 			continue
-		rows.append({
-			"component": component,
-			"debit_account": str(_get(row, "debit_account") or "").strip(),
-			"credit_account": str(_get(row, "credit_account") or "").strip(),
-			"notes": str(_get(row, "notes") or ""),
-		})
+		rows.append(
+			{
+				"component": component,
+				"debit_account": str(_get(row, "debit_account") or "").strip(),
+				"credit_account": str(_get(row, "credit_account") or "").strip(),
+				"notes": str(_get(row, "notes") or ""),
+			}
+		)
 	return rows
 
 
 def _payroll_doc(args: dict):
 	"""The Farm Payroll Entry named in the arguments."""
-	name = (
-		as_str(args, "payroll_entry")
-		or as_str(args, "name")
-		or as_str(args, "entry")
-	)
+	name = as_str(args, "payroll_entry") or as_str(args, "name") or as_str(args, "entry")
 	if not name:
 		raise ToolError(
 			"payroll_entry is required — the Farm Payroll Entry docname for the run to "
@@ -243,9 +242,7 @@ def get_payroll_account_mapping(args: dict) -> ToolResult:
 			"component has its account, because a mapping with a hole in it cannot produce "
 			"an entry that balances."
 		)
-		summary = (
-			f"{company}: {len(rows)} component(s) mapped, INCOMPLETE — missing {missing}"
-		)
+		summary = f"{company}: {len(rows)} component(s) mapped, INCOMPLETE — missing {missing}"
 	else:
 		summary = (
 			f"{company}: {len(rows)} component(s) mapped, complete. "
@@ -317,27 +314,26 @@ def configure_payroll_accounts(args: dict) -> ToolResult:
 		existing[component] = row
 		if previous is None:
 			changes.append({"component": component, "change": "added", **_accounts_of(row)})
-		elif (
-			previous.get("debit_account") != row.get("debit_account")
-			or previous.get("credit_account") != row.get("credit_account")
-		):
-			changes.append({
-				"component": component,
-				"change": "changed",
-				"was": _accounts_of(previous),
-				**_accounts_of(row),
-			})
+		elif previous.get("debit_account") != row.get("debit_account") or previous.get(
+			"credit_account"
+		) != row.get("credit_account"):
+			changes.append(
+				{
+					"component": component,
+					"change": "changed",
+					"was": _accounts_of(previous),
+					**_accounts_of(row),
+				}
+			)
 
 	if replace:
 		for component in before:
 			if component not in existing:
-				changes.append({"component": component, "change": "removed", **_accounts_of(before[component])})
+				changes.append(
+					{"component": component, "change": "removed", **_accounts_of(before[component])}
+				)
 
-	ordered = [
-		existing[component]
-		for component in payroll_gl.COMPONENT_NAMES
-		if component in existing
-	]
+	ordered = [existing[component] for component in payroll_gl.COMPONENT_NAMES if component in existing]
 	if not ordered:
 		raise ToolError(
 			"no component rows to write. Pass `components` as a list of objects, each with "
@@ -349,12 +345,15 @@ def configure_payroll_accounts(args: dict) -> ToolResult:
 
 	doc.set("components", [])
 	for row in ordered:
-		doc.append("components", {
-			"component": row["component"],
-			"debit_account": row.get("debit_account") or None,
-			"credit_account": row.get("credit_account") or None,
-			"notes": row.get("notes") or None,
-		})
+		doc.append(
+			"components",
+			{
+				"component": row["component"],
+				"debit_account": row.get("debit_account") or None,
+				"credit_account": row.get("credit_account") or None,
+				"notes": row.get("notes") or None,
+			},
+		)
 
 	mode = as_str(args, "default_posting_mode") or as_str(args, "mode")
 	if mode:
@@ -435,16 +434,27 @@ def post_payroll_to_gl(args: dict) -> ToolResult:
 	# somebody posted this payroll once and reversed it.
 	pruned = [row["journal_entry"] for row in context["superseded_postings"] if row["state"] == "deleted"]
 	if pruned:
-		kept = [row for row in doc.get("gl_postings") or [] if str(_get(row, "journal_entry") or "") not in pruned]
+		kept = [
+			row for row in doc.get("gl_postings") or [] if str(_get(row, "journal_entry") or "") not in pruned
+		]
 		doc.set("gl_postings", [])
 		for row in kept:
-			doc.append("gl_postings", {
-				field: _get(row, field)
-				for field in (
-					"journal_entry", "posting_mode", "employee", "employee_name",
-					"posting_date", "total_debit", "posted_on", "posted_by",
-				)
-			})
+			doc.append(
+				"gl_postings",
+				{
+					field: _get(row, field)
+					for field in (
+						"journal_entry",
+						"posting_mode",
+						"employee",
+						"employee_name",
+						"posting_date",
+						"total_debit",
+						"posted_on",
+						"posted_by",
+					)
+				},
+			)
 
 	created = []
 	for entry in plan["journal_entries"]:
@@ -466,16 +476,19 @@ def post_payroll_to_gl(args: dict) -> ToolResult:
 			"line_count": entry["line_count"],
 		}
 		created.append(record)
-		doc.append("gl_postings", {
-			"journal_entry": journal.name,
-			"posting_mode": mode_label,
-			"employee": record["employee"] or None,
-			"employee_name": record["employee_name"] or None,
-			"posting_date": entry["posting_date"],
-			"total_debit": entry["total_debit"],
-			"posted_on": now,
-			"posted_by": user,
-		})
+		doc.append(
+			"gl_postings",
+			{
+				"journal_entry": journal.name,
+				"posting_mode": mode_label,
+				"employee": record["employee"] or None,
+				"employee_name": record["employee_name"] or None,
+				"posting_date": entry["posting_date"],
+				"total_debit": entry["total_debit"],
+				"posted_on": now,
+				"posted_by": user,
+			},
+		)
 
 	doc.gl_status = "Draft Entries Created"
 	doc.flags.ignore_permissions = True
@@ -591,77 +604,91 @@ def _blockers(doc, plan: dict, context: dict) -> list[dict]:
 	blockers = []
 
 	if context["payroll_status"] not in POSTABLE_STATUSES:
-		blockers.append({
-			"blocker": "payroll_status",
-			"why": (
-				f"payroll entry {doc.name} is {context['payroll_status']!r}. Only "
-				f"{' and '.join(POSTABLE_STATUSES)} runs can be posted — a Draft has no "
-				"computed slips and a Cancelled run is one somebody withdrew."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "payroll_status",
+				"why": (
+					f"payroll entry {doc.name} is {context['payroll_status']!r}. Only "
+					f"{' and '.join(POSTABLE_STATUSES)} runs can be posted — a Draft has no "
+					"computed slips and a Cancelled run is one somebody withdrew."
+				),
+			}
+		)
 
 	if not context["mapping_configured"]:
-		blockers.append({
-			"blocker": "no_mapping",
-			"why": (
-				f"{context['company']} has no payroll account mapping. "
-				"configure_payroll_accounts creates one; no account name is shipped as a "
-				"default because one that is right on this chart of accounts would be "
-				"quietly wrong on the next farm's."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "no_mapping",
+				"why": (
+					f"{context['company']} has no payroll account mapping. "
+					"configure_payroll_accounts creates one; no account name is shipped as a "
+					"default because one that is right on this chart of accounts would be "
+					"quietly wrong on the next farm's."
+				),
+			}
+		)
 	elif not context["mapping_active"]:
-		blockers.append({
-			"blocker": "mapping_inactive",
-			"why": (
-				f"the payroll account mapping for {context['company']} is marked inactive. "
-				"Tick Active on it, or configure_payroll_accounts with is_active=true."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "mapping_inactive",
+				"why": (
+					f"the payroll account mapping for {context['company']} is marked inactive. "
+					"Tick Active on it, or configure_payroll_accounts with is_active=true."
+				),
+			}
+		)
 	elif not plan["mapping"]["complete"]:
 		missing = sorted({row["component"] for row in plan["mapping"]["missing"]})
-		blockers.append({
-			"blocker": "incomplete_mapping",
-			"components": missing,
-			"detail": plan["mapping"]["missing"],
-			"why": (
-				f"the account mapping for {context['company']} is missing: {', '.join(missing)}. "
-				"A mapping with a hole in it cannot produce an entry that balances."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "incomplete_mapping",
+				"components": missing,
+				"detail": plan["mapping"]["missing"],
+				"why": (
+					f"the account mapping for {context['company']} is missing: {', '.join(missing)}. "
+					"A mapping with a hole in it cannot produce an entry that balances."
+				),
+			}
+		)
 
 	if context["existing_postings"]:
 		names = ", ".join(row["journal_entry"] for row in context["existing_postings"])
-		blockers.append({
-			"blocker": "already_posted",
-			"journal_entries": [row["journal_entry"] for row in context["existing_postings"]],
-			"why": (
-				f"payroll entry {doc.name} already has {len(context['existing_postings'])} "
-				f"journal entry(ies) against it: {names}. Posting it again would double the "
-				"wage expense and double the liability. Delete or cancel those entries first "
-				"if they were wrong."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "already_posted",
+				"journal_entries": [row["journal_entry"] for row in context["existing_postings"]],
+				"why": (
+					f"payroll entry {doc.name} already has {len(context['existing_postings'])} "
+					f"journal entry(ies) against it: {names}. Posting it again would double the "
+					"wage expense and double the liability. Delete or cancel those entries first "
+					"if they were wrong."
+				),
+			}
+		)
 
 	if not plan["journal_entries"]:
-		blockers.append({
-			"blocker": "nothing_to_post",
-			"why": (
-				f"payroll entry {doc.name} produced no journal entry lines. Every slip in it "
-				"is zero, so there is nothing to book."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "nothing_to_post",
+				"why": (
+					f"payroll entry {doc.name} produced no journal entry lines. Every slip in it "
+					"is zero, so there is nothing to book."
+				),
+			}
+		)
 
 	if plan["unbalanced"]:
-		blockers.append({
-			"blocker": "unbalanced",
-			"detail": plan["unbalanced"],
-			"why": (
-				f"{len(plan['unbalanced'])} entry(ies) do not balance. A payroll slip whose "
-				"gross does not equal its deductions plus its net is a slip with a data "
-				"problem, and posting it would put that problem in the ledger."
-			),
-		})
+		blockers.append(
+			{
+				"blocker": "unbalanced",
+				"detail": plan["unbalanced"],
+				"why": (
+					f"{len(plan['unbalanced'])} entry(ies) do not balance. A payroll slip whose "
+					"gross does not equal its deductions plus its net is a slip with a data "
+					"problem, and posting it would put that problem in the ledger."
+				),
+			}
+		)
 
 	return blockers
 
@@ -670,9 +697,7 @@ def _refusal(doc, blockers: list[dict]) -> str:
 	lines = [f"payroll entry {doc.name} cannot be posted to the general ledger. Nothing was created."]
 	for index, blocker in enumerate(blockers, start=1):
 		lines.append(f"{index}. {blocker['why']}")
-	lines.append(
-		"preview_payroll_gl shows exactly what the entries would be, without writing anything."
-	)
+	lines.append("preview_payroll_gl shows exactly what the entries would be, without writing anything.")
 	return " ".join(lines)
 
 
@@ -731,14 +756,10 @@ def _requested_rows(args: dict, company: str) -> list[dict]:
 	elif isinstance(raw, list):
 		for index, value in enumerate(raw, start=1):
 			if not isinstance(value, dict):
-				raise ToolError(
-					f"components[{index}] must be an object, got {type(value).__name__}."
-				)
+				raise ToolError(f"components[{index}] must be an object, got {type(value).__name__}.")
 			entries.append(dict(value))
 	else:
-		raise ToolError(
-			"components must be a list of objects or an object keyed by component name."
-		)
+		raise ToolError("components must be a list of objects or an object keyed by component name.")
 
 	rows = []
 	seen = set()

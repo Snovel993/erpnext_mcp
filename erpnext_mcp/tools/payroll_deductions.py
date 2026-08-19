@@ -126,7 +126,10 @@ def _resolve_employee(value: str, label: str = "employee") -> str:
 		return value
 
 	matches = frappe.db.get_all(
-		EMPLOYEE, filters={"employee_name": ("like", f"%{value}%")}, pluck="name", limit=10,
+		EMPLOYEE,
+		filters={"employee_name": ("like", f"%{value}%")},
+		pluck="name",
+		limit=10,
 	)
 	if not matches:
 		raise ToolError(f"no Employee matches {value!r}. Nothing was changed.")
@@ -187,7 +190,9 @@ def _notes(row: dict) -> list[str]:
 	"""
 	notes = []
 	category = payroll_deductions._key(
-		row.get("deduction_category"), payroll_deductions.CATEGORIES, "other",
+		row.get("deduction_category"),
+		payroll_deductions.CATEGORIES,
+		"other",
 	)
 	kind = payroll_deductions.row_type(row)
 
@@ -272,7 +277,10 @@ def get_payroll_deduction(args: dict) -> ToolResult:
 		raise ToolError(f"no Farm Payroll Deduction called {name!r}.")
 
 	row = frappe.db.get_value(
-		PAYROLL_DEDUCTION, name, compat.existing_fields(PAYROLL_DEDUCTION, _FIELDS), as_dict=True,
+		PAYROLL_DEDUCTION,
+		name,
+		compat.existing_fields(PAYROLL_DEDUCTION, _FIELDS),
+		as_dict=True,
 	)
 	described = _describe(dict(row))
 	data = {"deduction": described}
@@ -383,9 +391,13 @@ def list_employee_deductions(args: dict) -> ToolResult:
 		limit=500,
 	)
 	live = payroll_deductions.active_deductions(rows, on_date)
-	shown = live if not include_inactive else sorted(
-		[dict(row) for row in rows],
-		key=lambda row: (payroll_deductions.row_priority(row), str(row.get("effective_from") or "")),
+	shown = (
+		live
+		if not include_inactive
+		else sorted(
+			[dict(row) for row in rows],
+			key=lambda row: (payroll_deductions.row_priority(row), str(row.get("effective_from") or "")),
+		)
 	)
 
 	data = {
@@ -428,7 +440,8 @@ def list_employee_deductions(args: dict) -> ToolResult:
 			"shortfalls": pre_tax["shortfalls"] + garnishments["shortfalls"] + post_tax["shortfalls"],
 			**payroll_deductions.summarize_deductions(lines),
 			"estimated_net_pay": round(
-				max(gross - statutory - payroll_deductions.summarize_deductions(lines)["total"], 0.0), 2,
+				max(gross - statutory - payroll_deductions.summarize_deductions(lines)["total"], 0.0),
+				2,
 			),
 		}
 		if not statutory:
@@ -443,8 +456,7 @@ def list_employee_deductions(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=(
-			f"listed {len(shown)} deductions for {data['employee_name']} "
-			f"({len(live)} in force on {on_date})"
+			f"listed {len(shown)} deductions for {data['employee_name']} ({len(live)} in force on {on_date})"
 		),
 	)
 
@@ -539,8 +551,7 @@ def update_payroll_deduction(args: dict) -> ToolResult:
 	changed = _apply(doc, args, creating=False)
 	if not changed:
 		raise ToolError(
-			"nothing to change: no writable field was supplied. Writable fields are "
-			f"{', '.join(_WRITABLE)}."
+			f"nothing to change: no writable field was supplied. Writable fields are {', '.join(_WRITABLE)}."
 		)
 
 	doc.save(ignore_permissions=True)
@@ -559,8 +570,7 @@ def update_payroll_deduction(args: dict) -> ToolResult:
 	return ToolResult(
 		data=data,
 		summary=(
-			f"updated deduction {name} ({len(changes)} field"
-			f"{'' if len(changes) == 1 else 's'} changed)"
+			f"updated deduction {name} ({len(changes)} field{'' if len(changes) == 1 else 's'} changed)"
 		),
 		docstatus_delta="0 → 0 (amended)",
 	)

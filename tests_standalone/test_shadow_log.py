@@ -201,7 +201,15 @@ class TheChainIsWalked(ShadowLogTestCase):
 		controller refuses one anyway."""
 		STORE.seed(
 			"Employee",
-			[{"name": "HR-EMP-00008", "employee_name": "Deep", "company": MAIN, "status": "Active", "reports_to": PICKER}],
+			[
+				{
+					"name": "HR-EMP-00008",
+					"employee_name": "Deep",
+					"company": MAIN,
+					"status": "Active",
+					"reports_to": PICKER,
+				}
+			],
 		)
 		chain = shadow_log.raci_chain("HR-EMP-00008")["chain"]
 		self.assertEqual(len(chain), shadow_log.MAX_LEVEL)

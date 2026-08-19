@@ -440,9 +440,7 @@ class TheReaderCannotBeWalked(EmployeeDocumentsTestCase):
 		"""`_resolve_max_bytes` is shared with the tool, so a brokered read is not
 		a way past the cap the tool enforces."""
 		with self.assertRaises(ToolError) as caught:
-			file_tools.attachment_content_on_authorized_parent(
-				"Employee", SUBJECT, LICENCE, max_bytes=4
-			)
+			file_tools.attachment_content_on_authorized_parent("Employee", SUBJECT, LICENCE, max_bytes=4)
 		self.assertIn("over the", str(caught.exception))
 
 	def test_neither_brokered_reader_is_a_published_tool(self):

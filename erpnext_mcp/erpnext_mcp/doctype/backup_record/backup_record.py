@@ -41,9 +41,7 @@ class BackupRecord(Document):
 
 		if self.completed_at and self.started_at and str(self.completed_at) < str(self.started_at):
 			frappe.throw(
-				_("Completed At ({0}) is before Started At ({1}).").format(
-					self.completed_at, self.started_at
-				)
+				_("Completed At ({0}) is before Started At ({1}).").format(self.completed_at, self.started_at)
 			)
 
 		if self.status != IN_PROGRESS and not self.completed_at and self.status == SUCCESS:

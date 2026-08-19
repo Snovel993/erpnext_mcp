@@ -69,7 +69,9 @@ def _card(**overrides) -> dict:
 class TheGeometry(unittest.TestCase):
 	def test_the_cards_fit_across_the_page(self):
 		usable = badge_sheet.PAGE["width_mm"] - 2 * badge_sheet.PAGE["margin_mm"]
-		needed = badge_sheet.CARDS_ACROSS * CARD_WIDTH_MM + (badge_sheet.CARDS_ACROSS - 1) * badge_sheet.GUTTER_MM
+		needed = (
+			badge_sheet.CARDS_ACROSS * CARD_WIDTH_MM + (badge_sheet.CARDS_ACROSS - 1) * badge_sheet.GUTTER_MM
+		)
 		self.assertLessEqual(needed, usable)
 
 	def test_one_more_across_would_not_fit(self):
@@ -77,17 +79,23 @@ class TheGeometry(unittest.TestCase):
 		otherwise `CARDS_ACROSS = 1` would pass the test above and waste half a
 		ream."""
 		usable = badge_sheet.PAGE["width_mm"] - 2 * badge_sheet.PAGE["margin_mm"]
-		one_more = (badge_sheet.CARDS_ACROSS + 1) * CARD_WIDTH_MM + badge_sheet.CARDS_ACROSS * badge_sheet.GUTTER_MM
+		one_more = (
+			badge_sheet.CARDS_ACROSS + 1
+		) * CARD_WIDTH_MM + badge_sheet.CARDS_ACROSS * badge_sheet.GUTTER_MM
 		self.assertGreater(one_more, usable)
 
 	def test_the_cards_fit_down_the_page(self):
 		usable = badge_sheet.PAGE["height_mm"] - 2 * badge_sheet.PAGE["margin_mm"]
-		needed = badge_sheet.CARDS_DOWN * CARD_HEIGHT_MM + (badge_sheet.CARDS_DOWN - 1) * badge_sheet.GUTTER_MM
+		needed = (
+			badge_sheet.CARDS_DOWN * CARD_HEIGHT_MM + (badge_sheet.CARDS_DOWN - 1) * badge_sheet.GUTTER_MM
+		)
 		self.assertLessEqual(needed, usable)
 
 	def test_one_more_down_would_not_fit(self):
 		usable = badge_sheet.PAGE["height_mm"] - 2 * badge_sheet.PAGE["margin_mm"]
-		one_more = (badge_sheet.CARDS_DOWN + 1) * CARD_HEIGHT_MM + badge_sheet.CARDS_DOWN * badge_sheet.GUTTER_MM
+		one_more = (
+			badge_sheet.CARDS_DOWN + 1
+		) * CARD_HEIGHT_MM + badge_sheet.CARDS_DOWN * badge_sheet.GUTTER_MM
 		self.assertGreater(one_more, usable)
 
 	def test_the_page_is_letter(self):
@@ -97,9 +105,7 @@ class TheGeometry(unittest.TestCase):
 		self.assertIn("@page { size: Letter", badge_sheet.SHEET_CSS)
 
 	def test_a_page_holds_across_times_down(self):
-		self.assertEqual(
-			badge_sheet.CARDS_PER_PAGE, badge_sheet.CARDS_ACROSS * badge_sheet.CARDS_DOWN
-		)
+		self.assertEqual(badge_sheet.CARDS_PER_PAGE, badge_sheet.CARDS_ACROSS * badge_sheet.CARDS_DOWN)
 
 	def test_the_card_geometry_has_one_definition(self):
 		"""The sheet and the Print Format share `CARD_CSS`. Two copies would have
@@ -254,7 +260,7 @@ class TheWhitelistedMethod(SeededTestCase):
 	def test_the_client_script_calls_the_path_that_actually_exists(self):
 		"""The two halves have to agree and nothing else makes them."""
 		self.assertEqual(badge_list_action.SHEET_METHOD, "erpnext_mcp.badge_sheet.render_badge_sheet")
-		module, _, attribute = badge_list_action.SHEET_METHOD.rpartition(".")
+		_module, _, attribute = badge_list_action.SHEET_METHOD.rpartition(".")
 		self.assertIs(frappe.get_attr(badge_list_action.SHEET_METHOD), badge_sheet.render_badge_sheet)
 		self.assertEqual(attribute, "render_badge_sheet")
 		self.assertIn(badge_list_action.SHEET_METHOD, badge_list_action.SCRIPT_SOURCE)
@@ -359,7 +365,7 @@ class TheListAction(SeededTestCase):
 		source = badge_list_action.SCRIPT_SOURCE
 		self.assertIn('frappe.listview_settings["Employee"] || {}', source)
 		self.assertIn("previous_onload", source)
-		self.assertNotIn("frappe.listview_settings[\"Employee\"] = {", source)
+		self.assertNotIn('frappe.listview_settings["Employee"] = {', source)
 
 	def test_it_adds_to_the_actions_menu_rather_than_the_page_toolbar(self):
 		"""The Actions menu is the one that appears once rows are ticked, which is
@@ -472,9 +478,7 @@ class TheRevisionUpgrade(SeededTestCase):
 		BENCH. The fingerprint is of a text this module does not keep a copy of;
 		if it is wrong, every existing site is told its copy has been edited and
 		quietly keeps the bug."""
-		self.assertIn(
-			badge_list_action._fingerprint(LIST_SCRIPT_R1), badge_list_action.PRIOR_REVISIONS
-		)
+		self.assertIn(badge_list_action._fingerprint(LIST_SCRIPT_R1), badge_list_action.PRIOR_REVISIONS)
 
 	def test_a_site_still_on_the_previous_revision_is_brought_up_to_date(self):
 		name = self._seed_at(LIST_SCRIPT_R1)

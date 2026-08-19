@@ -17,6 +17,7 @@ per tax year — so a 2025 form that gets re-saved in 2026 (a corrected count, a
 superseding edit) must still restate itself at 2025's $2,000. A flat constant
 would rewrite history on the next save.
 """
+
 from frappe.model.document import Document
 
 #: (first tax year the amount applied, credit), newest first. A year later than
@@ -29,28 +30,28 @@ OTHER_DEPENDENT_CREDIT = ((0, 500),)
 
 
 def credit_for(schedule, tax_year) -> int:
-    """The per-dependent credit a form of `tax_year` claims.
+	"""The per-dependent credit a form of `tax_year` claims.
 
-    A missing year takes the NEWEST amount rather than the oldest: `tax_year` is
-    mandatory, so the only row that reaches here without one is being created
-    right now, and today's edition is the honest guess for it.
-    """
-    year = int(tax_year or 0)
-    if not year:
-        return schedule[0][1]
-    for first_year, amount in schedule:
-        if year >= first_year:
-            return amount
-    return schedule[-1][1]
+	A missing year takes the NEWEST amount rather than the oldest: `tax_year` is
+	mandatory, so the only row that reaches here without one is being created
+	right now, and today's edition is the honest guess for it.
+	"""
+	year = int(tax_year or 0)
+	if not year:
+		return schedule[0][1]
+	for first_year, amount in schedule:
+		if year >= first_year:
+			return amount
+	return schedule[-1][1]
 
 
 class W4Form(Document):
-    def validate(self):
-        self._compute_dependents()
+	def validate(self):
+		self._compute_dependents()
 
-    def _compute_dependents(self):
-        under_17 = int(self.dependents_under_17_count or 0)
-        other = int(self.other_dependents_count or 0)
-        self.dependents_under_17_amount = under_17 * credit_for(UNDER_17_CREDIT, self.tax_year)
-        self.other_dependents_amount = other * credit_for(OTHER_DEPENDENT_CREDIT, self.tax_year)
-        self.total_dependents_credit = self.dependents_under_17_amount + self.other_dependents_amount
+	def _compute_dependents(self):
+		under_17 = int(self.dependents_under_17_count or 0)
+		other = int(self.other_dependents_count or 0)
+		self.dependents_under_17_amount = under_17 * credit_for(UNDER_17_CREDIT, self.tax_year)
+		self.other_dependents_amount = other * credit_for(OTHER_DEPENDENT_CREDIT, self.tax_year)
+		self.total_dependents_credit = self.dependents_under_17_amount + self.other_dependents_amount

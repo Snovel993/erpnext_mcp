@@ -360,9 +360,7 @@ def _leaf_accounts(company: str, root_type: str) -> list[str]:
 		limit=500,
 	)
 	return [
-		row["name"]
-		for row in rows
-		if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
+		row["name"] for row in rows if not int(row.get("is_group") or 0) and not int(row.get("disabled") or 0)
 	]
 
 
@@ -580,9 +578,7 @@ def _invoice_from_items(args: dict) -> ToolResult:
 	posting_date = as_date(args, "posting_date") or frappe.utils.today()
 	due_date = as_date(args, "due_date")
 	if due_date and due_date < posting_date:
-		raise ToolError(
-			f"due_date {due_date} is before posting_date {posting_date}. Nothing was created."
-		)
+		raise ToolError(f"due_date {due_date} is before posting_date {posting_date}. Nothing was created.")
 
 	debit_to = _resolve_receivable_account(as_str(args, "debit_to"), company)
 	default_income = as_str(args, "income_account")
@@ -937,14 +933,10 @@ def _invoice_from_settlement(args: dict, settlement_name: str) -> ToolResult:
 		)
 	customer = doc.get("customer")
 	posting_date = as_date(args, "posting_date") or str(doc.get("date"))
-	due_date = as_date(args, "due_date") or frappe.utils.add_days(
-		posting_date, DEFAULT_PAYMENT_TERMS_DAYS
-	)
+	due_date = as_date(args, "due_date") or frappe.utils.add_days(posting_date, DEFAULT_PAYMENT_TERMS_DAYS)
 	due_date = str(due_date)
 	if due_date < posting_date:
-		raise ToolError(
-			f"due_date {due_date} is before posting_date {posting_date}. Nothing was created."
-		)
+		raise ToolError(f"due_date {due_date} is before posting_date {posting_date}. Nothing was created.")
 
 	debit_to = _resolve_receivable_account(as_str(args, "debit_to"), company)
 	income_account = _resolve_income_account(as_str(args, "income_account"), company)
@@ -983,8 +975,8 @@ def _invoice_from_settlement(args: dict, settlement_name: str) -> ToolResult:
 
 	grand_total = float(doc_si.get("grand_total") or 0)
 	net_proceeds = float(doc.get("net_proceeds") or 0)
-	expected = net_proceeds if (deductions and include_deductions) else float(
-		doc.get("total_gross_revenue") or 0
+	expected = (
+		net_proceeds if (deductions and include_deductions) else float(doc.get("total_gross_revenue") or 0)
 	)
 	variance = round(grand_total - expected, 2)
 
@@ -1103,9 +1095,9 @@ def get_sales_invoice(args: dict) -> ToolResult:
 		),
 	}
 
-	settlement = doc.get(SETTLEMENT_LINK_FIELD) if compat.has_field(
-		SALES_INVOICE, SETTLEMENT_LINK_FIELD
-	) else None
+	settlement = (
+		doc.get(SETTLEMENT_LINK_FIELD) if compat.has_field(SALES_INVOICE, SETTLEMENT_LINK_FIELD) else None
+	)
 	data["linked_settlement"] = _settlement_summary(settlement) if settlement else None
 
 	return ToolResult(
@@ -1346,9 +1338,7 @@ def submit_sales_invoice(args: dict) -> ToolResult:
 		"credit": round(sum(row["credit"] for row in gl_entries), 2),
 	}
 	settlement = (
-		doc.get(SETTLEMENT_LINK_FIELD)
-		if compat.has_field(SALES_INVOICE, SETTLEMENT_LINK_FIELD)
-		else None
+		doc.get(SETTLEMENT_LINK_FIELD) if compat.has_field(SALES_INVOICE, SETTLEMENT_LINK_FIELD) else None
 	)
 	data["settlement_statement"] = settlement
 	data["note"] = (
@@ -1439,8 +1429,7 @@ def receive_payment(args: dict) -> ToolResult:
 	total_allocated = round(sum(row["allocated_amount"] for row in references), 2)
 	if total_allocated - paid_amount > 0.005:
 		raise ToolError(
-			f"the invoices allocate {total_allocated} but paid_amount is {paid_amount}. "
-			f"Nothing was created."
+			f"the invoices allocate {total_allocated} but paid_amount is {paid_amount}. Nothing was created."
 		)
 
 	doc = frappe.new_doc(PAYMENT_ENTRY)
@@ -1545,6 +1534,7 @@ def _open_invoices(customer: str, company: str) -> list[dict]:
 		),
 		limit=500,
 	)
+
 	# Sorted here rather than in SQL: an invoice with no due date has to sort
 	# beside its posting date rather than to the front (a NULL sorts first in
 	# most databases), because an invoice nobody put terms on is not thereby the
@@ -1591,11 +1581,7 @@ def _explicit_allocation(raw, customer: str, company: str) -> list[dict]:
 	for index, entry in enumerate(raw, start=1):
 		if not isinstance(entry, dict):
 			raise ToolError(f"invoices[{index}] must be an object, got {type(entry).__name__}")
-		name = (
-			as_str(entry, "sales_invoice")
-			or as_str(entry, "reference_name")
-			or as_str(entry, "invoice")
-		)
+		name = as_str(entry, "sales_invoice") or as_str(entry, "reference_name") or as_str(entry, "invoice")
 		if not name:
 			raise ToolError(f"invoices[{index}].sales_invoice is required. Nothing was created.")
 		if name in seen:
@@ -1633,8 +1619,7 @@ def _explicit_allocation(raw, customer: str, company: str) -> list[dict]:
 			allocated = outstanding
 		if allocated <= 0:
 			raise ToolError(
-				f"invoices[{index}].allocated_amount must be positive, got {allocated}. "
-				f"Nothing was created."
+				f"invoices[{index}].allocated_amount must be positive, got {allocated}. Nothing was created."
 			)
 		if allocated - outstanding > 0.005:
 			raise ToolError(
@@ -2102,9 +2087,7 @@ def _groups_by_field(settlements: list):
 		packed = float(s.get("packed_weight") or 0)
 		culled = float(s.get("cull_weight") or 0)
 		if single and single != "<none>":
-			row = groups.setdefault(
-				single, _new_group(single, packed_known=False, culled_known=False)
-			)
+			row = groups.setdefault(single, _new_group(single, packed_known=False, culled_known=False))
 			row["_packed_known"] = True
 			row["_culled_known"] = True
 			row["packed"] += packed
@@ -2504,9 +2487,7 @@ def _invoicing_rollup(company: str, customer: str, from_date: str, to_date: str)
 	rows = frappe.db.get_all(
 		SALES_INVOICE,
 		filters=filters,
-		fields=compat.existing_fields(
-			SALES_INVOICE, ("name", "grand_total", "outstanding_amount", "status")
-		),
+		fields=compat.existing_fields(SALES_INVOICE, ("name", "grand_total", "outstanding_amount", "status")),
 		limit=500,
 	)
 	invoiced = round(sum(float(r.get("grand_total") or 0) for r in rows), 2)
@@ -2516,9 +2497,7 @@ def _invoicing_rollup(company: str, customer: str, from_date: str, to_date: str)
 		"total_invoiced": invoiced,
 		"total_outstanding": outstanding,
 		"total_paid": round(invoiced - outstanding, 2),
-		"outstanding_invoice_count": sum(
-			1 for r in rows if float(r.get("outstanding_amount") or 0) > 0.005
-		),
+		"outstanding_invoice_count": sum(1 for r in rows if float(r.get("outstanding_amount") or 0) > 0.005),
 		"note": (
 			"total_paid is invoiced less outstanding, which counts a credit note or a write-off as "
 			"paid. It is the collected-versus-billed figure, not a sum of Payment Entries."
@@ -2527,11 +2506,7 @@ def _invoicing_rollup(company: str, customer: str, from_date: str, to_date: str)
 
 
 def _unmatched_tickets(tickets: list) -> dict:
-	rows = [
-		t
-		for t in tickets
-		if not t.get("settlement") and int(t.get("docstatus") or 0) == 1
-	]
+	rows = [t for t in tickets if not t.get("settlement") and int(t.get("docstatus") or 0) == 1]
 	uoms: dict = {}
 	for t in rows:
 		uom = t.get("weight_uom") or "<none>"
@@ -2551,9 +2526,7 @@ def _unmatched_tickets(tickets: list) -> dict:
 
 def _uninvoiced_settlements(settlements: list) -> dict:
 	rows = [
-		s
-		for s in settlements
-		if not s.get(SALES_INVOICE_LINK_FIELD) and not s.get("posted_journal_entry")
+		s for s in settlements if not s.get(SALES_INVOICE_LINK_FIELD) and not s.get("posted_journal_entry")
 	]
 	return {
 		"count": len(rows),
@@ -2782,9 +2755,7 @@ def reconcile_settlement_to_tickets(args: dict) -> ToolResult:
 
 	after = receipts._matched_tickets(doc.name)
 	reconciliation_after = receipts._reconciliation(doc, after)
-	variance_change = round(
-		reconciliation_after["variance"] - reconciliation_before["variance"], 3
-	)
+	variance_change = round(reconciliation_after["variance"] - reconciliation_before["variance"], 3)
 
 	data = {
 		"settlement_statement": doc.name,

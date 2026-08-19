@@ -423,7 +423,8 @@ class TheHigherOfRuleIsApplied(PieceworkTestCase):
 		slip = self.slip(self.one_day(units=47))
 		self.assertEqual(slip["gross_pay"], 117.60)
 		self.assertEqual(
-			slip["net_pay"], round(slip["gross_pay"] - slip["total_deductions"], 2),
+			slip["net_pay"],
+			round(slip["gross_pay"] - slip["total_deductions"], 2),
 		)
 		self.assertEqual(slip["social_security"], round(117.60 * 0.062, 2))
 		self.assertEqual(slip["medicare"], round(117.60 * 0.0145, 2))
@@ -527,7 +528,9 @@ class OvertimeUnderPieceRate(PieceworkTestCase):
 		now, so neither figure can pass.
 		"""
 		verdict = pi.check_minimum_wage_by_state(
-			{"OR": 50.0}, {"OR": 660.00}, overtime_hours_by_state={"OR": 10.0},
+			{"OR": 50.0},
+			{"OR": 660.00},
+			overtime_hours_by_state={"OR": 10.0},
 		)
 		self.assertEqual(verdict["by_state"]["OR"]["minimum_wage_floor"], 808.50)
 		self.assertFalse(verdict["meets_minimum_wage"])

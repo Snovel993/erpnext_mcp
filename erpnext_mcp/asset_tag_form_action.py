@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-""""QR Tag" on the Asset Register form, as a record and not as a hook. v0.83.0.
+""" "QR Tag" on the Asset Register form, as a record and not as a hook. v0.83.0.
 
 `asset_tag_list_action.py` puts "Generate QR Sheet" on the Asset Register LIST,
 for thirty machines at once. This is the other half and the one somebody standing

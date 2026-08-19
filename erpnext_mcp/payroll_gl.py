@@ -67,6 +67,7 @@ The tools that use this create DRAFT Journal Entries and stop. Posting payroll
 is a statement about money leaving the farm, and it wants the same human in
 front of it that `submit_journal_entry` wants.
 """
+
 from __future__ import annotations
 
 #: Rounding tolerance for the double-entry check. The same half-cent
@@ -194,9 +195,7 @@ COMPONENT_NAMES: tuple[str, ...] = tuple(row["component"] for row in COMPONENTS)
 #: the debit is gross, and the credits are every deduction plus what is left.
 #: An entry missing one of these does not balance, which is why they are the
 #: set `validate_mapping` insists on even where an amount happens to be zero.
-CORE_COMPONENTS: tuple[str, ...] = tuple(
-	row["component"] for row in COMPONENTS if row["party"] == "Employee"
-)
+CORE_COMPONENTS: tuple[str, ...] = tuple(row["component"] for row in COMPONENTS if row["party"] == "Employee")
 
 #: The employer-side components. Each is self-balancing — one debit, one credit,
 #: the same amount — so a mapping that has none of them still produces a valid
@@ -309,11 +308,13 @@ def mapping_index(mapping) -> dict[str, dict]:
 			if isinstance(row, dict):
 				rows.append(dict(row))
 			else:
-				rows.append({
-					"component": getattr(row, "component", ""),
-					"debit_account": getattr(row, "debit_account", ""),
-					"credit_account": getattr(row, "credit_account", ""),
-				})
+				rows.append(
+					{
+						"component": getattr(row, "component", ""),
+						"debit_account": getattr(row, "debit_account", ""),
+						"credit_account": getattr(row, "credit_account", ""),
+					}
+				)
 
 	for row in rows:
 		component = str(row.get("component") or "").strip()
@@ -336,10 +337,14 @@ def unrecognised_components(mapping) -> list[str]:
 	nothing, so it is named rather than dropped.
 	"""
 	found = []
-	rows = mapping.items() if isinstance(mapping, dict) else [
-		(row.get("component") if isinstance(row, dict) else getattr(row, "component", ""), None)
-		for row in (mapping or [])
-	]
+	rows = (
+		mapping.items()
+		if isinstance(mapping, dict)
+		else [
+			(row.get("component") if isinstance(row, dict) else getattr(row, "component", ""), None)
+			for row in (mapping or [])
+		]
+	)
 	for component, _value in rows:
 		name = str(component or "").strip()
 		if name and name not in COMPONENT_INDEX:
@@ -402,15 +407,15 @@ def validate_mapping(
 			account = entry.get(f"{side}_account")
 			if account:
 				continue
-			missing.append({
-				"component": component,
-				"side": side,
-				"account_field": f"{side}_account",
-				"amount": amount,
-				"why": (
-					f"{definition['label']} needs a {side} account. {definition['about']}"
-				),
-			})
+			missing.append(
+				{
+					"component": component,
+					"side": side,
+					"account_field": f"{side}_account",
+					"amount": amount,
+					"why": (f"{definition['label']} needs a {side} account. {definition['about']}"),
+				}
+			)
 
 	unmapped_with_amounts = []
 	if amounts:
@@ -418,10 +423,12 @@ def validate_mapping(
 			if abs(_as_float(amount)) < 0.005:
 				continue
 			if component not in index:
-				unmapped_with_amounts.append({
-					"component": component,
-					"amount": _money(amount),
-				})
+				unmapped_with_amounts.append(
+					{
+						"component": component,
+						"amount": _money(amount),
+					}
+				)
 
 	return {
 		"complete": not missing,
@@ -482,23 +489,27 @@ def journal_lines(
 
 		entry = index.get(component)
 		if not entry:
-			skipped.append({
-				"component": component,
-				"amount": amount,
-				"why": f"{definition['label']} has no account mapped for this company.",
-			})
+			skipped.append(
+				{
+					"component": component,
+					"amount": amount,
+					"why": f"{definition['label']} has no account mapped for this company.",
+				}
+			)
 			continue
 
 		placed = {}
 		for side in definition["sides"]:
 			account = entry.get(f"{side}_account")
 			if not account:
-				skipped.append({
-					"component": component,
-					"amount": amount,
-					"side": side,
-					"why": f"{definition['label']} has no {side} account mapped.",
-				})
+				skipped.append(
+					{
+						"component": component,
+						"amount": amount,
+						"side": side,
+						"why": f"{definition['label']} has no {side} account mapped.",
+					}
+				)
 				continue
 			key = _line_key(account, side)
 			if key not in merged:
@@ -514,14 +525,16 @@ def journal_lines(
 			placed[side] = account
 
 		if placed:
-			breakdown.append({
-				"component": component,
-				"label": definition["label"],
-				"party": definition["party"],
-				"amount": amount,
-				"debit_account": placed.get("debit", ""),
-				"credit_account": placed.get("credit", ""),
-			})
+			breakdown.append(
+				{
+					"component": component,
+					"label": definition["label"],
+					"party": definition["party"],
+					"amount": amount,
+					"debit_account": placed.get("debit", ""),
+					"credit_account": placed.get("credit", ""),
+				}
+			)
 
 	lines = []
 	for key in order:
@@ -531,9 +544,7 @@ def journal_lines(
 			continue
 		line = {"account": row["account"]}
 		line[row["side"]] = amount
-		line["user_remark"] = ", ".join(
-			COMPONENT_INDEX[name]["label"] for name in row["components"]
-		)
+		line["user_remark"] = ", ".join(COMPONENT_INDEX[name]["label"] for name in row["components"])
 		if cost_center:
 			line["cost_center"] = cost_center
 		lines.append(line)
@@ -645,7 +656,10 @@ def build_journal_entry(
 	"""
 	amounts = component_amounts(slip)
 	lines, breakdown, unmapped = journal_lines(
-		amounts, mapping, cost_center=cost_center, include_employer=include_employer,
+		amounts,
+		mapping,
+		cost_center=cost_center,
+		include_employer=include_employer,
 	)
 	balance = check_balance(lines)
 
@@ -739,7 +753,10 @@ def build_consolidated_journal_entry(
 	"""
 	amounts = consolidate_amounts(slips)
 	lines, breakdown, unmapped = journal_lines(
-		amounts, mapping, cost_center=cost_center, include_employer=include_employer,
+		amounts,
+		mapping,
+		cost_center=cost_center,
+		include_employer=include_employer,
 	)
 	balance = check_balance(lines)
 
@@ -836,46 +853,54 @@ def build_payroll_journal_entries(
 		for slip in slips:
 			amounts = component_amounts(slip)
 			if slip_is_empty(amounts):
-				skipped.append({
-					"employee": slip.get("employee", ""),
-					"employee_name": slip.get("employee_name", ""),
-					"why": "every component is zero, so there is nothing to post.",
-				})
+				skipped.append(
+					{
+						"employee": slip.get("employee", ""),
+						"employee_name": slip.get("employee_name", ""),
+						"why": "every component is zero, so there is nothing to post.",
+					}
+				)
 				warnings.extend(_slip_warnings(slip, amounts, include_employer))
 				continue
-			entries.append(build_journal_entry(
-				slip,
-				mapping,
-				posting_date=posting_date,
-				company=company,
-				payroll_entry=payroll_entry,
-				slip_name=(slip_names or {}).get(slip.get("employee", ""), ""),
-				cost_center=cost_center,
-				include_employer=include_employer,
-			))
+			entries.append(
+				build_journal_entry(
+					slip,
+					mapping,
+					posting_date=posting_date,
+					company=company,
+					payroll_entry=payroll_entry,
+					slip_name=(slip_names or {}).get(slip.get("employee", ""), ""),
+					cost_center=cost_center,
+					include_employer=include_employer,
+				)
+			)
 	else:
 		payable = []
 		for slip in slips:
 			amounts = component_amounts(slip)
 			if slip_is_empty(amounts):
-				skipped.append({
-					"employee": slip.get("employee", ""),
-					"employee_name": slip.get("employee_name", ""),
-					"why": "every component is zero, so it adds nothing to the entry.",
-				})
+				skipped.append(
+					{
+						"employee": slip.get("employee", ""),
+						"employee_name": slip.get("employee_name", ""),
+						"why": "every component is zero, so it adds nothing to the entry.",
+					}
+				)
 				warnings.extend(_slip_warnings(slip, amounts, include_employer))
 				continue
 			payable.append(slip)
 		if payable:
-			entries.append(build_consolidated_journal_entry(
-				payable,
-				mapping,
-				posting_date=posting_date,
-				company=company,
-				payroll_entry=payroll_entry,
-				cost_center=cost_center,
-				include_employer=include_employer,
-			))
+			entries.append(
+				build_consolidated_journal_entry(
+					payable,
+					mapping,
+					posting_date=posting_date,
+					company=company,
+					payroll_entry=payroll_entry,
+					cost_center=cost_center,
+					include_employer=include_employer,
+				)
+			)
 
 	for entry in entries:
 		warnings.extend(entry.get("warnings") or [])
@@ -899,7 +924,8 @@ def build_payroll_journal_entries(
 			"employee_name": entry.get("employee_name", ""),
 			"difference": entry["difference"],
 		}
-		for entry in entries if not entry["balanced"]
+		for entry in entries
+		if not entry["balanced"]
 	]
 
 	return {

@@ -480,8 +480,13 @@ class TheFieldsAreStoredWhereTheyCanBeReadBack(WizardTestCase):
 	def test_every_shipped_wizard_has_fields_after_a_migrate(self):
 		"""The register-wide version, so a sixth wizard added later that forgets
 		to write its fields fails here rather than in an orchard."""
-		for wizard in ("accident_investigation", "progressive_discipline", "asset_registration",
-		               "employee_onboarding", "inspection_session"):
+		for wizard in (
+			"accident_investigation",
+			"progressive_discipline",
+			"asset_registration",
+			"employee_onboarding",
+			"inspection_session",
+		):
 			with self.subTest(wizard=wizard):
 				data = self.tool_data("get_wizard_definition", {"wizard": wizard, "language": "en"})
 				self.assertTrue(data["field_count"], f"{wizard} has no fields")
@@ -550,10 +555,10 @@ class TheFieldsAreStoredWhereTheyCanBeReadBack(WizardTestCase):
 			step["idx"] = position
 		doc.set(
 			"steps",
-			[{"step_key": "local_rule", "title_en": "Our own step", "idx": 1}] + existing,
+			[{"step_key": "local_rule", "title_en": "Our own step", "idx": 1}, *existing],
 		)
 		doc.save()
-		self.assertEqual([step["step_key"] for step in self.steps_of()][0], "local_rule")
+		self.assertEqual(next(step["step_key"] for step in self.steps_of()), "local_rule")
 
 		wizards.install_wizard_definitions()
 		by_key = {step["step_key"]: step["name"] for step in self.steps_of()}
@@ -587,14 +592,10 @@ class TheFieldsAreStoredWhereTheyCanBeReadBack(WizardTestCase):
 		row = doc.append("steps", {"step_key": "one", "title_en": "One"})
 		row.append("fields", {"fieldname": "a", "field_type": "text", "label_en": "A"})
 		doc.insert()
-		self.assertEqual(
-			self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 0
-		)
+		self.assertEqual(self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 0)
 
 		self.assertEqual(wizards.write_wizard_fields(doc), 1)
-		self.assertEqual(
-			self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 1
-		)
+		self.assertEqual(self.tool_data("get_wizard_definition", {"wizard": "hand_rolled"})["field_count"], 1)
 
 	def test_an_unsaved_definition_still_reads_the_rows_in_hand(self):
 		"""`WizardDefinition.validate` walks the fields appended onto a document

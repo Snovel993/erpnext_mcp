@@ -25,6 +25,7 @@ across their active rows may not exceed 100. A row that is individually valid
 can still make the set unpayable, and the set is what `generate_nacha_file`
 resolves against a real net pay.
 """
+
 from __future__ import annotations
 
 import re
@@ -122,9 +123,7 @@ class EmployeeBankAccount(Document):
 
 		if str(self.allocation_type) == "Percentage":
 			total = float(self.allocation_amount or 0) + sum(
-				float(s.allocation_amount or 0)
-				for s in siblings
-				if str(s.allocation_type) == "Percentage"
+				float(s.allocation_amount or 0) for s in siblings if str(s.allocation_type) == "Percentage"
 			)
 			if total > 100:
 				frappe.throw(
@@ -140,8 +139,7 @@ def _clean_routing(value) -> str:
 		frappe.throw("A routing number is required.", frappe.ValidationError)
 	if len(digits) != 9:
 		frappe.throw(
-			f"The routing number {value!r} has {len(digits)} digits. An ABA routing number has "
-			"exactly 9.",
+			f"The routing number {value!r} has {len(digits)} digits. An ABA routing number has exactly 9.",
 			frappe.ValidationError,
 		)
 	if not routing_checksum_ok(digits):

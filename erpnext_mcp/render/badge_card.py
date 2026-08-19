@@ -256,9 +256,7 @@ def erpnext_mcp_badge_card(badge_id) -> dict:
 		card["employee"] = str(row.get("employee") or "")
 
 		if card["employee"]:
-			person = (
-				frappe.db.get_value(EMPLOYEE, card["employee"], _EMPLOYEE_FIELDS, as_dict=True) or {}
-			)
+			person = frappe.db.get_value(EMPLOYEE, card["employee"], _EMPLOYEE_FIELDS, as_dict=True) or {}
 			card["employee_name"] = str(person.get("employee_name") or card["employee"])
 			card["designation"] = str(person.get("designation") or "")
 			card["employee_number"] = str(person.get("employee_number") or "")

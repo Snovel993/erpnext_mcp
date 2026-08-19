@@ -536,9 +536,7 @@ class WhatAMinorMayNotDo(Wave3TestCase):
 				"evidence_required": {"findings_text": True},
 			},
 		)
-		message = self.tool_error(
-			"assign_farm_task", {"task": task["name"], "assigned_to": MINOR}
-		)
+		message = self.tool_error("assign_farm_task", {"task": task["name"], "assigned_to": MINOR})
 		self.assertIn("40 CFR §170.309(c)", message)
 		self.assertIn("Mateo Seventeen", message)
 
@@ -555,9 +553,7 @@ class WhatAMinorMayNotDo(Wave3TestCase):
 				"evidence_required": {"findings_text": True},
 			},
 		)
-		message = self.tool_error(
-			"assign_farm_task", {"task": task["name"], "assigned_to": YOUNGER}
-		)
+		message = self.tool_error("assign_farm_task", {"task": task["name"], "assigned_to": YOUNGER})
 		self.assertIn("570.71", message)
 
 		other = self.tool_data(
@@ -699,7 +695,7 @@ class TheCountdownKnowsWhoItIsFor(Wave3TestCase):
 			frappe.db.get_value(
 				"Farm Shift",
 				name,
-				list(shifts.FIELDS) + ["break_policy", "work_state"],
+				[*list(shifts.FIELDS), "break_policy", "work_state"],
 				as_dict=True,
 			)
 		)
@@ -740,9 +736,7 @@ class TheCountdownKnowsWhoItIsFor(Wave3TestCase):
 		policy = self.a_policy(with_minor_rows=False)
 		name = self.a_shift(start_datetime=self.at(6), crew_employees=[])["name"]
 		frappe.db.set_value("Farm Shift", name, "break_policy", policy)
-		data = shift_tools.get_break_schedule(
-			{"shift": name, "planned_hours": 8, "employee": YOUNGER}
-		).data
+		data = shift_tools.get_break_schedule({"shift": name, "planned_hours": 8, "employee": YOUNGER}).data
 		self.assertEqual(data["schedule_band"], "adult")
 		self.assertTrue(data["is_minor"])
 		self.assertIn("ADULT one", data["minor_gap"])
@@ -786,11 +780,7 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 		return data["name"]
 
 	def the_break(self, shift: str, kind: str):
-		return [
-			row
-			for row in shifts.events_of(shift)
-			if row.get("break_kind") == kind
-		][0]
+		return next(row for row in shifts.events_of(shift) if row.get("break_kind") == kind)
 
 	def test_a_water_break_carries_the_peak_the_crossing_and_the_source(self):
 		shift = self.a_hot_shift()
@@ -816,7 +806,12 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 		shift = self.a_hot_shift()
 		self.tool_data(
 			"log_shift_break",
-			{"shift": shift, "break_kind": "Cool-Down", "started_at": self.at(15, 10), "duration_minutes": 10},
+			{
+				"shift": shift,
+				"break_kind": "Cool-Down",
+				"started_at": self.at(15, 10),
+				"duration_minutes": 10,
+			},
 		)
 		row = self.the_break(shift, "Cool-Down")
 		self.assertEqual(row["weather_snapshot_heat_index_f"], 88.0)
@@ -854,7 +849,12 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 		data = self.a_shift(start_datetime=self.at(6))
 		answer = self.tool_data(
 			"log_shift_break",
-			{"shift": data["name"], "break_kind": "Water Break", "started_at": self.at(10), "duration_minutes": 10},
+			{
+				"shift": data["name"],
+				"break_kind": "Water Break",
+				"started_at": self.at(10),
+				"duration_minutes": 10,
+			},
 		)
 		row = self.the_break(data["name"], "Water Break")
 		self.assertTrue(row["heat_obligation"])
@@ -881,10 +881,15 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 		shift = self.a_hot_shift()
 		self.tool_data(
 			"log_shift_break",
-			{"shift": shift, "break_kind": "Shade Break", "started_at": self.at(15, 10), "duration_minutes": 10},
+			{
+				"shift": shift,
+				"break_kind": "Shade Break",
+				"started_at": self.at(15, 10),
+				"duration_minutes": 10,
+			},
 		)
 		described = self.tool_data("get_shift", {"shift": shift})
-		event = [row for row in described["compliance_events"] if row.get("break_kind")][0]
+		event = next(row for row in described["compliance_events"] if row.get("break_kind"))
 		self.assertEqual(event["temp_f"], event["ambient_temp_f"])
 		self.assertEqual(event["heat_index_f"], 88.0)
 		self.assertEqual(event["peak_heat_index_f"], 97.0)
@@ -1098,7 +1103,7 @@ class TheBinTracesBackToTheCrew(Wave3TestCase):
 		"""Both, and not one instead of the other: the badge is what the phone
 		saw and the link is what it resolved to, and a dispute about a mis-scan
 		needs both."""
-		row = [entry for entry in self.a_seal()["contributors"] if entry["employee"] == WORKER][0]
+		row = next(entry for entry in self.a_seal()["contributors"] if entry["employee"] == WORKER)
 		self.assertEqual(row["badge_id"], "B-0117")
 		self.assertEqual(row["employee_name"], "Ben Packhouse")
 
@@ -1148,9 +1153,7 @@ class TheBinTracesBackToTheCrew(Wave3TestCase):
 	def test_an_unregistered_badge_is_reported_and_the_bin_is_still_sealed(self):
 		"""A bin refused over a card nobody registered is a bin nothing can trace
 		at all — a record with a gap in it is worth more."""
-		data = self.a_seal(
-			contributors=[{"badge_id": "B-0117", "buckets_contributed": 18}, "B-9999"]
-		)
+		data = self.a_seal(contributors=[{"badge_id": "B-0117", "buckets_contributed": 18}, "B-9999"])
 		self.assertEqual(data["unresolved_badges"], ["B-9999"])
 		self.assertEqual(data["contributor_count"], 1)
 		self.assertTrue(data["name"])

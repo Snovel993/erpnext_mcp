@@ -168,7 +168,9 @@ class ABCTestCase(V12TestCase):
 				activity_name is None or line["activity_name"] == activity_name
 			):
 				return line
-		raise AssertionError(f"no line for {cost_object!r} in {[l['cost_object'] for l in data['lines']]}")
+		raise AssertionError(
+			f"no line for {cost_object!r} in {[row['cost_object'] for row in data['lines']]}"
+		)
 
 
 # ── 1 ───────────────────────────────────────────────────────────────────────
@@ -242,10 +244,14 @@ class AnActivityIsWhatCostsMoney(ABCTestCase):
 
 	def test_a_retired_activity_is_out_of_the_register_by_default(self):
 		self.an_activity()
-		self.tool_data("update_cost_activity", {"activity": "Dormant spray", "company": MAIN, "disabled": True})
+		self.tool_data(
+			"update_cost_activity", {"activity": "Dormant spray", "company": MAIN, "disabled": True}
+		)
 		self.assertEqual(self.tool_data("list_cost_activities", {"company": MAIN})["activity_count"], 0)
 		self.assertEqual(
-			self.tool_data("list_cost_activities", {"company": MAIN, "include_disabled": True})["activity_count"],
+			self.tool_data("list_cost_activities", {"company": MAIN, "include_disabled": True})[
+				"activity_count"
+			],
 			1,
 		)
 
@@ -390,7 +396,9 @@ class APoolsTrailReachesItsFigure(ABCTestCase):
 	def test_the_register_separates_the_typed_money_from_the_read_money(self):
 		self.gl(supplies(MAIN_ABBR), "2026-03-01", debit=6000)
 		ledger = self.an_activity(cost_center=FIELD_WORK)["name"]
-		self.tool_data("create_activity_cost_pool", {"activity": ledger, "company": MAIN, "fiscal_year": YEAR})
+		self.tool_data(
+			"create_activity_cost_pool", {"activity": ledger, "company": MAIN, "fiscal_year": YEAR}
+		)
 		manual = self.an_activity(activity_name="Hand thinning", cost_driver="Hours")["name"]
 		self.a_pool(manual, amount=4000)
 
@@ -503,9 +511,7 @@ class TheEngineWillNotEstimateADriver(ABCTestCase):
 
 	def test_the_identity_holds_and_is_stated(self):
 		self.a_pool(self.an_activity()["name"], amount=10000)
-		self.a_pool(
-			self.an_activity(activity_name="Hand thinning", cost_driver="Hours")["name"], amount=8000
-		)
+		self.a_pool(self.an_activity(activity_name="Hand thinning", cost_driver="Hours")["name"], amount=8000)
 		data = self.allocate()
 		self.assertEqual(data["total_pool_amount"], 18000)
 		self.assertEqual(data["total_assigned"] + data["unassigned_amount"], 18000)
@@ -682,7 +688,9 @@ class TheRunIsStoredWhole(ABCTestCase):
 		self.assertEqual(self.allocate()["total_pool_amount"], 10000)
 
 	def test_an_unallocated_activity_is_kept_on_the_run_rather_than_only_in_prose(self):
-		activity = self.an_activity(activity_name="Hand thinning", cost_driver="Hours", phase="Harvest")["name"]
+		activity = self.an_activity(activity_name="Hand thinning", cost_driver="Hours", phase="Harvest")[
+			"name"
+		]
 		self.a_pool(activity, amount=8000)
 		self.allocate()
 		data = self.tool_data("get_abc_assignment", {"company": MAIN, "fiscal_year": YEAR})
@@ -732,7 +740,9 @@ class TheReportSaysWhatItDividedBy(ABCTestCase):
 
 	def test_grouped_by_activity_the_denominator_is_the_whole_operation(self):
 		self.a_run()
-		data = self.tool_data("get_abc_report", {"company": MAIN, "fiscal_year": YEAR, "group_by": "activity"})
+		data = self.tool_data(
+			"get_abc_report", {"company": MAIN, "fiscal_year": YEAR, "group_by": "activity"}
+		)
 		spray = next(row for row in data["groups"] if row["label"] == "Dormant spray")
 		self.assertEqual(spray["acres"], 100.0)
 		self.assertIn("whole operation", spray["acres_basis"])
@@ -762,9 +772,7 @@ class TheReportSaysWhatItDividedBy(ABCTestCase):
 
 	def test_the_report_says_how_much_reached_no_block_at_all(self):
 		self.a_pool(self.an_activity()["name"], amount=10000)
-		self.a_pool(
-			self.an_activity(activity_name="Hand thinning", cost_driver="Hours")["name"], amount=5000
-		)
+		self.a_pool(self.an_activity(activity_name="Hand thinning", cost_driver="Hours")["name"], amount=5000)
 		self.allocate()
 		data = self.tool_data("get_abc_report", {"company": MAIN, "fiscal_year": YEAR})
 		self.assertEqual(data["unassigned_amount"], 5000)
@@ -827,9 +835,7 @@ class TheWaterfallIsTheShape(ABCTestCase):
 
 	def test_a_unit_count_of_zero_is_refused_rather_than_dividing(self):
 		self.a_pipeline()
-		message = self.tool_error(
-			"get_phase_waterfall", {"company": MAIN, "fiscal_year": YEAR, "units": 0}
-		)
+		message = self.tool_error("get_phase_waterfall", {"company": MAIN, "fiscal_year": YEAR, "units": 0})
 		self.assertIn("greater than zero", message)
 
 	def test_a_phase_nothing_is_mapped_to_is_reported_at_zero_with_a_note(self):
@@ -843,7 +849,9 @@ class TheWaterfallIsTheShape(ABCTestCase):
 		"""So a reader can see WHICH stage is under-measured, not only that
 		something is."""
 		self.a_pipeline()
-		thinning = self.an_activity(activity_name="Hand thinning", cost_driver="Hours", phase="Growing")["name"]
+		thinning = self.an_activity(activity_name="Hand thinning", cost_driver="Hours", phase="Growing")[
+			"name"
+		]
 		self.a_pool(thinning, amount=9000)
 		self.allocate()
 		data = self.tool_data("get_phase_waterfall", {"company": MAIN, "fiscal_year": YEAR})

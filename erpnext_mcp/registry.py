@@ -321,9 +321,7 @@ def _purchase_invoice_from_receipt_ready():
 
 #: v0.70.0. What the sales pipeline needs: ERPNext, because Sales Invoice,
 #: Payment Entry and Customer all come from it and from nowhere else.
-_SALES_REQUIRES = (
-	"the ERPNext app, which is where Sales Invoice, Payment Entry and Customer come from"
-)
+_SALES_REQUIRES = "the ERPNext app, which is where Sales Invoice, Payment Entry and Customer come from"
 
 #: What turning a settlement into an invoice needs: BOTH registers. A site with
 #: settlements and no ERPNext has nothing to invoice into; a site with ERPNext
@@ -405,8 +403,7 @@ _BIO_REQUIRES = (
 	"installing v0.80.0"
 )
 _STANDARD_REQUIRES = (
-	"the Standard Cost doctype, which ships with erpnext_mcp — run `bench migrate` after "
-	"installing v0.80.0"
+	"the Standard Cost doctype, which ships with erpnext_mcp — run `bench migrate` after installing v0.80.0"
 )
 #: v0.87.0. The breakeven calculator's own register. Named separately from the
 #: costing ones above for the reason the comment there gives: a site that
@@ -430,8 +427,7 @@ _ACH_REQUIRES = (
 #: engine needs all three. A site that migrated one and not the next should lose
 #: the tools for what is missing rather than the whole domain.
 _ACTIVITY_REQUIRES = (
-	"the Cost Activity doctype, which ships with erpnext_mcp — run `bench migrate` after "
-	"installing v0.84.0"
+	"the Cost Activity doctype, which ships with erpnext_mcp — run `bench migrate` after installing v0.84.0"
 )
 _POOL_REQUIRES = (
 	"the Activity Cost Pool doctype, which ships with erpnext_mcp — run `bench migrate` after "
@@ -504,9 +500,7 @@ _TAX_FORM_PDF_REQUIRES = (
 #: over a different doctype: `pay_stub_pdf` borrows `form_pdf_renderer`'s sheet,
 #: so a bench without reportlab loses this tool by name and keeps every payroll
 #: figure readable through `get_payroll_entry` and `get_payroll_register`.
-_GARNISHMENT_REQUIRES = (
-	"the Farm Garnishment DocType, which ships with erpnext_mcp — run `bench migrate`"
-)
+_GARNISHMENT_REQUIRES = "the Farm Garnishment DocType, which ships with erpnext_mcp — run `bench migrate`"
 
 _GARNISHMENT_PDF_REQUIRES = (
 	"the Farm Garnishment DocType (run `bench migrate`) and the reportlab Python package, "
@@ -3009,8 +3003,7 @@ TOOLS = {
 	),
 	"get_purchase_order": _tool(
 		purchasing.get_purchase_order,
-		"One Purchase Order in full, including its line items with received_qty "
-		"and billed_amt. Read-only.",
+		"One Purchase Order in full, including its line items with received_qty and billed_amt. Read-only.",
 		{"name": _field(_STRING, "Purchase Order docname.")},
 		required=("name",),
 		title="Get purchase order",
@@ -3329,8 +3322,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"settlement_statement": _field(
 				_STRING,
-				"A SUBMITTED Settlement Statement to fill the invoice from. Mutually "
-				"exclusive with items.",
+				"A SUBMITTED Settlement Statement to fill the invoice from. Mutually exclusive with items.",
 			),
 			"posting_date": _field(_STRING, "YYYY-MM-DD. Defaults to today, or to the settlement's date."),
 			"due_date": _field(
@@ -3607,9 +3599,7 @@ TOOLS = {
 			"customer": _field(_STRING, "The packer — docname or customer_name."),
 			"from_date": _field(_STRING, "Earliest statement date, YYYY-MM-DD."),
 			"to_date": _field(_STRING, "Latest statement date, YYYY-MM-DD."),
-			"group_by": _field(
-				_STRING, "variety (default), grade, customer, field or month."
-			),
+			"group_by": _field(_STRING, "variety (default), grade, customer, field or month."),
 		},
 		title="Get packout summary",
 		available=_receipts_ready("Settlement Statement"),
@@ -4135,7 +4125,9 @@ TOOLS = {
 		"company passed here is validated and reported as not stored.",
 		{
 			"supplier_name": _field(_STRING, "The name, which becomes the docname."),
-			"supplier_group": _field(_STRING, "An existing Supplier Group. Defaults to 'All Supplier Groups'."),
+			"supplier_group": _field(
+				_STRING, "An existing Supplier Group. Defaults to 'All Supplier Groups'."
+			),
 			"supplier_type": _field(_STRING, "Company or Individual."),
 			"company": _COMPANY,
 			"country": _field(_STRING, "Country docname."),
@@ -4189,9 +4181,7 @@ TOOLS = {
 		{
 			"customer_group": _field(_STRING, "Customer Group docname. Refused if unknown."),
 			"territory": _field(_STRING, "Territory docname. Refused if unknown."),
-			"sales_channel": _field(
-				_STRING, "Direct, Wholesale, Packer or Processor. Omit for all."
-			),
+			"sales_channel": _field(_STRING, "Direct, Wholesale, Packer or Processor. Omit for all."),
 			"disabled": _field(_BOOLEAN, "true for disabled customers only."),
 			"company": _COMPANY,
 			"search": _field(_STRING, "Substring of customer_name, case-insensitive."),
@@ -4227,7 +4217,9 @@ TOOLS = {
 		"company passed here is validated and reported as not stored.",
 		{
 			"customer_name": _field(_STRING, "The name, which becomes the docname."),
-			"customer_group": _field(_STRING, "An existing Customer Group. Defaults to 'All Customer Groups'."),
+			"customer_group": _field(
+				_STRING, "An existing Customer Group. Defaults to 'All Customer Groups'."
+			),
 			"customer_type": _field(_STRING, "Company or Individual."),
 			"territory": _field(_STRING, "An existing Territory. Defaults to 'All Territories'."),
 			"company": _COMPANY,
@@ -4275,8 +4267,7 @@ TOOLS = {
 			"default_price_list": _field(_STRING, "Selling Price List to default their rates from."),
 			"sales_channel": _field(
 				_STRING,
-				"Direct, Wholesale, Packer or Processor. Empty string clears it back to "
-				"unclassified.",
+				"Direct, Wholesale, Packer or Processor. Empty string clears it back to unclassified.",
 			),
 		},
 		required=("name",),
@@ -4322,8 +4313,7 @@ TOOLS = {
 			"warehouse_type": _field(_STRING, "Warehouse Type docname, where the site has the field."),
 			"is_group": _field(
 				_BOOLEAN,
-				"true to create a branch that holds other warehouses and no stock. "
-				"Defaults to false.",
+				"true to create a branch that holds other warehouses and no stock. Defaults to false.",
 			),
 			"city": _field(_STRING, "City, for the warehouse address block."),
 		},
@@ -6672,9 +6662,7 @@ TOOLS = {
 				"nobody has answered for — blank means unasked, which is a different fact "
 				"from Conventional and is reported separately.",
 			),
-			"organic_cert_agency": _field(
-				_STRING, "Who certified it: Oregon Tilth, CCOF, WSDA. Free text."
-			),
+			"organic_cert_agency": _field(_STRING, "Who certified it: Oregon Tilth, CCOF, WSDA. Free text."),
 			"transition_start_date": _field(
 				_STRING,
 				"When the transition began, YYYY-MM-DD. The National Organic Program counts "
@@ -6730,8 +6718,7 @@ TOOLS = {
 			"worker_hygiene_station_present": _field(_BOOLEAN, "New hygiene station flag."),
 			"organic_status": _field(
 				_STRING,
-				"Conventional, Transitional or Certified Organic. Empty string clears it "
-				"back to unanswered.",
+				"Conventional, Transitional or Certified Organic. Empty string clears it back to unanswered.",
 			),
 			"organic_cert_agency": _field(_STRING, "New certifying agency. Empty string clears it."),
 			"transition_start_date": _field(_STRING, "New transition start date, YYYY-MM-DD."),
@@ -11080,9 +11067,7 @@ TOOLS = {
 		"apart.",
 		{
 			"limit": _LIMIT,
-			"in_use_only": _field(
-				_BOOLEAN, "Only titles at least one Active Employee holds. Default false."
-			),
+			"in_use_only": _field(_BOOLEAN, "Only titles at least one Active Employee holds. Default false."),
 		},
 		title="List job titles",
 		available=_needs_doctype("Designation"),
@@ -11193,9 +11178,7 @@ TOOLS = {
 			"parent_department": _field(
 				_STRING, "Move it under a different Department. It cannot be its own parent."
 			),
-			"is_group": _field(
-				_BOOLEAN, "Make it a holder of other departments, or stop it being one."
-			),
+			"is_group": _field(_BOOLEAN, "Make it a holder of other departments, or stop it being one."),
 			"disabled": _field(
 				_BOOLEAN,
 				"Retire it without deleting it. Existing Employees keep pointing at it.",
@@ -11371,9 +11354,7 @@ TOOLS = {
 		"it back here any more than it writes it.",
 		{
 			"limit": _LIMIT,
-			"in_use_only": _field(
-				_BOOLEAN, "Only bands at least one Active Employee is on. Default false."
-			),
+			"in_use_only": _field(_BOOLEAN, "Only bands at least one Active Employee is on. Default false."),
 		},
 		title="List pay bands",
 		available=_needs_doctype("Employee Grade"),
@@ -12247,7 +12228,8 @@ TOOLS = {
 				"bytes, not off a filename.",
 			),
 			"file_token": _field(
-				_STRING, "A File already on the site, as finalize_staged_file returns it. Not with signature_base64."
+				_STRING,
+				"A File already on the site, as finalize_staged_file returns it. Not with signature_base64.",
 			),
 			"row": _field(
 				_STRING,
@@ -12262,17 +12244,13 @@ TOOLS = {
 			),
 			"overwrite": _field(
 				_BOOLEAN,
-				"Replace a signature filed in error. The File that was there stays attached to "
-				"the record.",
+				"Replace a signature filed in error. The File that was there stays attached to the record.",
 			),
 		},
 		mutating=True,
 		title="Collect a missing signature",
 		available=_needs_doctype("I-9 Form", "W-4 Form", "Tax Form"),
-		requires=(
-			"the I-9 Form, W-4 Form or Tax Form doctype (run bench migrate after installing "
-			"v0.56.0)"
-		),
+		requires=("the I-9 Form, W-4 Form or Tax Form doctype (run bench migrate after installing v0.56.0)"),
 	),
 	# ── v0.60.0: the evidence packet behind each signature ────────────────
 	"list_signing_evidence": _tool(
@@ -12449,9 +12427,7 @@ TOOLS = {
 				"List signers whose active flag is off. Default true — they are the answer "
 				"to who signed a form filed before they were removed.",
 			),
-			"form_type": _field(
-				_STRING, "Only signers authorized for 'I-9' or for 'W-4'. Omit for both."
-			),
+			"form_type": _field(_STRING, "Only signers authorized for 'I-9' or for 'W-4'. Omit for both."),
 		},
 		available=_needs_doctype("I-9 Settings"),
 		requires="the I-9 Settings doctype (run bench migrate after installing v0.48.0)",
@@ -12714,8 +12690,7 @@ TOOLS = {
 			"employee_name": _field(_STRING, "Alias for employee."),
 			"tax_year": _field(
 				_INTEGER,
-				"Which year's active W-4 to render, when resolving by employee. Defaults to "
-				"the most recent.",
+				"Which year's active W-4 to render, when resolving by employee. Defaults to the most recent.",
 			),
 			"overwrite": _field(
 				_BOOLEAN,
@@ -13567,9 +13542,7 @@ TOOLS = {
 		{
 			"name": _field(_STRING, "Piecework Rate docname, e.g. 'PWR-2026-0001'."),
 			"piecework_rate": _field(_STRING, "Alias for name."),
-			"on_date": _field(
-				_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."
-			),
+			"on_date": _field(_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."),
 		},
 		required=("name",),
 		available=_needs_doctype("Piecework Rate"),
@@ -13589,9 +13562,7 @@ TOOLS = {
 			"company": _COMPANY,
 			"designation": _field(_STRING, "One job title, e.g. 'Picker'. Exact Designation docname."),
 			"is_active": _field(_BOOLEAN, "Only active rows, or only retired ones. Omit for both."),
-			"on_date": _field(
-				_STRING, "The date `in_force` is computed for, YYYY-MM-DD. Defaults to today."
-			),
+			"on_date": _field(_STRING, "The date `in_force` is computed for, YYYY-MM-DD. Defaults to today."),
 			"limit": _LIMIT,
 		},
 		available=_needs_doctype("Position Wage Default"),
@@ -13608,9 +13579,7 @@ TOOLS = {
 		{
 			"name": _field(_STRING, "Position Wage Default docname, e.g. 'PWD-2026-0001'."),
 			"position_wage_default": _field(_STRING, "Alias for name."),
-			"on_date": _field(
-				_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."
-			),
+			"on_date": _field(_STRING, "The date to test the row against, YYYY-MM-DD. Defaults to today."),
 		},
 		required=("name",),
 		available=_needs_doctype("Position Wage Default"),
@@ -13639,9 +13608,7 @@ TOOLS = {
 				"uses, e.g. 'bucket_segmentation'. Stored as typed and matched case-insensitively.",
 			),
 			"rate_per_unit": _field(_NUMBER, "REQUIRED. What one bucket, bin or tree pays."),
-			"effective_from": _field(
-				_STRING, "First day this rate pays, YYYY-MM-DD. Defaults to today."
-			),
+			"effective_from": _field(_STRING, "First day this rate pays, YYYY-MM-DD. Defaults to today."),
 			"effective_to": _field(
 				_STRING, "Last day it pays, YYYY-MM-DD. Omit for the rate in force from now on."
 			),
@@ -14011,8 +13978,7 @@ TOOLS = {
 			),
 			"category": _field(
 				_STRING,
-				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, "
-				"Owner Draw or Other.",
+				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, Owner Draw or Other.",
 			),
 			"notes": _field(_STRING, "Free text, or '' to clear it."),
 		},
@@ -14064,8 +14030,7 @@ TOOLS = {
 			"status": _field(_STRING, "Draft, Submitted, Approved or Rejected."),
 			"category": _field(
 				_STRING,
-				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, "
-				"Owner Draw or Other.",
+				"Fuel, Equipment Parts, Supplies, Hardware, Feed, Seed, Fertilizer, Owner Draw or Other.",
 			),
 			"csv": _field(_BOOLEAN, "Also return a `csv` string of the same rows. Defaults to false."),
 			"limit": _LIMIT,
@@ -14381,8 +14346,12 @@ TOOLS = {
 			"merchant": _field(_STRING, "The vendor string off a receipt, exactly as captured."),
 			"merchant_url": _field(_STRING, "v0.75.0. A domain off the receipt, with or without a scheme."),
 			"merchant_phone": _field(_STRING, "v0.75.0. A phone number off the receipt, in any format."),
-			"store_number": _field(_STRING, "v0.75.0. The store or location number, if the slip printed one."),
-			"card_last_four": _field(_STRING, "v0.75.0. The last four digits of the card. Never a full number."),
+			"store_number": _field(
+				_STRING, "v0.75.0. The store or location number, if the slip printed one."
+			),
+			"card_last_four": _field(
+				_STRING, "v0.75.0. The last four digits of the card. Never a full number."
+			),
 			"ocr_raw_text": _field(
 				_STRING,
 				"v0.75.0. The whole raw OCR text. THE MOST USEFUL SINGLE "
@@ -14450,13 +14419,19 @@ TOOLS = {
 			"receipt": _field(_STRING, "The Expense Receipt docname."),
 			"expense_receipt": _field(_STRING, "Alias for receipt."),
 			"supplier": _field(_STRING, "Name the Supplier explicitly instead of matching or creating one."),
-			"expense_account": _field(_STRING, "Name the expense account explicitly instead of matching one."),
+			"expense_account": _field(
+				_STRING, "Name the expense account explicitly instead of matching one."
+			),
 			"cost_center": _field(_STRING, "Defaults to the receipt's own cost_center, if it has one."),
 			"posting_date": _field(_STRING, "Defaults to the receipt's receipt_date. YYYY-MM-DD."),
 			"due_date": _field(_STRING, "YYYY-MM-DD. Optional."),
 			"bill_no": _field(_STRING, "The vendor's own invoice/bill number, if there is one."),
-			"credit_to": _field(_STRING, "Name the payable account explicitly instead of the company default."),
-			"item": _field(_STRING, "Bill against this Item instead of the shared per-category service item."),
+			"credit_to": _field(
+				_STRING, "Name the payable account explicitly instead of the company default."
+			),
+			"item": _field(
+				_STRING, "Bill against this Item instead of the shared per-category service item."
+			),
 		},
 		required=("receipt",),
 		mutating=True,
@@ -14938,7 +14913,8 @@ TOOLS = {
 				"every training record the session produces.",
 			),
 			"duration_minutes": _field(
-				_INTEGER, "Defaults to the curriculum's own duration. Override it for a session that ran short."
+				_INTEGER,
+				"Defaults to the curriculum's own duration. Override it for a session that ran short.",
 			),
 			"delivery_method": _field(
 				_STRING,
@@ -14961,9 +14937,7 @@ TOOLS = {
 				"record it produces. EMPTY MEANS ONE-TIME and the compliance calendar will never "
 				"ask for a renewal — wrong for WPS, Oregon heat illness and annual GAP hygiene.",
 			),
-			"training_source": _field(
-				_STRING, "Internal (default), External, Contractor or Online-Course."
-			),
+			"training_source": _field(_STRING, "Internal (default), External, Contractor or Online-Course."),
 			"status": _field(
 				_STRING,
 				"Scheduled (default) or In Progress. Completed is refused here: completion is what "
@@ -15039,9 +15013,7 @@ TOOLS = {
 				"Default true. Untick for somebody rostered who did not come — their row is kept, "
 				"because deleting it would lose the fact that they were expected.",
 			),
-			"notes": _field(
-				_STRING, "Arrived late, translated for, took the Spanish version, left early."
-			),
+			"notes": _field(_STRING, "Arrived late, translated for, took the Spanish version, left early."),
 		},
 		required=("session",),
 		mutating=True,
@@ -15732,23 +15704,17 @@ TOOLS = {
 			},
 			"meal_schedule": {
 				"type": "array",
-				"description": (
-					"Adult meal period bands. Same shape as rest_schedule."
-				),
+				"description": ("Adult meal period bands. Same shape as rest_schedule."),
 				"items": {"type": "object"},
 			},
 			"minor_rest_schedule": {
 				"type": "array",
-				"description": (
-					"Rest periods for workers under 18. Same shape as rest_schedule."
-				),
+				"description": ("Rest periods for workers under 18. Same shape as rest_schedule."),
 				"items": {"type": "object"},
 			},
 			"minor_meal_schedule": {
 				"type": "array",
-				"description": (
-					"Meal periods for workers under 18. Same shape as rest_schedule."
-				),
+				"description": ("Meal periods for workers under 18. Same shape as rest_schedule."),
 				"items": {"type": "object"},
 			},
 			"heat_schedule": {
@@ -17743,13 +17709,21 @@ TOOLS = {
 		"To go the other way — from a block, a spray or a water test to the lots "
 		"that carry it and the customers holding them — use trace_forward.",
 		{
-			"shipment": _field(_STRING, "A shipment id as written on the captures, or a Trade Shipment docname."),
+			"shipment": _field(
+				_STRING, "A shipment id as written on the captures, or a Trade Shipment docname."
+			),
 			"bin": _field(_STRING, "A bin id as written on the captures."),
 			"scale_ticket": _field(_STRING, "A Scale Ticket docname. Widens to its origin block on its day."),
-			"settlement": _field(_STRING, "A Settlement Statement docname. Reaches the ground through its tickets."),
-			"bucket_entry": _field(_STRING, "One Bucket Log Entry. Widens to everything sharing its block, bin and shipment."),
+			"settlement": _field(
+				_STRING, "A Settlement Statement docname. Reaches the ground through its tickets."
+			),
+			"bucket_entry": _field(
+				_STRING, "One Bucket Log Entry. Widens to everything sharing its block, bin and shipment."
+			),
 			"company": _COMPANY,
-			"date_from": _field(_STRING, "Narrow the captures, YYYY-MM-DD. Defaults to what the anchor implies."),
+			"date_from": _field(
+				_STRING, "Narrow the captures, YYYY-MM-DD. Defaults to what the anchor implies."
+			),
 			"date_to": _field(_STRING, "YYYY-MM-DD."),
 			"limit": _LIMIT,
 		},
@@ -17778,9 +17752,16 @@ TOOLS = {
 		"To go the other way — from a shipment or a bin back to the blocks and "
 		"the sprays that reached them — use trace_backward.",
 		{
-			"block": _field(_STRING, "A Field docname, or a block id as written on the captures. Unbounded unless date_from is given."),
-			"spray_application": _field(_STRING, "A Spray Application docname. Bounds the trace at the pass."),
-			"water_test": _field(_STRING, "A Water Test docname. Bounds the trace at the sample, through its zone's Field."),
+			"block": _field(
+				_STRING,
+				"A Field docname, or a block id as written on the captures. Unbounded unless date_from is given.",
+			),
+			"spray_application": _field(
+				_STRING, "A Spray Application docname. Bounds the trace at the pass."
+			),
+			"water_test": _field(
+				_STRING, "A Water Test docname. Bounds the trace at the sample, through its zone's Field."
+			),
 			"company": _COMPANY,
 			"date_from": _field(_STRING, "Override the bound the anchor implies, YYYY-MM-DD."),
 			"date_to": _field(_STRING, "YYYY-MM-DD."),
@@ -17903,7 +17884,9 @@ TOOLS = {
 			"regenerate": _field(
 				_BOOLEAN, "Default false. True mints a new ID for everybody named and retires the old."
 			),
-			"template": _field(_STRING, "Label template the caller will lay these out on. Default badge_card_2x3."),
+			"template": _field(
+				_STRING, "Label template the caller will lay these out on. Default badge_card_2x3."
+			),
 			"notes": _field(_STRING, "Kept on every register row this call writes."),
 		},
 		required=("employees",),
@@ -18154,19 +18137,36 @@ TOOLS = {
 				"all three shapes land on one row. Duplicates are MERGED rather than "
 				"refused: somebody who came back with a second bucket is one row.",
 			),
-			"shift": _field(_STRING, "The Farm Shift the picking happened on. It is what joins a bin to the crew, the weather timeline and the break log."),
-			"field": _field(_STRING, "The Field docname. A Link because a residue trace runs bin → block → spray application."),
-			"block": _field(_STRING, "The block as the CREW calls it, where that is not a Field on the register."),
+			"shift": _field(
+				_STRING,
+				"The Farm Shift the picking happened on. It is what joins a bin to the crew, the weather timeline and the break log.",
+			),
+			"field": _field(
+				_STRING,
+				"The Field docname. A Link because a residue trace runs bin → block → spray application.",
+			),
+			"block": _field(
+				_STRING, "The block as the CREW calls it, where that is not a Field on the register."
+			),
 			"crop": _field(_STRING, "What is in it, as the checker said."),
-			"bucket_session": _field(_STRING, "Bucket Log Session docname or session_uuid, where the phone was running one."),
+			"bucket_session": _field(
+				_STRING, "Bucket Log Session docname or session_uuid, where the phone was running one."
+			),
 			"gps_lat": _field(_NUMBER, "Decimal degrees, -90 to 90. Where the bin stood when it was closed."),
 			"gps_lon": _field(_NUMBER, "Decimal degrees, -180 to 180. Negative in the western hemisphere."),
 			"gps_accuracy_meters": _field(_NUMBER, "What the phone reported. Kept, never used as a gate."),
-			"h3_hex": _field(_STRING, "Optional. Derived from the coordinates where this site has h3; pass one only to override."),
-			"sealed_at": _field(_STRING, "When the bin was closed, not when the call arrived. Defaults to now."),
+			"h3_hex": _field(
+				_STRING,
+				"Optional. Derived from the coordinates where this site has h3; pass one only to override.",
+			),
+			"sealed_at": _field(
+				_STRING, "When the bin was closed, not when the call arrived. Defaults to now."
+			),
 			"sealed_by": _field(_STRING, "The checker who closed it — an Employee docname or number."),
 			"company": _COMPANY,
-			"client_event_id": _field(_STRING, "The handset's identifier for this sealing action. What makes a retry safe."),
+			"client_event_id": _field(
+				_STRING, "The handset's identifier for this sealing action. What makes a retry safe."
+			),
 			"nostr_event_id": _field(_STRING, "The kind-4004 event id, where the handset published one."),
 			"source": _field(_STRING, "iOS, Manual or Import. Defaults to iOS."),
 			"notes": _field(_STRING, "Anything the checker wants on the record."),
@@ -18203,7 +18203,9 @@ TOOLS = {
 			"shift": _field(_STRING, "Every bin sealed on one Farm Shift."),
 			"field": _field(_STRING, "Every bin from one Field."),
 			"block": _field(_STRING, "Every bin whose block was recorded with this name."),
-			"bin_tag": _field(_STRING, "Every seal carrying one tag. trace_bin is the richer answer to the same question."),
+			"bin_tag": _field(
+				_STRING, "Every seal carrying one tag. trace_bin is the richer answer to the same question."
+			),
 			"bucket_session": _field(_STRING, "Every bin a session tipped into."),
 			"sealed_by": _field(_STRING, "Every bin one checker closed."),
 			"company": _COMPANY,
@@ -18254,7 +18256,9 @@ TOOLS = {
 		"rather than left for the caller to re-derive. Pass entry OR session. "
 		"Read-only.",
 		{
-			"entry": _field(_STRING, "Bucket Log Entry docname or entry_uuid. One of entry/session is required."),
+			"entry": _field(
+				_STRING, "Bucket Log Entry docname or entry_uuid. One of entry/session is required."
+			),
 			"session": _field(
 				_STRING,
 				"Bucket Log Session docname or session_uuid — every entry in it. One of "
@@ -19361,7 +19365,9 @@ TOOLS = {
 				"irrigation zone, a block. list_assets has the register.",
 			),
 			"from_date": _field(_STRING, "Start of the window, YYYY-MM-DD. Default 30 days before to_date."),
-			"to_date": _field(_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."),
+			"to_date": _field(
+				_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."
+			),
 			"irrigation_zone": _field(
 				_STRING,
 				"Optional. An Irrigation Zone docname whose flow_rate_gpm and area_acres "
@@ -19417,8 +19423,7 @@ TOOLS = {
 		{
 			"valve_id": _field(
 				_STRING,
-				"The tag ID that will be printed on the label and is the docname, e.g. "
-				"'MC-Valve-05'.",
+				"The tag ID that will be printed on the label and is the docname, e.g. 'MC-Valve-05'.",
 			),
 			"zone": _field(
 				_STRING,
@@ -19696,7 +19701,10 @@ TOOLS = {
 				_STRING,
 				"related (default), duplicate_of, merged_from, blocked_by or follows.",
 			),
-			"note": _field(_STRING, "Why these two belong together. A link nobody explained is one the next person undoes."),
+			"note": _field(
+				_STRING,
+				"Why these two belong together. A link nobody explained is one the next person undoes.",
+			),
 			"linked_by": _field(_STRING, "Who linked them. Defaults to the session user."),
 		},
 		required=("task", "linked_task"),
@@ -19881,12 +19889,18 @@ TOOLS = {
 			"evidence_files": _field(
 				{"type": "array", "items": {"type": ["string", "object"]}},
 				"Photographs of what this is about. File docnames from commit_staged_file, "
-				"file URLs, or objects like {\"file\": \"...\", \"evidence_type\": \"Photo\"}. "
+				'file URLs, or objects like {"file": "...", "evidence_type": "Photo"}. '
 				"Max 40. Attached to the record privately after it is created; anything that "
 				"could not be filed comes back in `warnings` rather than failing the record.",
 			),
 		},
-		required=("employee", "discipline_type", "incident_description", "expected_improvement", "followup_date"),
+		required=(
+			"employee",
+			"discipline_type",
+			"incident_description",
+			"expected_improvement",
+			"followup_date",
+		),
 		mutating=True,
 		title="Create an incident record",
 		available=_needs_doctype("Farm Incident Record"),
@@ -20303,7 +20317,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"customer": _field(_STRING, "Customer docname."),
 			"sales_order": _field(_STRING, "The order this fulfils."),
-			"sales_invoice": _field(_STRING, "The invoice raised against it — what a commercial invoice draws from."),
+			"sales_invoice": _field(
+				_STRING, "The invoice raised against it — what a commercial invoice draws from."
+			),
 			"ship_date": _field(_STRING, "When it is meant to leave, YYYY-MM-DD."),
 			"commodity": _field(_STRING, "What is on the truck, e.g. 'Fresh sweet cherries, Bing'."),
 			"total_packages": _field(_INTEGER, "Package count."),
@@ -20347,7 +20363,9 @@ TOOLS = {
 		"back to English listed in `untranslated`.",
 		{
 			"shipment": _field(_STRING, "Trade Shipment docname."),
-			"language": _field(_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."),
+			"language": _field(
+				_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."
+			),
 			"employee": _field(_STRING, "Whose language preference to read."),
 			"user": _field(_STRING, "Or the login, resolved to their Employee."),
 		},
@@ -20362,7 +20380,9 @@ TOOLS = {
 		"tier, destination country, company and ship-date range. Names every "
 		"shipment released with its checklist incomplete. Read-only.",
 		{
-			"status": _field(_STRING, "Draft, Documents Pending, Ready to Ship, In Transit, Delivered or Cancelled."),
+			"status": _field(
+				_STRING, "Draft, Documents Pending, Ready to Ship, In Transit, Delivered or Cancelled."
+			),
 			"customer": _field(_STRING, "Customer docname."),
 			"destination_tier": _field(_STRING, "Local, Domestic or International."),
 			"destination_country": _field(_STRING, "Destination country."),
@@ -20471,9 +20491,13 @@ TOOLS = {
 				"When it stops being good, YYYY-MM-DD. An expired document is reported as NOT "
 				"satisfied however approved it is.",
 			),
-			"external_reference": _field(_STRING, "The reference the external system issued, if already filed."),
+			"external_reference": _field(
+				_STRING, "The reference the external system issued, if already filed."
+			),
 			"required": _field(_BOOLEAN, "Override whether the shipment is held for it."),
-			"allow_off_tier": _field(_BOOLEAN, "Create it even though its template does not apply to this tier."),
+			"allow_off_tier": _field(
+				_BOOLEAN, "Create it even though its template does not apply to this tier."
+			),
 			"notes": _field(_STRING, "Notes."),
 		},
 		required=("shipment", "trade_document_template"),
@@ -20526,7 +20550,9 @@ TOOLS = {
 				"What PCIT, AES or the eBL platform issued. Until this is here, the document is "
 				"reported as outstanding however approved it looks.",
 			),
-			"external_filed_on": _field(_STRING, "When it was filed. Stamped automatically when a reference arrives."),
+			"external_filed_on": _field(
+				_STRING, "When it was filed. Stamped automatically when a reference arrives."
+			),
 			"external_system": _field(_STRING, "Override which system files it."),
 			"required": _field(_BOOLEAN, "Whether the shipment is held for it."),
 			"status": _field(_STRING, "Draft, Pending Review or Void. Not Approved or Sealed — see above."),
@@ -20558,7 +20584,9 @@ TOOLS = {
 			"approval_notes": _field(_STRING, "A condition, a caveat, the broker it was checked with."),
 			"signer_employee": _field(_STRING, "The Employee attesting, where one exists."),
 			"signer_name": _field(_STRING, "Their name, where there is no Employee record."),
-			"verification_method": _field(_STRING, "Badge QR, Employee ID or Photo, where identity was checked."),
+			"verification_method": _field(
+				_STRING, "Badge QR, Employee ID or Photo, where identity was checked."
+			),
 		},
 		required=("trade_document",),
 		mutating=True,
@@ -20596,11 +20624,15 @@ TOOLS = {
 		"Read-only.",
 		{
 			"shipment": _field(_STRING, "Trade Shipment docname."),
-			"document_type": _field(_STRING, "Commercial Invoice, Bill of Lading, Phytosanitary Certificate (ePhyto) …"),
+			"document_type": _field(
+				_STRING, "Commercial Invoice, Bill of Lading, Phytosanitary Certificate (ePhyto) …"
+			),
 			"trade_document_template": _field(_STRING, "Template docname."),
 			"status": _field(_STRING, "Draft, Pending Review, Approved, Sealed or Void."),
 			"company": _COMPANY,
-			"outstanding_only": _field(_BOOLEAN, "Only documents that are neither approved, sealed nor void."),
+			"outstanding_only": _field(
+				_BOOLEAN, "Only documents that are neither approved, sealed nor void."
+			),
 			"limit": _LIMIT,
 		},
 		title="List trade documents",
@@ -20654,7 +20686,9 @@ TOOLS = {
 			"template_name": _field(_STRING, "The docname. Short and stable — 'Commercial Invoice'."),
 			"document_type": _field(_STRING, "The closed-list type this template is of."),
 			"label_en": _field(_STRING, "What the sales desk sees."),
-			"label_es": _field(_STRING, "The Spanish label. A gap is reported, never silently served in English."),
+			"label_es": _field(
+				_STRING, "The Spanish label. A gap is reported, never silently served in English."
+			),
 			"description_en": _field(_STRING, "What this document is for and who reads it."),
 			"description_es": _field(_STRING, "The same in Spanish."),
 			"applicable_tiers": _field(
@@ -20666,19 +20700,25 @@ TOOLS = {
 				'"label_en": "Certificate Number", "type": "text", "required": true}]. Plain '
 				"strings are accepted where a field needs no explaining.",
 			),
-			"auto_populate_from": _field(_STRING, "The DocType a new document draws its opening values from."),
-			"auto_populate_map": _field(
-				_OBJECT, 'How the source maps in: {"invoice_total": "grand_total"}.'
+			"auto_populate_from": _field(
+				_STRING, "The DocType a new document draws its opening values from."
 			),
-			"requires_signature": _field(_BOOLEAN, "Whether approving it writes a Signing Evidence attestation."),
-			"signature_role": _field(_STRING, "The capacity it is signed in — Officer, Inspector, Employer Representative …"),
+			"auto_populate_map": _field(_OBJECT, 'How the source maps in: {"invoice_total": "grand_total"}.'),
+			"requires_signature": _field(
+				_BOOLEAN, "Whether approving it writes a Signing Evidence attestation."
+			),
+			"signature_role": _field(
+				_STRING, "The capacity it is signed in — Officer, Inspector, Employer Representative …"
+			),
 			"requires_external_filing": _field(
 				_BOOLEAN, "Whether somebody else's system has to file it. Needs external_system set."
 			),
 			"external_system": _field(_STRING, "PCIT, AES, ACE, DCSA, IPPC ePhyto Hub …"),
 			"standard_reference": _field(_STRING, "'IPPC ISPM-12', 'DCSA eBL 3.0', 'AES/EEI 15 CFR 30' …"),
 			"sequence": _field(_INTEGER, "Display order in a checklist. Lower first."),
-			"enabled": _field(_BOOLEAN, "A disabled template is not offered and is required of no new shipment."),
+			"enabled": _field(
+				_BOOLEAN, "A disabled template is not offered and is required of no new shipment."
+			),
 			"update_existing": _field(_BOOLEAN, "Amend a template that already exists instead of refusing."),
 			"notes": _field(_STRING, "Lead times, who issues it, what holds it up."),
 		},
@@ -20694,7 +20734,9 @@ TOOLS = {
 		"declared fields, whose system files them and which standard their field "
 		"names follow. Labels resolve into the caller's language. Read-only.",
 		{
-			"destination_tier": _field(_STRING, "Only templates that apply to Local, Domestic or International."),
+			"destination_tier": _field(
+				_STRING, "Only templates that apply to Local, Domestic or International."
+			),
 			"document_type": _field(_STRING, "Only one type."),
 			"include_disabled": _field(_BOOLEAN, "Include withdrawn templates."),
 			"language": _field(_STRING, "ISO code."),
@@ -20761,7 +20803,7 @@ TOOLS = {
 			),
 			"requirements": _field(
 				{"type": "array", "items": {"type": "object"}},
-				'The documents this destination asks for: a list of template names, or of '
+				"The documents this destination asks for: a list of template names, or of "
 				'objects like {"trade_document_template": "Phytosanitary Certificate (ePhyto)", '
 				'"required": true, "sequence": 60, "notes": "Allow three working days"}.',
 			),
@@ -20817,7 +20859,9 @@ TOOLS = {
 				"where the water went; the rest are when.",
 			),
 			"from_date": _field(_STRING, "Start of the window, YYYY-MM-DD. Default 30 days before to_date."),
-			"to_date": _field(_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."),
+			"to_date": _field(
+				_STRING, "End of the window, YYYY-MM-DD, inclusive of the whole day. Default today."
+			),
 			"field": _field(
 				_STRING,
 				"Optional Field docname. Narrows to the valves whose zone waters that block — "
@@ -21113,7 +21157,9 @@ TOOLS = {
 		"scheduler is wedged still answers correctly at a gate.",
 		{
 			"block": _field(_STRING, "The block — a Field docname, or an Asset Register block tag."),
-			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'. Only needed where a name is in both."),
+			"block_doctype": _field(
+				_STRING, "'Field' or 'Asset Register'. Only needed where a name is in both."
+			),
 			"company": _field(_STRING, "Company. Inferred on a single-company site."),
 			"timezone": _field(
 				_STRING,
@@ -21259,9 +21305,7 @@ TOOLS = {
 			"scanned_by": _field(_STRING, "The User who scanned. Recorded on the asset branch only."),
 			"gps_lat": _field(_NUMBER, "Latitude from the scanner's GPS fix. Asset branch only."),
 			"gps_lon": _field(_NUMBER, "Longitude from the scanner's GPS fix. Asset branch only."),
-			"history_limit": _field(
-				_INTEGER, "Timeline entries returned. Default 10, hard maximum 100."
-			),
+			"history_limit": _field(_INTEGER, "Timeline entries returned. Default 10, hard maximum 100."),
 		},
 		required=("content",),
 		mutating=True,
@@ -21323,7 +21367,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."),
+			"quarter": _field(
+				_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."
+			),
 		},
 		required=("fiscal_year",),
 		available=_needs_doctype("Farm Payroll Entry"),
@@ -21350,7 +21396,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — a 941 is quarterly."),
+			"quarter": _field(
+				_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — a 941 is quarterly."
+			),
 			"deposits": _field(_NUMBER, "Line 13 — total federal deposits made for the quarter."),
 			"ytd_wages_by_employee": _field(
 				_OBJECT,
@@ -21387,7 +21435,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — both reports are quarterly."),
+			"quarter": _field(
+				_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Required — both reports are quarterly."
+			),
 			"state": _field(_STRING, "OR or WA. Omit for both."),
 			"ui_rate": _field(_NUMBER, "The state's assigned unemployment-insurance rate, as a percent."),
 			"or_ui_wage_base": _field(_NUMBER, "Oregon's UI taxable wage base for the year."),
@@ -21432,7 +21482,9 @@ TOOLS = {
 			"company": _COMPANY,
 			"fiscal_year": _field(_STRING, "The calendar year as YYYY. `year` is an alias. Required."),
 			"year": _field(_STRING, "Alias for fiscal_year."),
-			"quarter": _field(_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."),
+			"quarter": _field(
+				_QUARTER, "Q1, Q2, Q3 or Q4, or the number 1 to 4. Omit for the whole calendar year."
+			),
 			"lookback_total": _field(
 				_NUMBER,
 				"Total employment tax reported on the four returns in the lookback period. "
@@ -21481,9 +21533,13 @@ TOOLS = {
 			"deposits": _field(_NUMBER, "Line 13 — FUTA already deposited for the year."),
 			"exempt_payments": _field(_NUMBER, "Line 4 — payments exempt from FUTA."),
 			"credit_reduction": _field(_NUMBER, "Line 11, for a credit-reduction state."),
-			"futa_rate": _field(_NUMBER, "The gross FUTA rate as a percent. Defaults to the FICA Configuration, then 6.0."),
+			"futa_rate": _field(
+				_NUMBER, "The gross FUTA rate as a percent. Defaults to the FICA Configuration, then 6.0."
+			),
 			"futa_wage_base": _field(_NUMBER, "The per-employee annual base. Defaults to 7000."),
-			"futa_state_credit_max": _field(_NUMBER, "The largest state credit as a percent. Defaults to 5.4."),
+			"futa_state_credit_max": _field(
+				_NUMBER, "The largest state credit as a percent. Defaults to 5.4."
+			),
 			"ytd_wages_by_employee": _field(
 				_OBJECT,
 				"Wages already paid this year before the first slip in hand, per employee. "
@@ -21850,7 +21906,9 @@ TOOLS = {
 			"source_doctype": _field(_STRING, "Only validations filed against this register."),
 			"source_name": _field(_STRING, "Only validations filed against this record."),
 			"status": _field(_STRING, "Pending, Validated, Flagged or Rejected."),
-			"human_confirmed": _field(_BOOLEAN, "Only those a person has confirmed, or only those nobody has."),
+			"human_confirmed": _field(
+				_BOOLEAN, "Only those a person has confirmed, or only those nobody has."
+			),
 			"limit": _LIMIT,
 		},
 		title="List document validations",
@@ -22261,7 +22319,9 @@ TOOLS = {
 		"which no amount of per-transaction checking will find. Read-only.",
 		{
 			"bank_account": _field(_STRING, "The Bank Account docname, or a four-digit mask."),
-			"plaid_account_mask": _field(_STRING, "Find the account by its mask instead. Refused if ambiguous."),
+			"plaid_account_mask": _field(
+				_STRING, "Find the account by its mask instead. Refused if ambiguous."
+			),
 			"company": _field(_STRING, "Every account in one company, when no bank_account is named."),
 			"from_date": _field(_STRING, "Earliest period start, YYYY-MM-DD."),
 			"to_date": _field(_STRING, "Latest period start, YYYY-MM-DD."),
@@ -22314,7 +22374,9 @@ TOOLS = {
 			"bank_account": _field(_STRING, "With period_start and period_end, instead of a docname."),
 			"period_start": _field(_STRING, "YYYY-MM-DD."),
 			"period_end": _field(_STRING, "YYYY-MM-DD."),
-			"day_window": _field(_INTEGER, "Days a statement line and a transaction may differ by. Default 3."),
+			"day_window": _field(
+				_INTEGER, "Days a statement line and a transaction may differ by. Default 3."
+			),
 			"tolerance": _field(_NUMBER, "How close two amounts must be to be the same movement."),
 			"limit": _LIMIT,
 		},
@@ -22485,7 +22547,9 @@ TOOLS = {
 				"Replace each period's statement sum with the Bank Transactions on file. Default "
 				"false, and read the warning before setting it.",
 			),
-			"day_window": _field(_INTEGER, "Days a statement line and a transaction may differ by. Default 3."),
+			"day_window": _field(
+				_INTEGER, "Days a statement line and a transaction may differ by. Default 3."
+			),
 			"tolerance": _field(_NUMBER, "How close two amounts must be to be the same movement."),
 			"dry_run": _field(_BOOLEAN, "Do the whole computation and write nothing. Default false."),
 		},
@@ -22789,7 +22853,9 @@ TOOLS = {
 			"period_start": _field(_STRING, "First day of the period, INCLUSIVE. YYYY-MM-DD."),
 			"period_end": _field(_STRING, "Last day of the period, INCLUSIVE. YYYY-MM-DD."),
 			"period_type": _field(_STRING, "Month (default), Quarter or Year."),
-			"fiscal_year": _field(_STRING, "Which year this rolls into. Informational — the lock is decided by the dates."),
+			"fiscal_year": _field(
+				_STRING, "Which year this rolls into. Informational — the lock is decided by the dates."
+			),
 			"items": _field(
 				{"type": "array", "items": {"type": "object"}},
 				'The steps: [{"step": "Reconcile every bank account", "step_es": "Conciliar '
@@ -23043,7 +23109,7 @@ TOOLS = {
 			"receivable_account": _field(_STRING, "New value."),
 			"obligations": _field(
 				{"type": "array", "items": {"type": "object"}},
-				'The obligations in full, replacing the list. Mark one satisfied with '
+				"The obligations in full, replacing the list. Mark one satisfied with "
 				'{"obligation": "...", "satisfied": true, "satisfied_on": "2026-09-12", '
 				'"evidence": "SCALE-0031"} — the date says when somebody claims control '
 				"transferred and the evidence says how anybody else could check.",
@@ -23462,7 +23528,9 @@ TOOLS = {
 			"absorption": _field(_BOOLEAN, "Fold the overhead pools in. Default false."),
 			"direct_cost_centers": _field(_STRING_ARRAY, "Cost centers carrying direct field and pack cost."),
 			"direct_accounts": _field(_STRING_ARRAY, "Accounts carrying direct cost."),
-			"overhead_cost_centers": _field(_STRING_ARRAY, "Cost centers carrying indirect cost. Used only with absorption."),
+			"overhead_cost_centers": _field(
+				_STRING_ARRAY, "Cost centers carrying indirect cost. Used only with absorption."
+			),
 			"overhead_accounts": _field(_STRING_ARRAY, "Accounts carrying indirect cost."),
 			"quantity": _field(_NUMBER, "Bins packed, boxes shipped, acres — the denominator."),
 			"uom": _field(_STRING, "What that quantity counts. Label only."),
@@ -23498,8 +23566,7 @@ TOOLS = {
 			"undocumented_only": _field(_BOOLEAN, "Only the ones with no arm's-length case behind them."),
 			"include_arms_length_vendors": _field(
 				_BOOLEAN,
-				"Include plain Vendor relationships, which are not disclosable and are excluded "
-				"by default.",
+				"Include plain Vendor relationships, which are not disclosable and are excluded by default.",
 			),
 			"limit": _LIMIT,
 		},
@@ -23616,9 +23683,7 @@ TOOLS = {
 				"WHAT THE PRICE WAS TESTED AGAINST, specifically enough to look up: 'three quotes "
 				"from independent haulers, Yakima, March 2026'.",
 			),
-			"justification": _field(
-				_STRING, "Why this is the price an unrelated party would have paid."
-			),
+			"justification": _field(_STRING, "Why this is the price an unrelated party would have paid."),
 			"pricing_method": _field(
 				_STRING,
 				"Comparable Uncontrolled Price, Resale Price, Cost Plus, Comparable Profits / "
@@ -23631,7 +23696,8 @@ TOOLS = {
 			"prepared_by": _field(_STRING, "Who wrote it. Defaults to the calling user."),
 			"prepared_on": _field(_STRING, "When it was written. Default today."),
 			"reviewed_by": _field(
-				_STRING, "Who checked it. A memo the preparer also reviewed is reported as not independently reviewed."
+				_STRING,
+				"Who checked it. A memo the preparer also reviewed is reported as not independently reviewed.",
 			),
 			"reviewed_on": _field(_STRING, "When it was reviewed."),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
@@ -23763,9 +23829,7 @@ TOOLS = {
 				_STRING, "The change in enough detail that somebody who was not there could tell what it did."
 			),
 			"changed_by": _field(_STRING, "Who made it. Defaults to the calling user."),
-			"change_date": _field(
-				_STRING, "When it HAPPENED, not when it was written down. Default now."
-			),
+			"change_date": _field(_STRING, "When it HAPPENED, not when it was written down. Default now."),
 			"approved_by": _field(_STRING, "Who approved it. Must not be the person who made it."),
 			"approved_on": _field(_STRING, "When it was approved. Cannot precede the change."),
 			"approval_status": _field(_STRING, "Pending, Approved, Rejected or Not Required."),
@@ -23773,7 +23837,9 @@ TOOLS = {
 			"source": _field(_STRING, "Manual (default), MCP Tool, Migration, Desk or External."),
 			"reference_doctype": _field(_STRING, "What the change was to, if it was to a record."),
 			"reference_name": _field(_STRING, "Which record."),
-			"mcp_action_log": _field(_STRING, "The audit row for the call that made it, if this app made it."),
+			"mcp_action_log": _field(
+				_STRING, "The audit row for the call that made it, if this app made it."
+			),
 			"rollback_plan": _field(_STRING, "How this would be undone."),
 			"tested": _field(_BOOLEAN, "Whether it was tested before going live."),
 			"notes": _field(_STRING, "Anything else — including why an approval was Not Required."),
@@ -23856,12 +23922,15 @@ TOOLS = {
 			"started_at": _field(_STRING, "When the job started. Default now."),
 			"completed_at": _field(_STRING, "When it finished. Required in effect for a Success."),
 			"location": _field(
-				_STRING, "Where the copy is — specific enough that somebody under pressure could go and get it."
+				_STRING,
+				"Where the copy is — specific enough that somebody under pressure could go and get it.",
 			),
 			"offsite": _field(_BOOLEAN, "Whether it is somewhere the primary site's fire would not reach."),
 			"size_mb": _field(_NUMBER, "Size in megabytes."),
 			"retention_days": _field(_INTEGER, "How long this copy is kept."),
-			"rpo_hours": _field(_INTEGER, "Recovery point objective: how much work the operation can afford to lose."),
+			"rpo_hours": _field(
+				_INTEGER, "Recovery point objective: how much work the operation can afford to lose."
+			),
 			"rto_hours": _field(_INTEGER, "Recovery time objective: how long it can be down."),
 			"notes": _field(_STRING, "Anything else."),
 		},
@@ -23954,7 +24023,9 @@ TOOLS = {
 		"edit without changing the other's report.",
 		{
 			"company": _COMPANY,
-			"template_name": _field(_STRING, "Short and stable — '10-Q Sections', 'Lender Quarterly Package'."),
+			"template_name": _field(
+				_STRING, "Short and stable — '10-Q Sections', 'Lender Quarterly Package'."
+			),
 			"report_type": _field(_STRING, "Annual, Quarterly, Monthly or Ad Hoc."),
 			"sections": _field(
 				{"type": "array", "items": {"type": "object"}},
@@ -23998,8 +24069,7 @@ TOOLS = {
 	),
 	"list_reporting_templates": _tool(
 		disclosure.list_reporting_templates,
-		"What report shapes this site has, without pulling every section of every "
-		"one. Read-only.",
+		"What report shapes this site has, without pulling every section of every one. Read-only.",
 		{
 			"company": _COMPANY,
 			"report_type": _field(_STRING, "Annual, Quarterly, Monthly or Ad Hoc."),
@@ -24112,7 +24182,8 @@ TOOLS = {
 			"reporting_template": _field(_STRING, "The report shape this filing follows, if there is one."),
 			"prepared_by": _field(_STRING, "Who is preparing it. Defaults to the calling user."),
 			"reviewed_by": _field(
-				_STRING, "Who reviewed it. A checklist the preparer also reviewed is reported as not independently reviewed."
+				_STRING,
+				"Who reviewed it. A checklist the preparer also reviewed is reported as not independently reviewed.",
 			),
 			"notes": _field(_STRING, "Anything else."),
 		},
@@ -24230,13 +24301,15 @@ TOOLS = {
 			"reporting_template": _field(
 				_STRING, "Which shape to follow. Omit and the enabled Quarterly template is used."
 			),
-			"report_type": _field(_STRING, "Which cadence's template to pick when none is named. Default Quarterly."),
+			"report_type": _field(
+				_STRING, "Which cadence's template to pick when none is named. Default Quarterly."
+			),
 			"disclosure_checklist": _field(_STRING, "The checklist for this filing, if one is open."),
 			"language": _field(_STRING, "ISO code for section headings and disclosure items."),
 		},
 		title="Generate a quarterly report skeleton",
 		available=_always,
-	),	# ── v0.84.0 · the activity-based costing engine ──────────────────────────
+	),  # ── v0.84.0 · the activity-based costing engine ──────────────────────────
 	"create_cost_activity": _tool(
 		abc.create_cost_activity,
 		"MUTATING (default OFF). Define one thing the operation does that costs "
@@ -24351,7 +24424,10 @@ TOOLS = {
 			"driver_uom": _field(_STRING, "A new driver label."),
 			"cost_center": _field(_STRING, "A new cost center."),
 			"accounts": _field(_STRING_ARRAY, "The complete new account list. Replaces the existing one."),
-			"disabled": _field(_BOOLEAN, "Retire or un-retire it. Retired rather than deleted, because prior runs point at it."),
+			"disabled": _field(
+				_BOOLEAN,
+				"Retire or un-retire it. Retired rather than deleted, because prior runs point at it.",
+			),
 			"notes": _field(_STRING, "New notes."),
 		},
 		required=("activity",),
@@ -24398,7 +24474,9 @@ TOOLS = {
 				"The one Field this pool goes to in full. Required for a Direct Assignment activity "
 				"and meaningless otherwise.",
 			),
-			"status": _field(_STRING, "Draft, Ready (default) or Allocated. Draft pools are excluded from allocation."),
+			"status": _field(
+				_STRING, "Draft, Ready (default) or Allocated. Draft pools are excluded from allocation."
+			),
 			"currency": _field(_STRING, "The pool's currency."),
 			"basis": _field(_STRING, "How a Manual figure was arrived at."),
 			"notes": _field(_STRING, "Anything about the pool."),
@@ -24545,7 +24623,6 @@ TOOLS = {
 		available=_all_doctypes("Cost Activity", "Activity Cost Pool", "ABC Cost Assignment"),
 		requires=_ASSIGNMENT_REQUIRES,
 	),
-
 	# ── v0.85.0: the string register ────────────────────────────────────────
 	"list_translations": _tool(
 		translations.list_translations,
@@ -24601,7 +24678,9 @@ TOOLS = {
 		"and no Spanish is a translator's to-do.",
 		{
 			"key": _field(_STRING, "The translation key, e.g. 'shift.status.open'."),
-			"language": _field(_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."),
+			"language": _field(
+				_STRING, "ISO code. Defaults to the Employee's preferred_language, then English."
+			),
 			"employee": _field(_STRING, "Whose language preference to read."),
 			"user": _field(_STRING, "Or the login, resolved to their Employee."),
 		},
@@ -24700,7 +24779,9 @@ TOOLS = {
 		"`source_still_exists` FALSE IS THE CASE THIS FEED EXISTS FOR: the "
 		"snapshot is now the only record of what happened.",
 		{
-			"name": _field(_STRING, "The docname, e.g. 'Shift Closed::Farm Shift::SHIFT-2026-00042::HR-EMP-0003'."),
+			"name": _field(
+				_STRING, "The docname, e.g. 'Shift Closed::Farm Shift::SHIFT-2026-00042::HR-EMP-0003'."
+			),
 		},
 		required=("name",),
 		title="Get a shadow log entry",
@@ -24816,7 +24897,9 @@ TOOLS = {
 		{
 			"crop_name": _field(_STRING, "What the crop is called — 'Sweet Cherry'. Becomes the docname."),
 			"crop_type": _field(_STRING, "Tree Fruit, Stone Fruit, Berry, Vegetable or Other."),
-			"scientific_name": _field(_STRING, "The binomial — 'Prunus avium'. What a pesticide label is written in."),
+			"scientific_name": _field(
+				_STRING, "The binomial — 'Prunus avium'. What a pesticide label is written in."
+			),
 			"growth_cycle": _field(_STRING, "Perennial, Annual or Biennial. Default Perennial."),
 			"days_to_harvest": _field(
 				_INTEGER, "Days from bloom for a perennial, from planting for an annual."
@@ -24964,7 +25047,9 @@ TOOLS = {
 			"market_type": _field(_STRING, "Fresh, Processing, Export or Organic."),
 			"region": _field(_STRING, "Trade region — 'Pacific Northwest'."),
 			"country": _field(_STRING, "Destination country. Blank for domestic."),
-			"currency": _field(_STRING, "What this market's prices are quoted in. Blank means the company's."),
+			"currency": _field(
+				_STRING, "What this market's prices are quoted in. Blank means the company's."
+			),
 			"primary_commodity": _field(_STRING, "The Crop this market is mainly for."),
 			"shipping_point": _field(
 				_STRING,
@@ -25036,9 +25121,7 @@ TOOLS = {
 		},
 		title="List agricultural UoM contexts",
 		available=_needs_doctype("Agricultural UOM Context"),
-		requires=(
-			"the Agricultural UOM Context DocType, which ships with erpnext_mcp — run `bench migrate`"
-		),
+		requires=("the Agricultural UOM Context DocType, which ships with erpnext_mcp — run `bench migrate`"),
 	),
 	"get_uom_conversions": _tool(
 		agronomy.get_uom_conversions,
@@ -25062,7 +25145,9 @@ TOOLS = {
 		"other crops and none for this one — which is correct rather than missing, "
 		"and guessing is how a settlement goes wrong by a factor nobody traces.",
 		{
-			"from_uom": _field(_STRING, "The unit converted FROM — the 'one bin' in 'one bin is 800 pounds'."),
+			"from_uom": _field(
+				_STRING, "The unit converted FROM — the 'one bin' in 'one bin is 800 pounds'."
+			),
 			"to_uom": _field(_STRING, "The unit converted TO — the 'pounds'."),
 			"crop": _field(
 				_STRING,
@@ -25114,8 +25199,7 @@ TOOLS = {
 			),
 			"droplet_class": _field(
 				_STRING,
-				"ASABE S572 class — Very Fine through Ultra Coarse. What a label's drift language "
-				"names.",
+				"ASABE S572 class — Very Fine through Ultra Coarse. What a label's drift language names.",
 			),
 			"rated_pressure_psi": _field(_NUMBER, "The pressure the flow rate was read at."),
 			"spacing_inches": _field(_NUMBER, "Distance between tips along the boom."),
@@ -25464,9 +25548,7 @@ TOOLS = {
 		"'Biological: release predatory mites'.",
 		{
 			"crop": _field(_STRING, "The crop — 'Cherry', 'Apple'. Matched case-insensitively."),
-			"threat": _field(
-				_STRING, "The threat — 'Codling Moth', 'Powdery Mildew', 'Vole', 'Boron'."
-			),
+			"threat": _field(_STRING, "The threat — 'Codling Moth', 'Powdery Mildew', 'Vole', 'Boron'."),
 			"threat_category": _field(
 				_STRING, "Insect, Disease, Weed, Vertebrate, Abiotic or Nutrient. The six are fixed."
 			),
@@ -25506,7 +25588,9 @@ TOOLS = {
 				"What to do when crossed, one per line, each optionally 'Method: action'. Methods: "
 				"Cultural, Biological, Mechanical, Behavioral, Chemical, No Action.",
 			),
-			"source": _field(_STRING, "Where the number came from — an extension bulletin, the farm's own record."),
+			"source": _field(
+				_STRING, "Where the number came from — an extension bulletin, the farm's own record."
+			),
 			"effective_from": _field(_STRING, "YYYY-MM-DD. Default today."),
 			"company": _COMPANY,
 			"notes": _field(_STRING, "Anything else."),
@@ -25571,9 +25655,7 @@ TOOLS = {
 			),
 			"block_doctype": _field(_STRING, "'Field' or 'Asset Register'. Only where a name is in both."),
 			"threat": _field(_STRING, "What was seen — 'Codling Moth', 'Powdery Mildew'."),
-			"threat_category": _field(
-				_STRING, "Insect, Disease, Weed, Vertebrate, Abiotic or Nutrient."
-			),
+			"threat_category": _field(_STRING, "Insect, Disease, Weed, Vertebrate, Abiotic or Nutrient."),
 			"count_observed": _field(
 				_NUMBER,
 				"The number seen, in the sample unit. ZERO IS A REAL OBSERVATION — it is how a "
@@ -25603,8 +25685,12 @@ TOOLS = {
 			"beneficials_observed": _field(
 				_NUMBER, "Natural enemies counted in the same sample. See the description."
 			),
-			"beneficial_name": _field(_STRING, "Which beneficial — a ratio against an unnamed predator is uncheckable."),
-			"severity": _field(_STRING, "None, Trace, Low, Moderate, High or Severe — the scout's own judgement."),
+			"beneficial_name": _field(
+				_STRING, "Which beneficial — a ratio against an unnamed predator is uncheckable."
+			),
+			"severity": _field(
+				_STRING, "None, Trace, Low, Moderate, High or Severe — the scout's own judgement."
+			),
 			"percent_affected": _field(_NUMBER, "0 to 100."),
 			"planting_season": _field(
 				_STRING,
@@ -26017,7 +26103,9 @@ TOOLS = {
 		"farm budget comes out wrong by a multiple while looking reasonable.",
 		{
 			"company": _COMPANY,
-			"fiscal_year": _field(_STRING, "The year whose costs this reads. Also where the cost window defaults from."),
+			"fiscal_year": _field(
+				_STRING, "The year whose costs this reads. Also where the cost window defaults from."
+			),
 			"crop_type": _field(
 				_STRING,
 				"What is being grown — 'Gala', 'Bing cherries'. Free text, not a link: a "
@@ -26123,7 +26211,7 @@ TOOLS = {
 			),
 			"cost_overrides": _field(
 				{"type": "array", "items": {"type": "object"}},
-				'Classify accounts for THIS analysis only, without writing to the Account: '
+				"Classify accounts for THIS analysis only, without writing to the Account: "
 				'[{"account": "5110 - Picking - OML", "cost_behavior": "Variable", '
 				'"volume_basis": "Harvested", "variable_pct": 0, "reason": "piece rate"}]. '
 				"Behaviors: Fixed, Variable, Mixed, Excluded. Bases: Harvested (everything off "
@@ -26139,7 +26227,9 @@ TOOLS = {
 				"any district average, and it is labelled so nobody mistakes the two.",
 			),
 			"market_price_date": _field(_STRING, "YYYY-MM-DD for that quote. Defaults to today."),
-			"market_package": _field(_STRING, "What that price is FOR — '40 lb carton'. Defaults to the unit label."),
+			"market_package": _field(
+				_STRING, "What that price is FOR — '40 lb carton'. Defaults to the unit label."
+			),
 			"market_price_source": _field(_STRING, "Manual (default) or Broker Quote."),
 			"refresh_usda_prices": _field(
 				_BOOLEAN,
@@ -26290,8 +26380,7 @@ TOOLS = {
 			),
 			"account_number": _field(
 				_STRING,
-				"The account number, up to 17 characters. Stored encrypted; never "
-				"returned by any read tool.",
+				"The account number, up to 17 characters. Stored encrypted; never returned by any read tool.",
 			),
 			"account_type": _field(_STRING, "Checking or Savings. Default Checking."),
 			"allocation_type": _field(
@@ -26301,8 +26390,7 @@ TOOLS = {
 			),
 			"allocation_amount": _field(
 				_NUMBER,
-				"Dollars for Fixed Amount, a percentage 0-100 for Percentage. "
-				"Ignored for Full.",
+				"Dollars for Fixed Amount, a percentage 0-100 for Percentage. Ignored for Full.",
 			),
 			"priority": _field(
 				_INTEGER,
@@ -26412,11 +26500,11 @@ TOOLS = {
 			),
 			"resend": _field(
 				_BOOLEAN,
-				"Include accounts already prenoted. Default false, which sends only "
-				"the outstanding ones.",
+				"Include accounts already prenoted. Default false, which sends only the outstanding ones.",
 			),
 			"effective_entry_date": _field(
-				_STRING, "YYYY-MM-DD. Defaults to today plus the settlement days.",
+				_STRING,
+				"YYYY-MM-DD. Defaults to today plus the settlement days.",
 			),
 			"entry_description": _field(_STRING, "Ten characters. Default PRENOTE."),
 			"file_id_modifier": _field(_STRING, "One character, A-Z or 0-9. Default A."),
@@ -26597,8 +26685,7 @@ TOOLS = {
 			),
 			"pre_tax": _field(
 				_BOOLEAN,
-				"Override the category. A garnishment is never pre-tax and passing true for one "
-				"is refused.",
+				"Override the category. A garnishment is never pre-tax and passing true for one is refused.",
 			),
 			"fica_exempt": _field(
 				_BOOLEAN,
@@ -26613,8 +26700,7 @@ TOOLS = {
 			),
 			"arrears_over_12_weeks": _field(
 				_BOOLEAN,
-				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 "
-				"becomes 65.",
+				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 becomes 65.",
 			),
 			"exempt_amount": _field(
 				_NUMBER,
@@ -26622,7 +26708,9 @@ TOOLS = {
 				"Publication 1494. A levy is not limited by the CCPA (29 CFR 870.11(b)(2)); "
 				"this is what bounds it instead.",
 			),
-			"label": _field(_STRING, "What this line is called on a pay stub. Blank uses the category's name."),
+			"label": _field(
+				_STRING, "What this line is called on a pay stub. Blank uses the category's name."
+			),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
 		},
 		required=("employee", "deduction_category", "amount"),
@@ -26727,7 +26815,8 @@ TOOLS = {
 		"with no linked deduction, under which nothing is being withheld.",
 		{
 			"garnishment": _field(
-				_STRING, "The Farm Garnishment docname ('GARN-2026-0001'), or the case number.",
+				_STRING,
+				"The Farm Garnishment docname ('GARN-2026-0001'), or the case number.",
 			),
 		},
 		required=("garnishment",),
@@ -26788,7 +26877,8 @@ TOOLS = {
 				"own pre-tax elections.",
 			),
 			"withholding_amount": _field(
-				_NUMBER, "Dollars per pay period, or the percentage — 15 means 15%, not 0.15.",
+				_NUMBER,
+				"Dollars per pay period, or the percentage — 15 means 15%, not 0.15.",
 			),
 			"max_disposable_earnings_percentage": _field(
 				_NUMBER,
@@ -26833,8 +26923,7 @@ TOOLS = {
 			),
 			"arrears_over_12_weeks": _field(
 				_BOOLEAN,
-				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 "
-				"becomes 65.",
+				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 becomes 65.",
 			),
 			"exempt_amount": _field(
 				_NUMBER,
@@ -26876,7 +26965,8 @@ TOOLS = {
 		"withholding stopped.",
 		{
 			"garnishment": _field(
-				_STRING, "The Farm Garnishment docname, or a case number that is unique.",
+				_STRING,
+				"The Farm Garnishment docname, or a case number that is unique.",
 			),
 			"add_withheld": _field(
 				_NUMBER,
@@ -26885,7 +26975,8 @@ TOOLS = {
 				"outright, so it reads as a correction rather than a refund nobody made.",
 			),
 			"total_withheld": _field(
-				_NUMBER, "Set the running total outright. For corrections and for opening balances.",
+				_NUMBER,
+				"Set the running total outright. For corrections and for opening balances.",
 			),
 			"total_owed": _field(_NUMBER, "The whole debt. Zero means there is no fixed balance."),
 			"status": _field(
@@ -26896,17 +26987,20 @@ TOOLS = {
 			),
 			"garnishment_type": _field(
 				_STRING,
-				"Child Support, Creditor, Tax Levy or Student Loan. Re-derives the federal "
-				"priority.",
+				"Child Support, Creditor, Tax Levy or Student Loan. Re-derives the federal priority.",
 			),
 			"case_number": _field(_STRING, "The case, docket or notice number."),
 			"issuing_court_or_agency": _field(_STRING, "Who issued it."),
 			"withholding_type": _field(
-				_STRING, "Fixed Amount or Percentage of Disposable. Carried onto the deduction.",
+				_STRING,
+				"Fixed Amount or Percentage of Disposable. Carried onto the deduction.",
 			),
-			"withholding_amount": _field(_NUMBER, "Dollars per period, or the percentage. Carried onto the deduction."),
+			"withholding_amount": _field(
+				_NUMBER, "Dollars per period, or the percentage. Carried onto the deduction."
+			),
 			"max_disposable_earnings_percentage": _field(
-				_NUMBER, "The ceiling this order states. Zero uses the statutory one.",
+				_NUMBER,
+				"The ceiling this order states. Zero uses the statutory one.",
 			),
 			"received_date": _field(_STRING, "YYYY-MM-DD, the day the employer was served."),
 			"effective_date": _field(_STRING, "YYYY-MM-DD, the first day withholding applies."),
@@ -26946,7 +27040,8 @@ TOOLS = {
 		"File stays attached either way.",
 		{
 			"garnishment": _field(
-				_STRING, "The Farm Garnishment docname, or a case number that is unique.",
+				_STRING,
+				"The Farm Garnishment docname, or a case number that is unique.",
 			),
 			"company_address": _field(
 				_STRING,
@@ -26962,7 +27057,8 @@ TOOLS = {
 				"to the calling principal.",
 			),
 			"signatory_title": _field(
-				_STRING, "Their title. Default 'Authorized Representative'.",
+				_STRING,
+				"Their title. Default 'Authorized Representative'.",
 			),
 			"pay_frequency": _field(
 				_STRING,
@@ -27000,7 +27096,9 @@ TOOLS = {
 		"row was deactivated on the spot; anything else is about this farm's "
 		"configuration rather than that phone.",
 		{
-			"employee": _field(_STRING, "Only this worker's handsets. Docname, employee number, name or login."),
+			"employee": _field(
+				_STRING, "Only this worker's handsets. Docname, employee number, name or login."
+			),
 			"user": _field(_STRING, "Only handsets registered by this login."),
 			"platform": _field(_STRING, "ios or android."),
 			"is_active": _field(

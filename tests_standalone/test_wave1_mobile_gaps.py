@@ -42,12 +42,11 @@ SEVEN CLAIMS, in the order the wave was worked.
 """
 
 import inspect
-import json
 
 import frappe
 
 from erpnext_mcp import breaks as breaks_mod
-from erpnext_mcp import compat, completions, roles, shifts
+from erpnext_mcp import completions, roles, shifts
 from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.api import shape
 from erpnext_mcp.args import resolve_company, select_options
@@ -356,9 +355,7 @@ class AWaterBreakIsAWaterBreak(Wave1TestCase):
 		here would tell a crew that had just come out of the shade that a
 		cool-down was overdue.
 		"""
-		self.assertEqual(
-			set(breaks_mod.HEAT_RELIEF_KINDS), {"Cool-Down", "Water Break", "Shade Break"}
-		)
+		self.assertEqual(set(breaks_mod.HEAT_RELIEF_KINDS), {"Cool-Down", "Water Break", "Shade Break"})
 
 
 # ── 4. item 1: the close-out, refused on a parameter name ──────────────────
@@ -378,9 +375,7 @@ class TheCloseTakesEitherSpelling(Wave1TestCase):
 
 	def test_bind_no_longer_drops_it(self):
 		"""The mechanism, at the layer that was doing the dropping."""
-		route = next(
-			r for r in farmops_routes.ROUTES if r.handler is mobile_api.end_shift
-		)
+		route = next(r for r in farmops_routes.ROUTES if r.handler is mobile_api.end_shift)
 		bound = farmops_routes.bind(route, {"farm_shift": "SHIFT-2026-0009", "_auth": "x"})
 		self.assertEqual(bound, {"farm_shift": "SHIFT-2026-0009"})
 

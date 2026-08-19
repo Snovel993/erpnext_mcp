@@ -444,9 +444,7 @@ class TheTemplateRenders(BadgeFormatTestCase):
 		"""
 		import re
 
-		fallback = re.search(
-			r"\{%- set card = \{(.*?)\} -%\}", badge_print_format.BADGE_TEMPLATE, re.S
-		)
+		fallback = re.search(r"\{%- set card = \{(.*?)\} -%\}", badge_print_format.BADGE_TEMPLATE, re.S)
 		self.assertIsNotNone(fallback, "the template no longer carries an inline fallback card")
 		declared = set(re.findall(r'"(\w+)":', fallback.group(1)))
 

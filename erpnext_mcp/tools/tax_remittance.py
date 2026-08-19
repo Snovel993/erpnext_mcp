@@ -64,6 +64,7 @@ whole liability as outstanding when it is not given one. Read `warnings` on
 every result first: it is where each figure that is a floor rather than a fact
 says so.
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -175,23 +176,27 @@ def get_tax_remittance_summary(args: dict) -> ToolResult:
 
 	by_period = []
 	for entry, rows in _by_entry(slips):
-		by_period.append({
-			"payroll_entry": entry["payroll_entry"],
-			"period_start": entry["period_start"],
-			"period_end": entry["period_end"],
-			"quarter": _quarter_of(entry["period_end"]),
-			"employee_count": len({r.get("employee") for r in rows if r.get("employee")}),
-			"gross_pay": _money(_sum(rows, "gross_pay")),
-			"federal_deposit": _federal_liability(rows, None)["deposit_liability"],
-			"oregon_total": _state_liability(rows, "OR", OR_COMPONENTS, None)["total"],
-			"washington_total": _state_liability(rows, "WA", WA_COMPONENTS, None)["total"],
-		})
+		by_period.append(
+			{
+				"payroll_entry": entry["payroll_entry"],
+				"period_start": entry["period_start"],
+				"period_end": entry["period_end"],
+				"quarter": _quarter_of(entry["period_end"]),
+				"employee_count": len({r.get("employee") for r in rows if r.get("employee")}),
+				"gross_pay": _money(_sum(rows, "gross_pay")),
+				"federal_deposit": _federal_liability(rows, None)["deposit_liability"],
+				"oregon_total": _state_liability(rows, "OR", OR_COMPONENTS, None)["total"],
+				"washington_total": _state_liability(rows, "WA", WA_COMPONENTS, None)["total"],
+			}
+		)
 
-	other = sorted({
-		str(s.get("work_state"))
-		for s in slips
-		if s.get("work_state") and str(s.get("work_state")) not in SUPPORTED_STATES
-	})
+	other = sorted(
+		{
+			str(s.get("work_state"))
+			for s in slips
+			if s.get("work_state") and str(s.get("work_state")) not in SUPPORTED_STATES
+		}
+	)
 	if other:
 		warnings.append(
 			f"slips carry work states this app's engine does not compute: {', '.join(other)}. "
@@ -253,9 +258,7 @@ def get_941_prefill(args: dict) -> ToolResult:
 	company_info["ss_wage_base"] = company_info.get("ss_wage_base") or taxforms._ss_wage_base()
 
 	form = generate_941_data(slips, company_info, quarter, year)
-	part2 = monthly_liability(
-		slips, quarter, year, total_tax=form.get("line12_total_taxes_after_credits")
-	)
+	part2 = monthly_liability(slips, quarter, year, total_tax=form.get("line12_total_taxes_after_credits"))
 
 	# The 943 note goes FIRST. See FORM_943_NOTE: on this site agricultural
 	# labour is the normal case, and a warning buried at position six is a
@@ -435,14 +438,16 @@ def get_tax_deposit_schedule(args: dict) -> ToolResult:
 		if frequency["schedule"] == "Semiweekly":
 			row.update(semiweekly_due_date(payday, holidays))
 		else:
-			row.update({
-				"due_date": monthly_due_date(payday.year, payday.month, holidays).isoformat(),
-				"rule": (
-					f"monthly depositor — everything paid in {payday.strftime('%B %Y')} is "
-					"deposited by the 15th of the following month."
-				),
-				"holiday_extension_days": 0,
-			})
+			row.update(
+				{
+					"due_date": monthly_due_date(payday.year, payday.month, holidays).isoformat(),
+					"rule": (
+						f"monthly depositor — everything paid in {payday.strftime('%B %Y')} is "
+						"deposited by the 15th of the following month."
+					),
+					"holiday_extension_days": 0,
+				}
+			)
 		if liability["deposit_liability"] >= NEXT_DAY_THRESHOLD:
 			row["next_day_rule"] = True
 			row["note"] = (
@@ -532,8 +537,14 @@ def get_futa_summary(args: dict) -> ToolResult:
 	slips = _slips(company, start, end)
 	company_info = taxforms._company_info(company, args)
 	company_info.update(_futa_config(year))
-	for key in ("exempt_payments", "credit_reduction", "futa_rate", "futa_wage_base",
-	            "futa_state_credit_max", "deposits"):
+	for key in (
+		"exempt_payments",
+		"credit_reduction",
+		"futa_rate",
+		"futa_wage_base",
+		"futa_state_credit_max",
+		"deposits",
+	):
 		if args.get(key) not in (None, ""):
 			company_info[key] = _float(args[key], key=key)
 
@@ -624,8 +635,7 @@ def _window(args: dict, quarter_required: bool = False, annual: bool = False) ->
 
 	if quarter and quarter not in QUARTERS:
 		raise ToolError(
-			f"quarter must be one of {', '.join(QUARTERS)}, or the number 1 to 4, got "
-			f"{quarter!r}."
+			f"quarter must be one of {', '.join(QUARTERS)}, or the number 1 to 4, got {quarter!r}."
 		)
 	if quarter_required and not quarter:
 		raise ToolError(
@@ -703,14 +713,17 @@ def _by_entry(slips: list[dict]) -> list[tuple[dict, list[dict]]]:
 	groups: dict[str, dict] = {}
 	for slip in slips:
 		key = str(slip.get("payroll_entry") or "")
-		bucket = groups.setdefault(key, {
-			"entry": {
-				"payroll_entry": key,
-				"period_start": slip.get("period_start"),
-				"period_end": slip.get("period_end"),
+		bucket = groups.setdefault(
+			key,
+			{
+				"entry": {
+					"payroll_entry": key,
+					"period_start": slip.get("period_start"),
+					"period_end": slip.get("period_end"),
+				},
+				"rows": [],
 			},
-			"rows": [],
-		})
+		)
 		bucket["rows"].append(slip)
 	return [
 		(group["entry"], group["rows"])
@@ -729,22 +742,34 @@ def _payday(entry: dict, offset: int) -> tuple[date | None, str, bool]:
 	period_end = _as_date(entry.get("period_end"))
 	posted = _gl_posting_date(entry.get("payroll_entry"))
 	if posted:
-		return posted, (
-			f"the latest GL posting date on {entry['payroll_entry']} — this run reached the "
-			"ledger, so this is a recorded date rather than an assumption."
-		), False
+		return (
+			posted,
+			(
+				f"the latest GL posting date on {entry['payroll_entry']} — this run reached the "
+				"ledger, so this is a recorded date rather than an assumption."
+			),
+			False,
+		)
 	if not period_end:
 		return None, "no readable period end.", True
 	if offset:
-		return period_end + timedelta(days=offset), (
-			f"the pay period end plus the {offset}-day payday_offset_days supplied by the "
-			"caller. Not a recorded date, but the farm's own stated lag."
-		), True
-	return period_end, (
-		"THE PAY PERIOD END, used because no GL posting date exists and no "
-		"payday_offset_days was given. The deposit clock runs from the date wages were "
-		"PAID, so this date is early by however long this farm takes to pay."
-	), True
+		return (
+			period_end + timedelta(days=offset),
+			(
+				f"the pay period end plus the {offset}-day payday_offset_days supplied by the "
+				"caller. Not a recorded date, but the farm's own stated lag."
+			),
+			True,
+		)
+	return (
+		period_end,
+		(
+			"THE PAY PERIOD END, used because no GL posting date exists and no "
+			"payday_offset_days was given. The deposit clock runs from the date wages were "
+			"PAID, so this date is early by however long this farm takes to pay."
+		),
+		True,
+	)
 
 
 def _gl_posting_date(payroll_entry: str | None) -> date | None:
@@ -798,9 +823,7 @@ def _federal_liability(slips: list[dict], warnings: list | None) -> dict:
 	stored = [s for s in slips if s.get("social_security_employer")]
 	ss_employer = _sum(stored, "social_security_employer") + _sum(mirrored, "social_security")
 	medicare_employer = (
-		_sum(stored, "medicare_employer")
-		+ _sum(mirrored, "medicare")
-		- _sum(mirrored, "additional_medicare")
+		_sum(stored, "medicare_employer") + _sum(mirrored, "medicare") - _sum(mirrored, "additional_medicare")
 	)
 
 	if mirrored and warnings is not None:
@@ -840,8 +863,7 @@ def _state_liability(slips: list[dict], state: str, components: tuple, warnings:
 		# `state_taxes_detail` is what the state engine returned for this slip,
 		# keyed by state — a cross-state pay period carries both states' figures.
 		total = sum(
-			_float((slip.get("state_taxes_detail") or {}).get(state, {}).get(key))
-			for slip in relevant
+			_float((slip.get("state_taxes_detail") or {}).get(state, {}).get(key)) for slip in relevant
 		)
 		amounts[key] = {"label": label, "agency": agency, "amount": _money(total)}
 
@@ -982,34 +1004,36 @@ def _monthly_rollup(deposits: list[dict], schedule: str, holidays: dict) -> list
 def _state_deadlines(year: int, quarter: str | None) -> list[dict]:
 	"""When each return is due. Federal, Oregon and Washington share the date."""
 	rows = []
-	for one in ([quarter] if quarter else list(QUARTERS)):
+	for one in [quarter] if quarter else list(QUARTERS):
 		due = quarterly_return_due(one, year).isoformat()
-		rows.extend([
-			{
-				"jurisdiction": "Federal",
-				"form": "941",
-				"agency": "IRS",
-				"quarter": one,
-				"due_date": due,
-				"note": "Farmworkers go on Form 943 instead, filed annually. See get_941_prefill.",
-			},
-			{
-				"jurisdiction": "OR",
-				"form": "OQ + Form 132",
-				"agency": "Oregon DOR / OED",
-				"quarter": one,
-				"due_date": due,
-				"note": "Oregon withholding DEPOSITS follow the federal schedule; this is the report.",
-			},
-			{
-				"jurisdiction": "WA",
-				"form": "WA-ESD",
-				"agency": "WA Employment Security Department",
-				"quarter": one,
-				"due_date": due,
-				"note": "UI, Paid Family & Medical Leave and WA Cares are reported together.",
-			},
-		])
+		rows.extend(
+			[
+				{
+					"jurisdiction": "Federal",
+					"form": "941",
+					"agency": "IRS",
+					"quarter": one,
+					"due_date": due,
+					"note": "Farmworkers go on Form 943 instead, filed annually. See get_941_prefill.",
+				},
+				{
+					"jurisdiction": "OR",
+					"form": "OQ + Form 132",
+					"agency": "Oregon DOR / OED",
+					"quarter": one,
+					"due_date": due,
+					"note": "Oregon withholding DEPOSITS follow the federal schedule; this is the report.",
+				},
+				{
+					"jurisdiction": "WA",
+					"form": "WA-ESD",
+					"agency": "WA Employment Security Department",
+					"quarter": one,
+					"due_date": due,
+					"note": "UI, Paid Family & Medical Leave and WA Cares are reported together.",
+				},
+			]
+		)
 	return rows
 
 
@@ -1050,7 +1074,11 @@ def _existing_form(form_type: str, company: str, year: int, quarter: str | None)
 		)
 	except Exception:
 		return None
-	return {key: (str(value) if hasattr(value, "isoformat") else value) for key, value in row.items()} if row else None
+	return (
+		{key: (str(value) if hasattr(value, "isoformat") else value) for key, value in row.items()}
+		if row
+		else None
+	)
 
 
 # ── Internal: small shared helpers ────────────────────────────────────────

@@ -45,10 +45,7 @@ THRESHOLD = "Container Fill Threshold"
 SHIFT = "Farm Shift"
 BUCKET_SESSION = "Bucket Log Session"
 
-ON = {
-	f"allow_{name}": 1
-	for name in ("list_mobile_users", "create_mobile_user", "list_designations")
-}
+ON = {f"allow_{name}": 1 for name in ("list_mobile_users", "create_mobile_user", "list_designations")}
 
 
 def custom_perms(doctype: str) -> dict:
@@ -244,9 +241,7 @@ class TheDesignationsExist(RoleMapTestCase):
 			[{"name": "Checker", "designation_name": "Checker", "description": "ours, not yours"}],
 		)
 		install._farm_designations()
-		self.assertEqual(
-			frappe.db.get_value("Designation", "Checker", "description"), "ours, not yours"
-		)
+		self.assertEqual(frappe.db.get_value("Designation", "Checker", "description"), "ours, not yours")
 
 	def test_running_it_twice_creates_nothing_the_second_time(self):
 		install._farm_designations()
@@ -257,9 +252,7 @@ class TheDesignationsExist(RoleMapTestCase):
 	# The seeder reads its list FROM the mapping rather than restating it, so a
 	# title in one and not the other cannot happen.
 	def test_the_seeded_list_is_the_mapping(self):
-		self.assertEqual(
-			sorted(install.FARM_DESIGNATIONS), sorted(roles.ROLE_FOR_JOB_TITLE)
-		)
+		self.assertEqual(sorted(install.FARM_DESIGNATIONS), sorted(roles.ROLE_FOR_JOB_TITLE))
 
 
 class EveryPhoneOnlyRoleHasADoor(RoleMapTestCase):

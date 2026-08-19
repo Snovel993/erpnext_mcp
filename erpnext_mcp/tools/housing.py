@@ -228,16 +228,10 @@ def _describe_unit(row: dict, today: str = "") -> dict:
 		"smoke_detector_overdue": _stale(smoke, today, DETECTOR_DAYS) if required else None,
 		"co_detector_overdue": _stale(co, today, DETECTOR_DAYS) if required else None,
 		"detector_test_overdue": (
-			(_stale(smoke, today, DETECTOR_DAYS) or _stale(co, today, DETECTOR_DAYS))
-			if required
-			else None
+			(_stale(smoke, today, DETECTOR_DAYS) or _stale(co, today, DETECTOR_DAYS)) if required else None
 		),
 		"detectors_overdue": (
-			[
-				label
-				for label, value in (("smoke", smoke), ("CO", co))
-				if _stale(value, today, DETECTOR_DAYS)
-			]
+			[label for label, value in (("smoke", smoke), ("CO", co)) if _stale(value, today, DETECTOR_DAYS)]
 			if required
 			else []
 		),
@@ -786,6 +780,7 @@ def list_housing_assignments(args: dict) -> ToolResult:
 
 # ── 116. create_housing_assignment ──────────────────────────────────────────
 
+
 def _company_housing_deduction(unit: dict) -> str:
 	"""This entity's standing answer to "is rent taken out of wages", or "".
 
@@ -815,9 +810,7 @@ def _company_housing_deduction(unit: dict) -> str:
 	company = str(unit.get("owning_entity") or "")
 	if not company or not compat.has_field("Company", "default_housing_deduction_from_wages"):
 		return ""
-	return str(
-		frappe.db.get_value("Company", company, "default_housing_deduction_from_wages") or ""
-	)
+	return str(frappe.db.get_value("Company", company, "default_housing_deduction_from_wages") or "")
 
 
 def create_housing_assignment(args: dict) -> ToolResult:

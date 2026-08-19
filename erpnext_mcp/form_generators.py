@@ -67,6 +67,7 @@ these numbers onto the real form or into the state's portal. The `warnings`
 list on every result is the part to read first: it is where a form says which
 of its numbers is a floor rather than a figure.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -230,19 +231,19 @@ def generate_w2_data(
 	state_boxes = []
 	for state in sorted(state_wages):
 		income_tax = _state_income_tax(slips, state)
-		state_boxes.append({
-			"box15_state": state,
-			"box15_employer_state_id": str(state_ids.get(state) or ""),
-			"box16_state_wages": _money(state_wages[state]),
-			"box17_state_income_tax": _money(income_tax),
-			"box18_local_wages": 0.0,
-			"box19_local_income_tax": 0.0,
-			"box20_locality_name": "",
-		})
+		state_boxes.append(
+			{
+				"box15_state": state,
+				"box15_employer_state_id": str(state_ids.get(state) or ""),
+				"box16_state_wages": _money(state_wages[state]),
+				"box17_state_income_tax": _money(income_tax),
+				"box18_local_wages": 0.0,
+				"box19_local_income_tax": 0.0,
+				"box20_locality_name": "",
+			}
+		)
 		if not state_ids.get(state):
-			warnings.append(
-				f"no employer state ID recorded for {state}; box 15 will print blank."
-			)
+			warnings.append(f"no employer state ID recorded for {state}; box 15 will print blank.")
 
 	box14 = _box14_items(slips)
 
@@ -487,7 +488,9 @@ def generate_941_data(
 	# was actually withheld and matched, against what the form's own rates
 	# produce on the quarter's totals.
 	actual_fica = _money(
-		ss_withheld_employee * 2 + (medicare_withheld_employee - additional_medicare) * 2 + additional_medicare
+		ss_withheld_employee * 2
+		+ (medicare_withheld_employee - additional_medicare) * 2
+		+ additional_medicare
 	)
 	line7 = _money(actual_fica - line5e)
 
@@ -587,8 +590,13 @@ def generate_or_wr_data(or_slips: list[dict], company_info: dict, year: int) -> 
 
 	quarters_sum = {
 		key: _money(sum(by_quarter[q][key] for q in QUARTERS))
-		for key in ("or_wages", "or_income_tax", "or_transit_tax",
-		            "or_paid_leave_employee", "or_paid_leave_employer")
+		for key in (
+			"or_wages",
+			"or_income_tax",
+			"or_transit_tax",
+			"or_paid_leave_employee",
+			"or_paid_leave_employer",
+		)
 	}
 
 	reported = company_info.get("oq_reported") or {}
@@ -684,11 +692,7 @@ def generate_or_oq_data(
 
 	monthly_counts = {}
 	for month in QUARTER_MONTHS[quarter]:
-		paid = {
-			s.get("employee")
-			for s in slips
-			if s.get("employee") and _month_of(_period_end(s)) == month
-		}
+		paid = {s.get("employee") for s in slips if s.get("employee") and _month_of(_period_end(s)) == month}
 		monthly_counts[calendar.month_name[month]] = len(paid)
 
 	ui_rate = float(company_info.get("ui_rate") or 0.0) / 100.0
@@ -803,13 +807,16 @@ def generate_wa_esd_data(
 		if not employee:
 			continue
 		wages = _state_wages_of(slip, "WA")
-		row = per_employee.setdefault(employee, {
-			"employee": employee,
-			"employee_name": slip.get("employee_name") or "",
-			"ssn_display": _ssn_display(ssn_map.get(employee)),
-			"wages": 0.0,
-			"hours": 0.0,
-		})
+		row = per_employee.setdefault(
+			employee,
+			{
+				"employee": employee,
+				"employee_name": slip.get("employee_name") or "",
+				"ssn_display": _ssn_display(ssn_map.get(employee)),
+				"wages": 0.0,
+				"hours": 0.0,
+			},
+		)
 		row["wages"] += wages
 		row["hours"] += _float(slip.get("total_hours"))
 
@@ -936,9 +943,7 @@ def generate_form_data(
 		return generate_or_oq_data(slips, company_info, quarter or "Q1", year)
 	if form_type == "WA-ESD":
 		return generate_wa_esd_data(slips, company_info, quarter or "Q1", year)
-	raise ValueError(
-		f"unknown form_type {form_type!r}. Known forms: {', '.join(sorted(FORM_TYPES))}."
-	)
+	raise ValueError(f"unknown form_type {form_type!r}. Known forms: {', '.join(sorted(FORM_TYPES))}.")
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────

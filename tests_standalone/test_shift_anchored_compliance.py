@@ -169,9 +169,7 @@ class ShiftAnchoredTestCase(V12TestCase):
 			self.reading(11, temp=93.0),
 			self.reading(12, temp=97.0),
 		)
-		self.tool_data(
-			"add_worker_to_shift", {"shift": shift, "employee": LATE, "joined_at": at(11, 30)}
-		)
+		self.tool_data("add_worker_to_shift", {"shift": shift, "employee": LATE, "joined_at": at(11, 30)})
 		for tool, payload in events:
 			self.tool_data(tool, {"shift": shift, **payload})
 		if remove:
@@ -239,9 +237,7 @@ class TheCrewEnvelope(ShiftAnchoredTestCase):
 		data = self.timeline(self.a_hot_morning())
 		self.assertEqual(self.envelope(data, LATE)["exposure"]["minutes_bracketed_by_crossings"], 0.0)
 		# Ten o'clock to noon, bracketed rather than summed.
-		self.assertEqual(
-			self.envelope(data, FOREMAN)["exposure"]["minutes_bracketed_by_crossings"], 120.0
-		)
+		self.assertEqual(self.envelope(data, FOREMAN)["exposure"]["minutes_bracketed_by_crossings"], 120.0)
 
 	def test_a_crew_break_called_before_somebody_arrived_is_not_care_given_to_them(self):
 		"""Counting it would flatter the operation where an investigator checks."""

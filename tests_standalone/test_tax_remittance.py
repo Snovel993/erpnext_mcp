@@ -16,6 +16,7 @@ TWELVE CLAIMS.
 11. `DepositScheduleTool` — the payday, where it comes from and when it is a guess.
 12. `RemittanceRefusals` — the switches, the HR gate, and every argument check.
 """
+
 import json
 from datetime import date
 
@@ -283,8 +284,12 @@ class FutaWageBase(V12TestCase):
 
 	def _quarterly(self, gross_per_quarter, employees=("E1",)):
 		slips = [
-			{"employee": employee, "gross_pay": gross_per_quarter,
-			 "period_start": f"2025-{month:02d}-01", "period_end": f"2025-{month:02d}-28"}
+			{
+				"employee": employee,
+				"gross_pay": gross_per_quarter,
+				"period_start": f"2025-{month:02d}-01",
+				"period_end": f"2025-{month:02d}-28",
+			}
 			for employee in employees
 			for month in (2, 5, 8, 11)
 		]
@@ -315,8 +320,9 @@ class FutaWageBase(V12TestCase):
 		self.assertEqual(capped, {"E1", "E2"})
 
 	def test_prior_wages_consume_the_base_before_the_first_slip(self):
-		slips = [{"employee": "E1", "gross_pay": 3000.0,
-		          "period_start": "2025-08-01", "period_end": "2025-08-31"}]
+		slips = [
+			{"employee": "E1", "gross_pay": 3000.0, "period_start": "2025-08-01", "period_end": "2025-08-31"}
+		]
 		taxable, excess, _capped = futa_taxable_by_quarter(slips, 7000.0, {"E1": 6000.0})
 		self.assertEqual(taxable["Q3"], 1000.0)
 		self.assertEqual(excess["Q3"], 2000.0)
@@ -330,8 +336,12 @@ class Form940(V12TestCase):
 
 	def _year(self, gross=3000.0, employees=("E1",), **info):
 		slips = [
-			{"employee": employee, "gross_pay": gross,
-			 "period_start": f"2025-{month:02d}-01", "period_end": f"2025-{month:02d}-28"}
+			{
+				"employee": employee,
+				"gross_pay": gross,
+				"period_start": f"2025-{month:02d}-01",
+				"period_end": f"2025-{month:02d}-28",
+			}
 			for employee in employees
 			for month in (2, 5, 8, 11)
 		]
@@ -351,8 +361,7 @@ class Form940(V12TestCase):
 
 	def test_part_five_totals_the_annual_tax(self):
 		form = self._year()
-		self.assertEqual(form["line16_quarterly_liabilities"],
-		                 {"Q1": 18.0, "Q2": 18.0, "Q3": 6.0, "Q4": 0.0})
+		self.assertEqual(form["line16_quarterly_liabilities"], {"Q1": 18.0, "Q2": 18.0, "Q3": 6.0, "Q4": 0.0})
 		self.assertEqual(form["line17_total_liability"], form["line12_total_futa_tax"])
 
 	def test_undeposited_futa_carries_between_quarters(self):
@@ -404,8 +413,12 @@ class Form940(V12TestCase):
 	def test_ten_workers_across_the_year_meets_the_weeks_test(self):
 		"""Twelve monthly periods with ten workers is well past twenty weeks."""
 		slips = [
-			{"employee": f"E{n}", "gross_pay": 500.0,
-			 "period_start": f"2025-{month:02d}-01", "period_end": f"2025-{month:02d}-28"}
+			{
+				"employee": f"E{n}",
+				"gross_pay": 500.0,
+				"period_start": f"2025-{month:02d}-01",
+				"period_end": f"2025-{month:02d}-28",
+			}
 			for n in range(1, 11)
 			for month in range(1, 13)
 		]
@@ -523,18 +536,46 @@ class RemittanceToolTestCase(V12TestCase):
 		# anything. Restored here rather than in each test that moves it.
 		original = list(ROLES.get("Administrator") or [])
 		self.addCleanup(set_roles, "Administrator", original)
-		STORE.seed("Employee", [
-			{"name": "HR-EMP-00001", "employee_name": "Test Worker", "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-01-15"},
-			{"name": "HR-EMP-00002", "employee_name": "Second Worker", "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-01-15"},
-		])
-		STORE.seed("State Tax Configuration", [
-			{"name": "STC-OR-2025", "company": MAIN, "state": "OR", "tax_year": 2025,
-			 "status": "Active", "employer_account_number": "1234567-8"},
-			{"name": "STC-WA-2025", "company": MAIN, "state": "WA", "tax_year": 2025,
-			 "status": "Active", "employer_account_number": "000123456"},
-		])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": "HR-EMP-00001",
+					"employee_name": "Test Worker",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				},
+				{
+					"name": "HR-EMP-00002",
+					"employee_name": "Second Worker",
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				},
+			],
+		)
+		STORE.seed(
+			"State Tax Configuration",
+			[
+				{
+					"name": "STC-OR-2025",
+					"company": MAIN,
+					"state": "OR",
+					"tax_year": 2025,
+					"status": "Active",
+					"employer_account_number": "1234567-8",
+				},
+				{
+					"name": "STC-WA-2025",
+					"company": MAIN,
+					"state": "WA",
+					"tax_year": 2025,
+					"status": "Active",
+					"employer_account_number": "000123456",
+				},
+			],
+		)
 
 	def seed_payroll(self, name, start, end, slips, status="Submitted", company=MAIN, postings=None):
 		rows = []
@@ -557,8 +598,7 @@ class RemittanceToolTestCase(V12TestCase):
 		}
 		if postings:
 			entry["gl_postings"] = [
-				{"journal_entry": f"JE-{name}", "posting_date": d, "total_debit": 0}
-				for d in postings
+				{"journal_entry": f"JE-{name}", "posting_date": d, "total_debit": 0} for d in postings
 			]
 		STORE.seed("Farm Payroll Entry", [entry])
 
@@ -577,73 +617,115 @@ class RemittanceSummaryTool(RemittanceToolTestCase):
 	def test_the_federal_deposit_is_both_halves_of_fica(self):
 		"""$1,000 gross: $100 withheld, $62 + $62 SS, $14.50 + $14.50 Medicare."""
 		self.seed_payroll("PAY-0001", "2025-02-01", "2025-02-14", [slip(gross=1000.0)])
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["federal"]["deposit_liability"], 253.0)
 		self.assertEqual(data["federal"]["social_security_employer"], 62.0)
 
 	def test_each_pay_period_is_reported_on_its_own_row(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["payroll_entry_count"], 2)
 		self.assertEqual([row["federal_deposit"] for row in data["by_period"]], [253.0, 253.0])
 		self.assertEqual(data["by_period"][0]["quarter"], "Q1")
 
 	def test_the_oregon_components_are_totalled_by_programme(self):
 		self.seed_payroll("PAY-0001", "2025-02-01", "2025-02-14", [slip(gross=1000.0)])
-		components = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["oregon"]["components"]
+		components = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["oregon"]["components"]
 		self.assertEqual(components["or_income_tax"]["amount"], 60.0)
 		self.assertEqual(components["or_transit_tax"]["amount"], 1.0)
 		self.assertEqual(components["state_unemployment"]["amount"], 20.0)
 
 	def test_washington_is_totalled_separately(self):
 		self.seed_payroll("PAY-WA", "2025-02-01", "2025-02-14", [slip(gross=1000.0, state="WA")])
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["washington"]["components"]["wa_cares_employee"]["amount"], 5.80)
 		self.assertEqual(data["oregon"]["total"], 0.0)
 
 	def test_a_draft_payroll_is_not_counted(self):
 		self.seed_payroll("PAY-DRAFT", "2025-02-01", "2025-02-14", [slip(gross=9000.0)], status="Draft")
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["gross_pay"], 0.0)
 		self.assertIn("no Calculated or Submitted payroll", " ".join(data["warnings"]))
 
 	def test_another_companys_payroll_is_not_counted(self):
-		self.seed_payroll("PAY-OTHER", "2025-02-01", "2025-02-14",
-		                  [slip(gross=5000.0)], company=OTHER)
+		self.seed_payroll("PAY-OTHER", "2025-02-01", "2025-02-14", [slip(gross=5000.0)], company=OTHER)
 		self.seed_payroll("PAY-MAIN", "2025-02-15", "2025-02-28", [slip(gross=1000.0)])
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["gross_pay"], 1000.0)
 
 	def test_a_quarter_narrows_the_window(self):
 		self.seed_payroll("PAY-Q1", "2025-02-01", "2025-02-14", [slip(gross=1000.0)])
 		self.seed_payroll("PAY-Q2", "2025-05-01", "2025-05-14", [slip(gross=4000.0)])
-		q1 = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		q1 = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		year = self.tool_data("get_tax_remittance_summary", {"company": MAIN, "fiscal_year": "2025"})
 		self.assertEqual(q1["gross_pay"], 1000.0)
 		self.assertEqual(year["gross_pay"], 5000.0)
 
 	def test_the_grand_total_adds_the_three_jurisdictions(self):
 		self.seed_payroll("PAY-0001", "2025-02-01", "2025-02-14", [slip(gross=1000.0)])
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		expected = round(
-			data["federal"]["deposit_liability"] + data["federal"]["futa"]
-			+ data["oregon"]["total"] + data["washington"]["total"], 2,
+			data["federal"]["deposit_liability"]
+			+ data["federal"]["futa"]
+			+ data["oregon"]["total"]
+			+ data["washington"]["total"],
+			2,
 		)
 		self.assertEqual(data["grand_total_remittance"], expected)
 
@@ -652,9 +734,14 @@ class RemittanceSummaryTool(RemittanceToolTestCase):
 		bare["social_security_employer"] = 0.0
 		bare["medicare_employer"] = 0.0
 		self.seed_payroll("PAY-OLD", "2025-02-01", "2025-02-14", [bare])
-		data = self.tool_data("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["federal"]["deposit_liability"], 253.0)
 		self.assertIn("MIRRORED", " ".join(data["warnings"]))
 
@@ -672,9 +759,14 @@ class PrefillAndStateTools(RemittanceToolTestCase):
 
 	def test_the_941_lines_come_through(self):
 		self.seed_a_quarter()
-		form = self.tool_data("get_941_prefill", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["form_941"]
+		form = self.tool_data(
+			"get_941_prefill",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["form_941"]
 		self.assertEqual(form["line2_wages_tips_other_compensation"], 2000.0)
 		self.assertEqual(form["line3_federal_income_tax_withheld"], 200.0)
 		self.assertEqual(form["line1_number_of_employees"], 1)
@@ -682,17 +774,27 @@ class PrefillAndStateTools(RemittanceToolTestCase):
 	def test_the_943_warning_is_first_because_this_is_a_farm(self):
 		"""Buried at position six it is a warning nobody reads."""
 		self.seed_a_quarter()
-		warnings = self.tool_data("get_941_prefill", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["warnings"]
+		warnings = self.tool_data(
+			"get_941_prefill",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["warnings"]
 		self.assertIn("FORM 943, NOT FORM 941", warnings[0])
 		self.assertIn("ANNUAL", warnings[0])
 
 	def test_part_two_reconciles_to_line_twelve(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_941_prefill", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_941_prefill",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		part2 = data["part2_monthly_liability"]
 		self.assertTrue(part2["reconciles"])
 		self.assertEqual(part2["reconciled_total"], data["form_941"]["line12_total_taxes_after_credits"])
@@ -700,16 +802,26 @@ class PrefillAndStateTools(RemittanceToolTestCase):
 	def test_the_prefill_records_nothing(self):
 		"""It is recomputed on every call; generate_tax_form is what stores."""
 		self.seed_a_quarter()
-		self.tool_data("get_941_prefill", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		self.tool_data(
+			"get_941_prefill",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(STORE.rows("Tax Form"), [])
 
 	def test_the_oregon_report_carries_both_forms(self):
 		self.seed_a_quarter()
-		report = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["reports"]["OR"]
+		report = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["reports"]["OR"]
 		self.assertEqual(report["forms"], ["OQ", "Form 132"])
 		self.assertEqual(report["oq"]["subject_wages"], 2000.0)
 		self.assertEqual(report["form_132"]["employee_count"], 1)
@@ -717,49 +829,80 @@ class PrefillAndStateTools(RemittanceToolTestCase):
 
 	def test_the_oregon_bin_reaches_both_forms(self):
 		self.seed_a_quarter()
-		report = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["reports"]["OR"]
+		report = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["reports"]["OR"]
 		self.assertEqual(report["form_132"]["oregon_bin"], "1234567-8")
 
 	def test_the_oq_and_the_132_are_reconciled_against_each_other(self):
 		"""Oregon rejects a filing where the two disagree, so this says when."""
 		self.seed_a_quarter()
-		data = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertNotIn("Oregon reconciles the two", " ".join(data["warnings"]))
 
 	def test_washington_is_reported_when_asked_for(self):
 		self.seed_payroll("PAY-WA", "2025-02-01", "2025-02-14", [slip(gross=1000.0, state="WA")])
-		data = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1", "state": "WA",
-		})
+		data = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"state": "WA",
+			},
+		)
 		self.assertEqual(data["states"], ["WA"])
 		self.assertNotIn("OR", data["reports"])
 
 	def test_both_states_are_reported_by_default(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["states"], ["OR", "WA"])
 
 	def test_both_states_share_the_federal_due_date(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["due_date"], "2025-04-30")
 		self.assertEqual(data["reports"]["OR"]["due_date"], "2025-04-30")
 
 	def test_the_futa_summary_walks_the_year(self):
 		for index, month in enumerate((2, 5, 8, 11)):
-			self.seed_payroll(f"PAY-{index}", f"2025-{month:02d}-01", f"2025-{month:02d}-28",
-			                  [slip(gross=3000.0)])
-		form = self.tool_data("get_futa_summary", {
-			"company": MAIN, "fiscal_year": "2025",
-		})["form_940"]
+			self.seed_payroll(
+				f"PAY-{index}", f"2025-{month:02d}-01", f"2025-{month:02d}-28", [slip(gross=3000.0)]
+			)
+		form = self.tool_data(
+			"get_futa_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)["form_940"]
 		self.assertEqual(form["line7_total_taxable_futa_wages"], 7000.0)
 		self.assertEqual(form["line16_quarterly_liabilities"]["Q4"], 0.0)
 
@@ -772,97 +915,160 @@ class DepositScheduleTool(RemittanceToolTestCase):
 
 	def test_a_small_employer_is_a_monthly_depositor(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["deposit_schedule"], "Monthly")
 		self.assertEqual(data["federal_deposits"][0]["due_date"], "2025-03-17")
 
 	def test_the_schedule_can_be_supplied_directly(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1", "schedule": "Semiweekly",
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"schedule": "Semiweekly",
+			},
+		)
 		self.assertEqual(data["deposit_schedule"], "Semiweekly")
 		self.assertIn("supplied as Semiweekly", data["schedule_basis"])
 
 	def test_a_supplied_lookback_total_decides_the_schedule(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "lookback_total": 60000,
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"lookback_total": 60000,
+			},
+		)
 		self.assertEqual(data["deposit_schedule"], "Semiweekly")
 
 	def test_a_thin_lookback_is_flagged_as_a_floor(self):
 		"""A quarter this app never ran reads as zero, not as unknown."""
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025",
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertIn("FLOOR", " ".join(data["warnings"]))
 
 	def test_the_period_end_is_used_when_there_is_no_payday(self):
 		self.seed_a_quarter()
-		row = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["federal_deposits"][0]
+		row = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["federal_deposits"][0]
 		self.assertTrue(row["payday_is_assumed"])
 		self.assertEqual(row["payday"], "2025-02-14")
 		self.assertIn("THE PAY PERIOD END", row["payday_basis"])
 
 	def test_the_offset_moves_the_payday(self):
 		self.seed_a_quarter()
-		row = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1", "payday_offset_days": 5,
-		})["federal_deposits"][0]
+		row = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"payday_offset_days": 5,
+			},
+		)["federal_deposits"][0]
 		self.assertEqual(row["payday"], "2025-02-19")
 
 	def test_a_posted_run_uses_its_real_ledger_date(self):
 		"""A run that reached the ledger has a recorded date; prefer it."""
-		self.seed_payroll("PAY-POSTED", "2025-02-01", "2025-02-14", [slip(gross=1000.0)],
-		                  postings=["2025-02-20"])
-		row = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["federal_deposits"][0]
+		self.seed_payroll(
+			"PAY-POSTED", "2025-02-01", "2025-02-14", [slip(gross=1000.0)], postings=["2025-02-20"]
+		)
+		row = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["federal_deposits"][0]
 		self.assertFalse(row["payday_is_assumed"])
 		self.assertEqual(row["payday"], "2025-02-20")
 		self.assertIn("GL posting date", row["payday_basis"])
 
 	def test_an_assumed_payday_says_the_dates_are_early(self):
 		self.seed_a_quarter()
-		warnings = " ".join(self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["warnings"])
+		warnings = " ".join(
+			self.tool_data(
+				"get_tax_deposit_schedule",
+				{
+					"company": MAIN,
+					"fiscal_year": "2025",
+					"quarter": "Q1",
+				},
+			)["warnings"]
+		)
 		self.assertIn("EARLY", warnings)
 
 	def test_the_next_day_rule_is_raised_on_a_large_deposit(self):
 		self.seed_payroll("PAY-BIG", "2025-02-01", "2025-02-14", [slip(gross=500000.0)])
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertTrue(data["federal_deposits"][0]["next_day_rule"])
 		self.assertIn("next-day", " ".join(data["warnings"]))
 
 	def test_the_state_deadlines_cover_all_three_jurisdictions(self):
 		self.seed_a_quarter()
-		rows = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})["state_deadlines"]
+		rows = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)["state_deadlines"]
 		self.assertEqual({row["jurisdiction"] for row in rows}, {"Federal", "OR", "WA"})
 		self.assertTrue(all(row["due_date"] == "2025-04-30" for row in rows))
 
 	def test_a_whole_year_lists_every_quarters_deadline(self):
 		self.seed_a_quarter()
-		rows = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025",
-		})["state_deadlines"]
+		rows = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+			},
+		)["state_deadlines"]
 		self.assertEqual(len(rows), 12)
 
 	def test_the_monthly_rollup_totals_the_deposits(self):
 		self.seed_a_quarter()
-		data = self.tool_data("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		data = self.tool_data(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertEqual(data["monthly_rollup"][0]["month"], "2025-02")
 		self.assertEqual(data["monthly_rollup"][0]["liability"], data["federal_deposit_total"])
 
@@ -913,9 +1119,14 @@ class RemittanceRefusals(RemittanceToolTestCase):
 		self.assertIn("four-digit calendar year", error)
 
 	def test_a_bad_quarter_is_refused(self):
-		error = self.tool_error("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q5",
-		})
+		error = self.tool_error(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q5",
+			},
+		)
 		self.assertIn("quarter must be one of", error)
 
 	def test_the_quarter_is_taken_as_a_number_as_well_as_a_string(self):
@@ -923,9 +1134,14 @@ class RemittanceRefusals(RemittanceToolTestCase):
 		self.seed_a_quarter()
 		for sent in ("Q1", "q1", "1", 1):
 			with self.subTest(quarter=sent):
-				data = self.tool_data("get_tax_remittance_summary", {
-					"company": MAIN, "fiscal_year": "2025", "quarter": sent,
-				})
+				data = self.tool_data(
+					"get_tax_remittance_summary",
+					{
+						"company": MAIN,
+						"fiscal_year": "2025",
+						"quarter": sent,
+					},
+				)
 				self.assertEqual(data["quarter"], "Q1")
 				self.assertEqual(data["period_start"], "2025-01-01")
 				self.assertEqual(data["period_end"], "2025-03-31")
@@ -943,24 +1159,39 @@ class RemittanceRefusals(RemittanceToolTestCase):
 		"""NORMALISING IS NOT ACCEPTING. 0, 5 and 13 are wrong in either spelling."""
 		for sent in (0, 5, 13, "Q0", "5"):
 			with self.subTest(quarter=sent):
-				error = self.tool_error("get_tax_remittance_summary", {
-					"company": MAIN, "fiscal_year": "2025", "quarter": sent,
-				})
+				error = self.tool_error(
+					"get_tax_remittance_summary",
+					{
+						"company": MAIN,
+						"fiscal_year": "2025",
+						"quarter": sent,
+					},
+				)
 				self.assertIn("quarter must be one of", error)
 				self.assertIn("number 1 to 4", error)
 
 	def test_a_quarter_that_is_neither_is_quoted_back_unchanged(self):
 		"""A guess would be worse than the refusal: 2026-Q2 is another tool's format."""
-		error = self.tool_error("get_tax_remittance_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "2026-Q2",
-		})
+		error = self.tool_error(
+			"get_tax_remittance_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "2026-Q2",
+			},
+		)
 		self.assertIn("2026-Q2", error)
 
 	def test_the_annual_futa_tool_refuses_a_numbered_quarter_too(self):
 		"""The normaliser runs BEFORE the annual check, so 1 is caught like 'Q1'."""
-		error = self.tool_error("get_futa_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": 1,
-		})
+		error = self.tool_error(
+			"get_futa_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": 1,
+			},
+		)
 		self.assertIn("ANNUAL return", error)
 
 	def test_a_quarterly_tool_needs_a_quarter(self):
@@ -971,31 +1202,57 @@ class RemittanceRefusals(RemittanceToolTestCase):
 
 	def test_the_annual_futa_tool_refuses_a_quarter(self):
 		"""Silently ignoring it would label a year's figures as a quarter's."""
-		error = self.tool_error("get_futa_summary", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1",
-		})
+		error = self.tool_error(
+			"get_futa_summary",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+			},
+		)
 		self.assertIn("ANNUAL return", error)
 
 	def test_an_unsupported_state_is_refused_by_name(self):
-		error = self.tool_error("get_state_tax_remittance", {
-			"company": MAIN, "fiscal_year": "2025", "quarter": "Q1", "state": "CA",
-		})
+		error = self.tool_error(
+			"get_state_tax_remittance",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": "Q1",
+				"state": "CA",
+			},
+		)
 		self.assertIn("state must be one of", error)
 
 	def test_a_negative_payday_offset_is_refused(self):
-		error = self.tool_error("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "payday_offset_days": -3,
-		})
+		error = self.tool_error(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"payday_offset_days": -3,
+			},
+		)
 		self.assertIn("between 0 and", error)
 
 	def test_a_payday_offset_that_is_really_a_date_is_refused(self):
-		error = self.tool_error("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "payday_offset_days": 20250214,
-		})
+		error = self.tool_error(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"payday_offset_days": 20250214,
+			},
+		)
 		self.assertIn("number of DAYS", error)
 
 	def test_an_unknown_deposit_schedule_is_refused(self):
-		error = self.tool_error("get_tax_deposit_schedule", {
-			"company": MAIN, "fiscal_year": "2025", "schedule": "Fortnightly",
-		})
+		error = self.tool_error(
+			"get_tax_deposit_schedule",
+			{
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"schedule": "Fortnightly",
+			},
+		)
 		self.assertIn("Monthly", error)

@@ -55,7 +55,7 @@ from erpnext_mcp.api import mobile as mobile_api
 from erpnext_mcp.farmops_api import routes
 from erpnext_mcp.tools import payroll as payroll_tools
 
-from .fixtures import MAIN, OTHER, V12TestCase, install_hrms
+from .fixtures import MAIN, OTHER, install_hrms
 from .harness import STORE
 from .test_api_mobile import ON as MOBILE_ON
 from .test_api_mobile import (
@@ -419,9 +419,7 @@ class MyW4(SelfServiceTestCase):
 		self.assertFalse(mobile_api.get_my_w4()["on_file"])
 
 		self.a_w4()
-		self.assertEqual(
-			mobile_api.get_my_w4()["w4"]["filing_status"], "Single or Married Filing Separately"
-		)
+		self.assertEqual(mobile_api.get_my_w4()["w4"]["filing_status"], "Single or Married Filing Separately")
 
 
 # ── 4. the pay stubs ────────────────────────────────────────────────────────
@@ -759,9 +757,7 @@ class MyPayStubPdf(SelfServiceTestCase):
 		with self.assertRaises(Exception):
 			mobile_api.get_my_pay_stub_pdf(payroll_entry="PAY-2026-CARA")
 		attached = [
-			row
-			for row in STORE.rows("File")
-			if str(row.get("attached_to_name") or "") == "PAY-2026-CARA"
+			row for row in STORE.rows("File") if str(row.get("attached_to_name") or "") == "PAY-2026-CARA"
 		]
 		self.assertEqual(attached, [])
 

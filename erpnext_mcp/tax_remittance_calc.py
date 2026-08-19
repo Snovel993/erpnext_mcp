@@ -59,6 +59,7 @@ portals. This app has no visibility into any of them, which is why every
 function that could report a balance takes `deposits` as an argument and says in
 `warnings` when it was not given one.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -466,9 +467,7 @@ def generate_940_data(slips: list[dict], company_info: dict, year: int) -> dict:
 	line13 = _money(company_info.get("deposits"))
 	balance = _money(line12 - line13)
 
-	liabilities = {
-		quarter: _money(amount * effective_rate) for quarter, amount in taxable_by_quarter.items()
-	}
+	liabilities = {quarter: _money(amount * effective_rate) for quarter, amount in taxable_by_quarter.items()}
 	if exempt > 0 and taxable_wages > 0:
 		# Keep Part 5 reconciling to line 12, which the form requires of it.
 		scale = taxable_wages / max(sum(taxable_by_quarter.values()), 0.01)
@@ -567,25 +566,27 @@ def futa_deposit_plan(liabilities: dict[str, float], year: int) -> list[dict]:
 		amount = _money(liabilities.get(quarter, 0.0))
 		accumulated = _money(carried + amount)
 		due = accumulated > FUTA_DEPOSIT_THRESHOLD
-		plan.append({
-			"quarter": quarter,
-			"liability": amount,
-			"carried_in": _money(carried),
-			"accumulated": accumulated,
-			"deposit_required": due,
-			"deposit_amount": accumulated if due else 0.0,
-			"due_date": quarterly_return_due(quarter, year).isoformat(),
-			"note": (
-				f"accumulated FUTA is over ${FUTA_DEPOSIT_THRESHOLD:,.0f}, so it is deposited "
-				"by the last day of the month after the quarter."
-				if due
-				else (
-					f"accumulated FUTA is ${accumulated:,.2f}, at or under the "
-					f"${FUTA_DEPOSIT_THRESHOLD:,.0f} threshold — nothing is deposited and the "
-					"liability carries into the next quarter."
-				)
-			),
-		})
+		plan.append(
+			{
+				"quarter": quarter,
+				"liability": amount,
+				"carried_in": _money(carried),
+				"accumulated": accumulated,
+				"deposit_required": due,
+				"deposit_amount": accumulated if due else 0.0,
+				"due_date": quarterly_return_due(quarter, year).isoformat(),
+				"note": (
+					f"accumulated FUTA is over ${FUTA_DEPOSIT_THRESHOLD:,.0f}, so it is deposited "
+					"by the last day of the month after the quarter."
+					if due
+					else (
+						f"accumulated FUTA is ${accumulated:,.2f}, at or under the "
+						f"${FUTA_DEPOSIT_THRESHOLD:,.0f} threshold — nothing is deposited and the "
+						"liability carries into the next quarter."
+					)
+				),
+			}
+		)
 		carried = 0.0 if due else accumulated
 	return plan
 
@@ -713,15 +714,18 @@ def generate_or_132_data(
 		if not employee:
 			continue
 		wages = _state_wages_of(slip, "OR")
-		row = rows.setdefault(employee, {
-			"employee": employee,
-			"employee_name": slip.get("employee_name") or "",
-			"ssn_last4": str(ssn_map.get(employee) or ""),
-			"hours_worked": 0.0,
-			"total_wages": 0.0,
-			"ui_subject_wages": 0.0,
-			"excess_wages": 0.0,
-		})
+		row = rows.setdefault(
+			employee,
+			{
+				"employee": employee,
+				"employee_name": slip.get("employee_name") or "",
+				"ssn_last4": str(ssn_map.get(employee) or ""),
+				"hours_worked": 0.0,
+				"total_wages": 0.0,
+				"ui_subject_wages": 0.0,
+				"excess_wages": 0.0,
+			},
+		)
 		row["hours_worked"] += _float(slip.get("total_hours"))
 		row["total_wages"] += wages
 
@@ -736,15 +740,17 @@ def generate_or_132_data(
 
 	employees = []
 	for row in sorted(rows.values(), key=lambda r: (str(r["employee_name"]), str(r["employee"]))):
-		employees.append({
-			**row,
-			# Oregon asks for WHOLE hours and rounds down. int() truncates, which
-			# is the same thing for the non-negative values an hours field holds.
-			"hours_worked": int(_float(row["hours_worked"])),
-			"total_wages": _money(row["total_wages"]),
-			"ui_subject_wages": _money(row["ui_subject_wages"]),
-			"excess_wages": _money(row["excess_wages"]),
-		})
+		employees.append(
+			{
+				**row,
+				# Oregon asks for WHOLE hours and rounds down. int() truncates, which
+				# is the same thing for the non-negative values an hours field holds.
+				"hours_worked": int(_float(row["hours_worked"])),
+				"total_wages": _money(row["total_wages"]),
+				"ui_subject_wages": _money(row["ui_subject_wages"]),
+				"excess_wages": _money(row["excess_wages"]),
+			}
+		)
 
 	missing_ssn = [r["employee"] for r in employees if not r["ssn_last4"]]
 	if missing_ssn:
@@ -832,9 +838,7 @@ def monthly_liability(slips: list[dict], quarter: str, year: int, total_tax: flo
 		# otherwise report a March liability in a month nobody was paid, which is
 		# a figure an agency can ask about and the employer cannot explain.
 		with_liability = [
-			calendar.month_name[month]
-			for month in months
-			if as_withheld[calendar.month_name[month]] != 0
+			calendar.month_name[month] for month in months if as_withheld[calendar.month_name[month]] != 0
 		]
 		residual_month = with_liability[-1] if with_liability else calendar.month_name[months[-1]]
 		reconciled[residual_month] = _money(reconciled[residual_month] + residual)

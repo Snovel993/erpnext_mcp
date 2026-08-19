@@ -411,7 +411,9 @@ def _seed_crops(report: dict) -> None:
 			_note(report, "failed", f"Crop {name}", f"{type(exc).__name__}: {exc}")
 
 	if not doctype_exists(MARKET):
-		_note(report, "skipped", "the seeded markets", "this site has no Market doctype — run `bench migrate`")
+		_note(
+			report, "skipped", "the seeded markets", "this site has no Market doctype — run `bench migrate`"
+		)
 		return
 	for spec in SEED_MARKETS:
 		name = spec["market_name"]
@@ -473,7 +475,9 @@ def _seed_contexts(report: dict) -> None:
 
 def _seed_conversions(report: dict) -> None:
 	if not doctype_exists(UOM_CONVERSION):
-		_note(report, "skipped", "the unit conversions", "this site has no Agricultural UOM Conversion doctype")
+		_note(
+			report, "skipped", "the unit conversions", "this site has no Agricultural UOM Conversion doctype"
+		)
 		return
 	if not doctype_exists("UOM"):
 		_note(report, "skipped", "the unit conversions", "this site has no UOM doctype (no ERPNext)")

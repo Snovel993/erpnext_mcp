@@ -5039,7 +5039,6 @@ def _build_frappe() -> types.ModuleType:
 		STORE.snapshot(doctype, name)
 		STORE.tables.get(doctype, {}).pop(name, None)
 
-
 	def rename_doc(doctype, old, new, force=False, merge=False, **kwargs):
 		"""Move a docname and repoint the links this app can observe.
 

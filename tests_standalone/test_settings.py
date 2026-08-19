@@ -9,7 +9,7 @@ build.
 
 import json
 
-from erpnext_mcp import form_pdf_renderer, geo, i9_pdf, packets, registry, settings
+from erpnext_mcp import form_pdf_renderer, geo, i9_pdf, packets, registry, settings, w4_pdf
 from erpnext_mcp.erpnext_mcp.doctype.erpnext_mcp_settings.erpnext_mcp_settings import (
 	TOKEN_LENGTH,
 )
@@ -43,6 +43,12 @@ GEO_TOOLS = (
 PDF_TOOLS = (
 	"render_tax_form_pdf",
 	"bulk_render_tax_form_pdfs",
+	# Both gate on `form_pdf_renderer.available()`, exactly as the two above
+	# do — `render_pay_stub` since v0.72.0 and `render_garnishment_response`
+	# with the garnishment release. Neither was added here when it landed,
+	# so this list was right only on a bench that had reportlab.
+	"render_pay_stub",
+	"render_garnishment_response",
 )
 
 #: v0.47.1. The tool that needs pypdf AND the shipped USCIS template. A separate
@@ -51,6 +57,11 @@ PDF_TOOLS = (
 #: bench can have either without the other. `attach_signed_i9` is deliberately
 #: absent: filing a scan somebody else produced needs no PDF library at all.
 I9_PDF_TOOLS = ("render_i9_pdf",)
+
+#: Listed apart from `PDF_TOOLS` for the same reason `I9_PDF_TOOLS` is: it
+#: answers a different `available()` — `w4_pdf` needs the shipped IRS
+#: template as well as reportlab, so a bench can have one and not the other.
+W4_PDF_TOOLS = ("render_w4_pdf",)
 
 
 class ShippedDefaults(SeededTestCase):
@@ -535,6 +546,8 @@ class SelfTest(SeededTestCase):
 			out += list(PDF_TOOLS)
 		if not i9_pdf.available():
 			out += list(I9_PDF_TOOLS)
+		if not w4_pdf.available():
+			out += list(W4_PDF_TOOLS)
 		# v0.68.0. This fixture is a plain `SeededTestCase` site: it never
 		# registers the Purchase Invoice doctype (only `PurchasingTestCase`
 		# does, for the tests that need to insert one), so the one tool that

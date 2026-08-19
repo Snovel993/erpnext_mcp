@@ -2753,7 +2753,14 @@ def _scan_budget_variances(context: dict) -> list:
 		line_items = _rows(
 			"Budget Line Item",
 			{"parent": row["name"], "parenttype": BUDGET_SOURCE_DOCTYPE},
-			("account", "budgeted_amount", "actual_amount", "variance_amount", "variance_pct", "threshold_pct"),
+			(
+				"account",
+				"budgeted_amount",
+				"actual_amount",
+				"variance_amount",
+				"variance_pct",
+				"threshold_pct",
+			),
 			limit=500,
 		)
 		kpi_targets = _rows(
@@ -2989,11 +2996,7 @@ def _scan_unsigned_reverifications(context: dict) -> list:
 		newest = rows[0]
 		when = str(newest.get("reverification_date") or "").strip()
 		person = str(form.get("employee_name") or form.get("employee") or parent)
-		count = (
-			"1 reverification entry has"
-			if len(rows) == 1
-			else f"{len(rows)} reverification entries have"
-		)
+		count = "1 reverification entry has" if len(rows) == 1 else f"{len(rows)} reverification entries have"
 		out.append(
 			Observation(
 				source_doctype="I-9 Form",
@@ -3111,9 +3114,7 @@ def _item_row(item_code: str, cache: dict) -> dict:
 	if item_code not in cache:
 		try:
 			cache[item_code] = dict(
-				frappe.db.get_value(
-					"Item", item_code, ["item_name", "stock_uom", "disabled"], as_dict=True
-				)
+				frappe.db.get_value("Item", item_code, ["item_name", "stock_uom", "disabled"], as_dict=True)
 				or {}
 			)
 		except Exception:  # pragma: no cover - a site without the stock module

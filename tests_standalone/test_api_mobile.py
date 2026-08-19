@@ -694,11 +694,6 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# ALL FIVE ARE HR-ONLY IN THEIR OWN BODIES, which is the thing to check
 		# if any appears in an app build. What a person's wages are garnished
 		# for is among the most sensitive facts this app holds.
-		"list_payroll_deductions",
-		"get_payroll_deduction",
-		"list_employee_deductions",
-		"create_payroll_deduction",
-		"update_payroll_deduction",
 		# v0.92.0. The five tax remittance reads: what is owed to the IRS, Oregon
 		# and Washington, when each deposit is due, and the two annual returns.
 		# Every one carries `personnel.require_hr_role` in its own body, on the
@@ -893,9 +888,7 @@ class ThePersonnelRegisterIsNotAPickersToRead(MobileAPITestCase):
 		foreman refused at step 1 never reaches the other ten."""
 		set_roles(WORKER, ["Field Worker", "Foreman"])
 		self.be()
-		self.assertTrue(
-			mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN)
-		)
+		self.assertTrue(mobile_api.create_employee(first_name="Elena", last_name="Marquez", company=MAIN))
 		self.assertTrue(mobile_api.reactivate_employee(employee=WORKER_EMPLOYEE))
 
 	def test_and_the_register_read_did_not_widen_with_them(self):
@@ -2953,9 +2946,7 @@ class TheFinishingTimestampsReachThePhone(MobileAPITestCase):
 		an hour late must not report the hour as work."""
 		self.finish(completed_at="2026-07-24 16:00:00", actual_duration_minutes=22)
 		row = mobile_api.get_task(task=self.task)
-		assignment = frappe.db.get_value(
-			"Farm Task Assignment", row["assignment"], "completed_at"
-		)
+		assignment = frappe.db.get_value("Farm Task Assignment", row["assignment"], "completed_at")
 		self.assertEqual(str(row["completed_at"]), str(assignment))
 
 
@@ -3052,9 +3043,9 @@ class TheHandsetConfirmsMovementAndNothingElse(MobileAPITestCase):
 
 		self.trade = shipments
 		shipments.install_trade_documents()
-		self.shipment = shipments.create_shipment(
-			{"destination_tier": "Local", "company": MAIN}
-		).data["shipment"]
+		self.shipment = shipments.create_shipment({"destination_tier": "Local", "company": MAIN}).data[
+			"shipment"
+		]
 
 	def _released(self):
 		self.trade.update_shipment_status({"shipment": self.shipment, "status": "Ready to Ship"})
@@ -3108,9 +3099,7 @@ class TheHandsetConfirmsMovementAndNothingElse(MobileAPITestCase):
 		self.assertNotIn("status", signature.parameters)
 
 	def test_another_entitys_shipment_is_not_reachable(self):
-		other = self.trade.create_shipment(
-			{"destination_tier": "Local", "company": OTHER}
-		).data["shipment"]
+		other = self.trade.create_shipment({"destination_tier": "Local", "company": OTHER}).data["shipment"]
 		self.be()
 		with self.assertRaises(Exception):
 			mobile_api.get_shipment(shipment=other)
@@ -3144,9 +3133,9 @@ class TheShiftTimelineReachesThePhone(MobileAPITestCase):
 		# very different set of keys to hand somebody who runs a crew.
 		set_roles(WORKER, ["Field Worker", "Foreman"])
 		self.be()
-		self.shift = mobile_api.start_shift(
-			location="Block 7 North", shift_type="Harvest", company=MAIN
-		)["name"]
+		self.shift = mobile_api.start_shift(location="Block 7 North", shift_type="Harvest", company=MAIN)[
+			"name"
+		]
 
 	def test_a_water_break_is_logged_from_the_block_it_happened_on(self):
 		answer = mobile_api.log_shift_event(shift=self.shift, event_type="Water Break")
@@ -3317,9 +3306,7 @@ class TheShadowFeedIsAddressed(MobileAPITestCase):
 		self.be()
 		answer = mobile_api.list_shadow_log_entries()
 		self.assertEqual(answer["count"], 1)
-		self.assertEqual(
-			{row["recipient_employee"] for row in answer["entries"]}, {WORKER_EMPLOYEE}
-		)
+		self.assertEqual({row["recipient_employee"] for row in answer["entries"]}, {WORKER_EMPLOYEE})
 
 	def test_the_recipient_is_not_a_body_argument_on_any_of_the_three(self):
 		"""`routes.bind` keeps body keys that match the signature. A key that is
@@ -3633,17 +3620,13 @@ class TheWizardKnowsWhereToPostItsAnswers(MobileAPITestCase):
 		worker who fills in three steps and a signature before the post 404s has
 		lost the thing this surface exists to collect."""
 		self.be()
-		frappe.db.set_value(
-			"Wizard Definition", "accident_investigation", "submit_method", "no_such_tool"
-		)
+		frappe.db.set_value("Wizard Definition", "accident_investigation", "submit_method", "no_such_tool")
 		answer = mobile_api.get_wizard_definition(wizard="accident_investigation")
 		self.assertEqual(answer["submit_endpoint"], "")
 		self.assertIn("does not publish", answer["submit_unavailable"])
 
 	def test_there_is_no_submit_wizard_route(self):
-		self.assertNotIn(
-			"submit_wizard", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES}
-		)
+		self.assertNotIn("submit_wizard", {route.path.rsplit("/", 1)[-1] for route in farmops_routes.ROUTES})
 
 	def test_start_inspection_cannot_file_against_a_colleague(self):
 		"""`worker` and `foreman` are not on the signature, so `routes.bind`
@@ -4019,9 +4002,7 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 	# ── options ─────────────────────────────────────────────────────────────
 	def test_a_select_carries_its_choices_in_the_shape_the_app_decodes(self):
 		definition = decode_wizard_definition(self.a_spec())
-		choice = next(
-			field for field in definition["steps"][0]["fields"] if field["key"] == "choice"
-		)
+		choice = next(field for field in definition["steps"][0]["fields"] if field["key"] == "choice")
 		self.assertEqual(
 			[(option["value"], option["label_en"]) for option in choice["options"]],
 			[("Pass", "Pass"), ("Fail", "Fail")],
@@ -4056,9 +4037,7 @@ class TheWizardArrivesInTheShapeTheHandsetDecodes(MobileAPITestCase):
 		question's name and the column it lands in differ, and `key` is what the
 		app posts under. A wizard that set one and got its answers keyed by the
 		other files every record with the field it cares about empty."""
-		self.a_mixed_wizard(
-			key="retargeted", field_overrides={"plain": {"target_field": "description"}}
-		)
+		self.a_mixed_wizard(key="retargeted", field_overrides={"plain": {"target_field": "description"}})
 		fields = self.fields_by_name(self.a_spec(wizard="retargeted"))
 		self.assertIn("description", fields)
 		self.assertEqual(fields["description"]["fieldname"], "plain")
@@ -4162,7 +4141,10 @@ class TheWizardFilesWhatWasFilledIn(MobileAPITestCase):
 		self.be()
 		spec = mobile_api.get_wizard_definition(wizard="accident_investigation")
 		self.assertEqual(spec["submit_endpoint"], "farmops/api/mobile/submit_wizard_via_mobile")
-		self.assertIn(spec["submit_endpoint"].rsplit("/", 1)[-1], {r.path.rsplit("/", 1)[-1] for r in farmops_routes.ROUTES})
+		self.assertIn(
+			spec["submit_endpoint"].rsplit("/", 1)[-1],
+			{r.path.rsplit("/", 1)[-1] for r in farmops_routes.ROUTES},
+		)
 
 	# ── it is not a dispatcher ──────────────────────────────────────────────
 	def test_the_caller_does_not_get_to_name_the_target(self):
@@ -4182,7 +4164,9 @@ class TheWizardFilesWhatWasFilledIn(MobileAPITestCase):
 		"""The reachable set is exactly what a phone could already post to
 		directly. A `submit_method` naming an unrouted tool — or an MCP tool that
 		is deliberately not published, which is most of them — files nothing."""
-		frappe.db.set_value("Wizard Definition", "accident_investigation", "submit_method", "create_journal_entry")
+		frappe.db.set_value(
+			"Wizard Definition", "accident_investigation", "submit_method", "create_journal_entry"
+		)
 		with self.assertRaises(Exception) as caught:
 			self.an_accident()
 		self.assertIn("does not publish", str(caught.exception))
@@ -4251,10 +4235,12 @@ class TheWizardFilesWhatWasFilledIn(MobileAPITestCase):
 		self.be()
 		answer = mobile_api.submit_wizard_via_mobile(
 			wizard="accident_investigation",
-			answers=json.dumps({
-				"occurred_at": self.OCCURRED,
-				"incident_description": "Filed from a form-encoded body.",
-			}),
+			answers=json.dumps(
+				{
+					"occurred_at": self.OCCURRED,
+					"incident_description": "Filed from a form-encoded body.",
+				}
+			),
 		)
 		self.assertTrue(answer["filed"])
 
@@ -4330,14 +4316,28 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		)
 		from .test_payroll_register import entry, slip
 
-		STORE.seed("Farm Payroll Entry", [
-			entry("PAY-2026-0001", "2026-06-01", "2026-06-14", [
-				slip(WORKER_EMPLOYEE, name="Ana Ramos", gross=1000.0),
-			]),
-			entry("PAY-2026-0090", "2026-06-01", "2026-06-14", [
-				slip(OUTSIDER_EMPLOYEE, name="Ben Ortiz", gross=4000.0),
-			], company=OTHER),
-		])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				entry(
+					"PAY-2026-0001",
+					"2026-06-01",
+					"2026-06-14",
+					[
+						slip(WORKER_EMPLOYEE, name="Ana Ramos", gross=1000.0),
+					],
+				),
+				entry(
+					"PAY-2026-0090",
+					"2026-06-01",
+					"2026-06-14",
+					[
+						slip(OUTSIDER_EMPLOYEE, name="Ben Ortiz", gross=4000.0),
+					],
+					company=OTHER,
+				),
+			],
+		)
 
 	def as_hr(self):
 		set_roles(WORKER, ["Field Worker", "Farm Manager"])
@@ -4367,7 +4367,8 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.assertEqual(answer["company"], MAIN)
 		self.assertEqual(answer["totals"]["gross_pay"], 1000.0)
 		self.assertEqual(
-			[row["employee_id"] for row in answer["employees"]], [WORKER_EMPLOYEE],
+			[row["employee_id"] for row in answer["employees"]],
+			[WORKER_EMPLOYEE],
 		)
 
 	def test_naming_another_entity_does_not_reach_its_payroll(self):
@@ -4377,7 +4378,9 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.as_hr()
 		with self.assertRaises(Exception):
 			mobile_api.get_payroll_register(
-				company=OTHER, date_from="2026-06-01", date_to="2026-06-30",
+				company=OTHER,
+				date_from="2026-06-01",
+				date_to="2026-06-30",
 			)
 
 	def test_the_register_wrapper_declares_no_employee_argument(self):
@@ -4395,7 +4398,8 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.be()
 		with self.assertRaises(Exception) as caught:
 			mobile_api.render_pay_stub(
-				payroll_entry="PAY-2026-0001", employee=WORKER_EMPLOYEE,
+				payroll_entry="PAY-2026-0001",
+				employee=WORKER_EMPLOYEE,
 			)
 		self.assertIn("personnel", str(caught.exception).lower())
 
@@ -4405,7 +4409,8 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.as_hr()
 		with self.assertRaises(Exception) as caught:
 			mobile_api.render_pay_stub(
-				payroll_entry="PAY-2026-0090", employee=OUTSIDER_EMPLOYEE,
+				payroll_entry="PAY-2026-0090",
+				employee=OUTSIDER_EMPLOYEE,
 			)
 		self.assertIn("not found", str(caught.exception).lower())
 
@@ -4416,7 +4421,8 @@ class ThePayrollRoutesAreHROnly(MobileAPITestCase):
 		self.as_hr()
 		with self.assertRaises(Exception) as caught:
 			mobile_api.render_pay_stub(
-				payroll_entry="PAY-2026-0090", employee=WORKER_EMPLOYEE,
+				payroll_entry="PAY-2026-0090",
+				employee=WORKER_EMPLOYEE,
 			)
 		self.assertIn("not found", str(caught.exception).lower())
 

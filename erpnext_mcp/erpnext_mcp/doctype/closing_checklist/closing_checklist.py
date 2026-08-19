@@ -88,7 +88,9 @@ class ClosingChecklist(Document):
 					"Closing Checklist {0} already covers {1} to {2} for this company, which overlaps "
 					"{3} to {4}. Two rows covering one date would make 'is this date locked' depend "
 					"on which was read first."
-				).format(row["name"], row["period_start"], row["period_end"], self.period_start, self.period_end),
+				).format(
+					row["name"], row["period_start"], row["period_end"], self.period_start, self.period_end
+				),
 				title=_("Overlapping periods"),
 			)
 

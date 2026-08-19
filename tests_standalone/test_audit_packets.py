@@ -655,7 +655,14 @@ class SprayRecordsComeFromThisApp(PacketTestCase):
 		)
 		STORE.seed(
 			"User",
-			[{"name": "mendez@example.com", "email": "mendez@example.com", "full_name": "R. Mendez", "enabled": 1}],
+			[
+				{
+					"name": "mendez@example.com",
+					"email": "mendez@example.com",
+					"full_name": "R. Mendez",
+					"enabled": 1,
+				}
+			],
 		)
 
 	def a_spray(self, **kw):
@@ -752,9 +759,7 @@ class SprayRecordsComeFromThisApp(PacketTestCase):
 
 	def test_a_missing_registration_number_is_reported_not_hidden(self):
 		self.a_full_operation()
-		created = self.a_spray(
-			products=[{"item_code": self.CAPTAN, "rate_per_acre": 5, "rate_uom": "Lb"}]
-		)
+		created = self.a_spray(products=[{"item_code": self.CAPTAN, "rate_per_acre": 5, "rate_uom": "Lb"}])
 		section = self.spray_section()
 		self.assertEqual(section["rows"][0]["epa_reg_number"], "(unrecorded)")
 		self.assertIn(created["name"], section["incomplete_records"])

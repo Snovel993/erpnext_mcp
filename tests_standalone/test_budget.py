@@ -72,7 +72,10 @@ class ComputingActuals(unittest.TestCase):
 		self.assertIsNone(row["variance_pct"])
 
 	def test_threshold_pct_falls_back_to_the_default_when_absent(self):
-		budget_doc = {"line_items": [{"account": "5300 - Field Labor", "budgeted_amount": 1000.0}], "kpi_targets": []}
+		budget_doc = {
+			"line_items": [{"account": "5300 - Field Labor", "budgeted_amount": 1000.0}],
+			"kpi_targets": [],
+		}
 		result = engine.compute_budget_actuals(budget_doc, {"5300 - Field Labor": 1000.0}, {})
 		self.assertEqual(result["line_items"][0]["threshold_pct"], engine.DEFAULT_THRESHOLD_PCT)
 
@@ -112,8 +115,16 @@ class ComputingActuals(unittest.TestCase):
 class CheckingVariances(unittest.TestCase):
 	def test_a_variance_inside_its_threshold_is_not_a_breach(self):
 		result = {
-			"line_items": [{"account": "A", "budgeted_amount": 1000.0, "actual_amount": 1050.0,
-							"variance_amount": 50.0, "variance_pct": 5.0, "threshold_pct": 10.0}],
+			"line_items": [
+				{
+					"account": "A",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1050.0,
+					"variance_amount": 50.0,
+					"variance_pct": 5.0,
+					"threshold_pct": 10.0,
+				}
+			],
 			"kpi_targets": [],
 		}
 		self.assertEqual(engine.check_budget_variances(result), [])
@@ -123,8 +134,16 @@ class CheckingVariances(unittest.TestCase):
 		variance sitting exactly on the line somebody drew is exactly what the
 		threshold exists to catch."""
 		result = {
-			"line_items": [{"account": "A", "budgeted_amount": 1000.0, "actual_amount": 1100.0,
-							"variance_amount": 100.0, "variance_pct": 10.0, "threshold_pct": 10.0}],
+			"line_items": [
+				{
+					"account": "A",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1100.0,
+					"variance_amount": 100.0,
+					"variance_pct": 10.0,
+					"threshold_pct": 10.0,
+				}
+			],
 			"kpi_targets": [],
 		}
 		breaches = engine.check_budget_variances(result)
@@ -134,8 +153,16 @@ class CheckingVariances(unittest.TestCase):
 
 	def test_a_row_with_no_percentage_is_never_a_breach(self):
 		result = {
-			"line_items": [{"account": "A", "budgeted_amount": 0.0, "actual_amount": 500.0,
-							"variance_amount": 500.0, "variance_pct": None, "threshold_pct": 10.0}],
+			"line_items": [
+				{
+					"account": "A",
+					"budgeted_amount": 0.0,
+					"actual_amount": 500.0,
+					"variance_amount": 500.0,
+					"variance_pct": None,
+					"threshold_pct": 10.0,
+				}
+			],
 			"kpi_targets": [],
 		}
 		self.assertEqual(engine.check_budget_variances(result), [])
@@ -143,10 +170,22 @@ class CheckingVariances(unittest.TestCase):
 	def test_direction_is_over_when_positive_and_under_when_negative(self):
 		result = {
 			"line_items": [
-				{"account": "OVER", "budgeted_amount": 1000.0, "actual_amount": 1300.0,
-				 "variance_amount": 300.0, "variance_pct": 30.0, "threshold_pct": 10.0},
-				{"account": "UNDER", "budgeted_amount": 1000.0, "actual_amount": 700.0,
-				 "variance_amount": -300.0, "variance_pct": -30.0, "threshold_pct": 10.0},
+				{
+					"account": "OVER",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1300.0,
+					"variance_amount": 300.0,
+					"variance_pct": 30.0,
+					"threshold_pct": 10.0,
+				},
+				{
+					"account": "UNDER",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 700.0,
+					"variance_amount": -300.0,
+					"variance_pct": -30.0,
+					"threshold_pct": 10.0,
+				},
 			],
 			"kpi_targets": [],
 		}
@@ -157,8 +196,15 @@ class CheckingVariances(unittest.TestCase):
 	def test_kpi_targets_are_checked_the_same_way_as_line_items(self):
 		result = {
 			"line_items": [],
-			"kpi_targets": [{"kpi_definition": "cost_per_bin", "target_value": 25.0, "actual_value": 40.0,
-							  "variance_pct": 60.0, "threshold_pct": 10.0}],
+			"kpi_targets": [
+				{
+					"kpi_definition": "cost_per_bin",
+					"target_value": 25.0,
+					"actual_value": 40.0,
+					"variance_pct": 60.0,
+					"threshold_pct": 10.0,
+				}
+			],
 		}
 		breaches = engine.check_budget_variances(result)
 		self.assertEqual(len(breaches), 1)
@@ -167,8 +213,16 @@ class CheckingVariances(unittest.TestCase):
 
 	def test_threshold_default_is_used_when_a_row_has_none(self):
 		result = {
-			"line_items": [{"account": "A", "budgeted_amount": 1000.0, "actual_amount": 1250.0,
-							"variance_amount": 250.0, "variance_pct": 25.0, "threshold_pct": None}],
+			"line_items": [
+				{
+					"account": "A",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1250.0,
+					"variance_amount": 250.0,
+					"variance_pct": 25.0,
+					"threshold_pct": None,
+				}
+			],
 			"kpi_targets": [],
 		}
 		# threshold_default of 20 puts a 25% variance just over the line.
@@ -179,10 +233,22 @@ class CheckingVariances(unittest.TestCase):
 	def test_breaches_are_sorted_worst_first(self):
 		result = {
 			"line_items": [
-				{"account": "MILD", "budgeted_amount": 1000.0, "actual_amount": 1110.0,
-				 "variance_amount": 110.0, "variance_pct": 11.0, "threshold_pct": 10.0},
-				{"account": "SEVERE", "budgeted_amount": 1000.0, "actual_amount": 1500.0,
-				 "variance_amount": 500.0, "variance_pct": 50.0, "threshold_pct": 10.0},
+				{
+					"account": "MILD",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1110.0,
+					"variance_amount": 110.0,
+					"variance_pct": 11.0,
+					"threshold_pct": 10.0,
+				},
+				{
+					"account": "SEVERE",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1500.0,
+					"variance_amount": 500.0,
+					"variance_pct": 50.0,
+					"threshold_pct": 10.0,
+				},
 			],
 			"kpi_targets": [],
 		}
@@ -197,14 +263,16 @@ class SeverityEscalates(unittest.TestCase):
 
 	def _breach_at(self, variance_pct: float, threshold_pct: float = 10.0):
 		result = {
-			"line_items": [{
-				"account": "A",
-				"budgeted_amount": 1000.0,
-				"actual_amount": 1000.0 * (1 + variance_pct / 100),
-				"variance_amount": 1000.0 * (variance_pct / 100),
-				"variance_pct": variance_pct,
-				"threshold_pct": threshold_pct,
-			}],
+			"line_items": [
+				{
+					"account": "A",
+					"budgeted_amount": 1000.0,
+					"actual_amount": 1000.0 * (1 + variance_pct / 100),
+					"variance_amount": 1000.0 * (variance_pct / 100),
+					"variance_pct": variance_pct,
+					"threshold_pct": threshold_pct,
+				}
+			],
 			"kpi_targets": [],
 		}
 		breaches = engine.check_budget_variances(result)
@@ -248,9 +316,9 @@ class RefreshBudgetEndToEnd(unittest.TestCase):
 			"kpi_targets": [kpi_target(kpi_definition="cost_per_bin", target=25.0, threshold=10.0)],
 		}
 		self.gl_balances = {
-			"CLEAN": 10200.0,       # 2% over — inside threshold
-			"WARNING": 11500.0,     # 15% over — 1.5x threshold, Warning
-			"CRITICAL": 13000.0,    # 30% over — 3x threshold, Critical
+			"CLEAN": 10200.0,  # 2% over — inside threshold
+			"WARNING": 11500.0,  # 15% over — 1.5x threshold, Warning
+			"CRITICAL": 13000.0,  # 30% over — 3x threshold, Critical
 			# UNRESOLVED intentionally absent
 		}
 		self.kpi_values = {"cost_per_bin": 30.0}  # 20% over — 2x threshold, Critical
@@ -268,7 +336,7 @@ class RefreshBudgetEndToEnd(unittest.TestCase):
 		result = engine.refresh_budget(self.budget_doc, self.gl_balances, self.kpi_values)
 		self.assertEqual(result["breach_count"], 3)
 		self.assertEqual(result["critical_count"], 2)  # CRITICAL account + cost_per_bin KPI
-		self.assertEqual(result["warning_count"], 1)   # WARNING account
+		self.assertEqual(result["warning_count"], 1)  # WARNING account
 
 	def test_the_clean_and_unresolved_rows_never_breach(self):
 		result = engine.refresh_budget(self.budget_doc, self.gl_balances, self.kpi_values)

@@ -232,9 +232,7 @@ def _resolve(master: OrgMaster, value: str, verb: str = "changed") -> str:
 
 	column = _name_column(master)
 	if column:
-		matches = (
-			frappe.db.get_all(master.doctype, filters={column: value}, pluck="name", limit=5) or []
-		)
+		matches = frappe.db.get_all(master.doctype, filters={column: value}, pluck="name", limit=5) or []
 		if len(matches) == 1:
 			return str(matches[0])
 		if len(matches) > 1:
@@ -451,9 +449,7 @@ def _apply(master: OrgMaster, doc, args: dict, creating: bool) -> list:
 		elif field == "parent_department":
 			value = _resolve(master, str(raw or ""), "created" if creating else "changed") if raw else ""
 			if value and not creating and value == doc.name:
-				raise ToolError(
-					f"{doc.name} cannot be its own parent_department. Nothing was changed."
-				)
+				raise ToolError(f"{doc.name} cannot be its own parent_department. Nothing was changed.")
 		else:
 			value = str(raw or "").strip()
 		doc.set(field, value)

@@ -118,7 +118,9 @@ class BinSeal(Document):
 	def _fill_from_the_sealer(self) -> None:
 		if not self.sealed_by:
 			return
-		row = frappe.db.get_value("Employee", self.sealed_by, ["employee_name", "company"], as_dict=True) or {}
+		row = (
+			frappe.db.get_value("Employee", self.sealed_by, ["employee_name", "company"], as_dict=True) or {}
+		)
 		if not str(self.sealed_by_name or "").strip():
 			self.sealed_by_name = row.get("employee_name") or self.sealed_by
 		if not self.company:

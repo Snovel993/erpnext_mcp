@@ -286,9 +286,7 @@ def _open_shift_for(worker: str, company: str = "") -> str:
 		return ""
 	try:
 		filters = {"employee": worker, "left_at": ("is", "not set"), "parenttype": FARM_SHIFT}
-		rows = frappe.db.get_all(
-			"Farm Shift Crew Member", filters=filters, fields=["parent"], limit=50
-		)
+		rows = frappe.db.get_all("Farm Shift Crew Member", filters=filters, fields=["parent"], limit=50)
 		names = sorted({str(entry.get("parent") or "") for entry in rows or [] if entry.get("parent")})
 		if not names:
 			return ""
@@ -445,9 +443,7 @@ def _evaluate_compliance_after(task: dict, produced_doctype: str, company: str) 
 			),
 		}
 	dismissed = [
-		entry["name"]
-		for entry in report.get("alerts") or []
-		if entry.get("outcome") == "auto_dismissed"
+		entry["name"] for entry in report.get("alerts") or [] if entry.get("outcome") == "auto_dismissed"
 	]
 	out = {
 		"rules_asked": names,
@@ -895,7 +891,9 @@ def _worker(args: dict, key: str = "worker_id", required: bool = True) -> str:
 	return worker
 
 
-def _refuse_a_minor_on_prohibited_work(worker: str, worker_name: str, task: dict, verb: str = "changed") -> dict:
+def _refuse_a_minor_on_prohibited_work(
+	worker: str, worker_name: str, task: dict, verb: str = "changed"
+) -> dict:
 	"""Refuse to send somebody under eighteen to work an age bar closes to them.
 
 	v0.98.0. AN AGE BAR AND NOT A TRAINING GAP, which is the whole reason this is
@@ -1373,9 +1371,7 @@ def _draw_down_materials(task: dict, assignment_doc, args: dict) -> tuple[dict, 
 	return consumed, windows
 
 
-def _open_assignment(
-	task_doc, worker: str, worker_name: str, dispatched: bool, farm_shift: str = ""
-) -> dict:
+def _open_assignment(task_doc, worker: str, worker_name: str, dispatched: bool, farm_shift: str = "") -> dict:
 	assignment = frappe.new_doc(FARM_TASK_ASSIGNMENT)
 	assignment.task = task_doc.name
 	assignment.task_name = task_doc.task_name
@@ -1782,12 +1778,12 @@ def claim_farm_task(args: dict) -> ToolResult:
 	assignment = _open_assignment(task_doc, worker, worker_name, dispatched=False)
 
 	claimed = {
-			**_describe_task(dict(task_doc.as_dict())),
-			"assignment": assignment,
-			"concurrent_claims": len(holding) + 1,
-			"claims_remaining": MAX_CONCURRENT_CLAIMS - len(holding) - 1,
-			"evidence_you_will_need": _contract_sentence(evidence_contract(task_doc.evidence_required)),
-		}
+		**_describe_task(dict(task_doc.as_dict())),
+		"assignment": assignment,
+		"concurrent_claims": len(holding) + 1,
+		"claims_remaining": MAX_CONCURRENT_CLAIMS - len(holding) - 1,
+		"evidence_you_will_need": _contract_sentence(evidence_contract(task_doc.evidence_required)),
+	}
 	# v0.79.0. THE HINT, NOT THE MERGE. A claim is the moment somebody has
 	# decided to do this job, which is exactly when telling them that another
 	# open task names the same valve is useful and not yet too late. Nothing is
@@ -1865,23 +1861,23 @@ def start_farm_task(args: dict) -> ToolResult:
 	_set_task_state(assignment["task"], IN_PROGRESS)
 
 	started = {
-			"assignment": _describe_assignment(dict(doc.as_dict())),
-			"task": _describe_task(task_row(assignment["task"])),
-			"evidence_you_will_need": _contract_sentence(evidence_contract(task.get("evidence_required"))),
-			"note": (
-				"This is the clock-in for THIS TASK, not for the shift. A worker on the clock all "
-				"morning did this particular cabin between ten and half past, and that is what an "
-				"hour charged to a job has to mean."
-			),
-			"shift_note": (
-				f"This work is anchored to shift {doc.farm_shift}, so its completion evidence will "
-				"land on that shift's compliance timeline beside the weather it was done in."
-				if doc.farm_shift
-				else "This work is anchored to NO SHIFT, so its completion evidence will sit on the "
-				"assignment alone and nothing will reach a compliance record spanning an exposure "
-				"period. Pass farm_shift here or at completion if the worker was on one."
-			),
-		}
+		"assignment": _describe_assignment(dict(doc.as_dict())),
+		"task": _describe_task(task_row(assignment["task"])),
+		"evidence_you_will_need": _contract_sentence(evidence_contract(task.get("evidence_required"))),
+		"note": (
+			"This is the clock-in for THIS TASK, not for the shift. A worker on the clock all "
+			"morning did this particular cabin between ten and half past, and that is what an "
+			"hour charged to a job has to mean."
+		),
+		"shift_note": (
+			f"This work is anchored to shift {doc.farm_shift}, so its completion evidence will "
+			"land on that shift's compliance timeline beside the weather it was done in."
+			if doc.farm_shift
+			else "This work is anchored to NO SHIFT, so its completion evidence will sit on the "
+			"assignment alone and nothing will reach a compliance record spanning an exposure "
+			"period. Pass farm_shift here or at completion if the worker was on one."
+		),
+	}
 	if auto_paused:
 		started["auto_paused"] = auto_paused
 		started["auto_pause_note"] = (
@@ -2537,28 +2533,28 @@ def clean_pass_flag(args: dict):
 def _marked_checklist(task: dict, args: dict) -> dict:
 	"""The task's snapshotted checklist with this submission's ticks applied.
 
-	v0.41.0. NOTHING IS WRITTEN HERE — the caller decides whether the completion
-	survives its other refusals before any of this reaches the database, which is
-	what makes a refused completion leave the checklist exactly as the worker's
-	last successful call left it.
+	    v0.41.0. NOTHING IS WRITTEN HERE — the caller decides whether the completion
+	    survives its other refusals before any of this reaches the database, which is
+	    what makes a refused completion leave the checklist exactly as the worker's
+	    last successful call left it.
 
-	THE ARGUMENT ACCEPTS BOTH SHAPES, and the bare-string one is the reason: a
-	handset marking five items sends five names, and making it send five objects
-	to say the same thing is how a client ends up sending none. An entry may be:
+	    THE ARGUMENT ACCEPTS BOTH SHAPES, and the bare-string one is the reason: a
+	    handset marking five items sends five names, and making it send five objects
+	    to say the same thing is how a client ends up sending none. An entry may be:
 
-        "Press the smoke alarm"                          → done
-        {"item_name": "…", "done": true, "note": "…"}    → done, with what was found
-        {"item_name": "…", "done": false}                → explicitly NOT done
+	    "Press the smoke alarm"                          → done
+	    {"item_name": "…", "done": true, "note": "…"}    → done, with what was found
+	    {"item_name": "…", "done": false}                → explicitly NOT done
 
-    A NAME THE TASK'S CHECKLIST DOES NOT HOLD IS REFUSED, rather than ignored. A
-    typo that silently marks nothing looks exactly like a tick right up until the
-    completion is refused for an item the worker believes they ticked — and the
-    second refusal names a different item from the one they got wrong, which is
-    the worst possible place to spend somebody's afternoon.
+	A NAME THE TASK'S CHECKLIST DOES NOT HOLD IS REFUSED, rather than ignored. A
+	typo that silently marks nothing looks exactly like a tick right up until the
+	completion is refused for an item the worker believes they ticked — and the
+	second refusal names a different item from the one they got wrong, which is
+	the worst possible place to spend somebody's afternoon.
 
-    TICKS ARE CUMULATIVE. An item marked done on an earlier call stays done: a
-    worker who marks three items, walks out of signal, and completes later is one
-    worker doing one job.
+	TICKS ARE CUMULATIVE. An item marked done on an earlier call stays done: a
+	worker who marks three items, walks out of signal, and completes later is one
+	worker doing one job.
 	"""
 	items = checklist_items(task.get("checklist_status"))
 	raw = args.get("checklist")
@@ -2567,7 +2563,7 @@ def _marked_checklist(task: dict, args: dict) -> dict:
 	if not isinstance(raw, list):
 		raise ToolError(
 			"checklist must be a JSON list — either of item names, or of objects with "
-			'`item_name`, `done` and an optional `note`. Nothing was changed.'
+			"`item_name`, `done` and an optional `note`. Nothing was changed."
 		)
 	if not items:
 		raise ToolError(
@@ -2585,14 +2581,12 @@ def _marked_checklist(task: dict, args: dict) -> dict:
 		else:
 			name, done, note = str(entry or "").strip(), True, ""
 		if not name:
-			raise ToolError(
-				f"checklist entry {index + 1} names no item. Nothing was changed."
-			)
+			raise ToolError(f"checklist entry {index + 1} names no item. Nothing was changed.")
 		item = by_name.get(name.casefold())
 		if item is None:
 			raise ToolError(
 				f"this task's checklist has no item called {name!r}. Its items are: "
-				+ ", ".join(repr(str(row.get('item_name') or '')) for row in items)
+				+ ", ".join(repr(str(row.get("item_name") or "")) for row in items)
 				+ ". A name that marks nothing looks exactly like a tick right up until the "
 				"completion is refused for an item you believe you ticked. Nothing was changed."
 			)
@@ -3206,9 +3200,7 @@ def _resolve_authorized_signer(row: dict, notes: list) -> str:
 		return ""
 
 	verifier = str(row.get("verifier_name") or "").strip().casefold()
-	ordered = sorted(
-		live, key=lambda entry: str(entry.get("full_name") or "").strip().casefold() != verifier
-	)
+	ordered = sorted(live, key=lambda entry: str(entry.get("full_name") or "").strip().casefold() != verifier)
 	for entry in ordered:
 		employee = _employee_for_user(str(entry.get("user") or ""))
 		if employee:
@@ -4059,9 +4051,7 @@ def _cohort_note(row: dict) -> str:
 		return ""
 	source = _training_record(row)
 	curriculum = str(source.get("training_type") or "")
-	if not curriculum or not compat.checked(
-		training_sessions.type_row(curriculum).get("group_training")
-	):
+	if not curriculum or not compat.checked(training_sessions.type_row(curriculum).get("group_training")):
 		return ""
 	others = frappe.db.count(
 		ALERT, {"alert_type": TRAINING_ALERT, "dismissed": 0, "company": row.get("company") or ""}
@@ -4237,9 +4227,7 @@ def _bundle_into_training_sessions(
 	`failed` for that curriculum and its alerts fall through to the per-alert
 	path, which is strictly better than losing them.
 	"""
-	if not training_sessions.available() or not compat.has_field(
-		training_sessions.DOCTYPE, "source_alerts"
-	):
+	if not training_sessions.available() or not compat.has_field(training_sessions.DOCTYPE, "source_alerts"):
 		return set()
 
 	groups = {}
@@ -4281,8 +4269,7 @@ def _bundle_into_training_sessions(
 			"company": company,
 			"training_type": curriculum,
 			"attendees": [
-				{"employee": entry["employee"], "employee_name": entry["employee_name"]}
-				for entry in members
+				{"employee": entry["employee"], "employee_name": entry["employee_name"]} for entry in members
 			],
 			"alerts": [entry["alert"]["name"] for entry in members],
 			"training_session": None,
@@ -4734,6 +4721,7 @@ def report_field_task(args: dict) -> ToolResult:
 	asset_doc = None
 	if asset_name:
 		from .asset_tags import ASSET_TYPE_SKILL_MAP, asset_row
+
 		asset_doc = asset_row(asset_name)
 		if not location and not location_doctype:
 			location_doctype = asset_doc.get("location_doctype") or None
@@ -4922,14 +4910,16 @@ def active_minutes(doc) -> int:
 def _describe_segments(doc) -> list:
 	out = []
 	for row in _segment_rows(doc):
-		out.append({
-			"started_at": str(row.get("started_at") or "") or None,
-			"ended_at": str(row.get("ended_at") or "") or None,
-			"minutes": round(float(row.get("minutes") or 0), 1),
-			"ended_by": row.get("ended_by") or None,
-			"reason": row.get("reason") or None,
-			"running": not row.get("ended_at"),
-		})
+		out.append(
+			{
+				"started_at": str(row.get("started_at") or "") or None,
+				"ended_at": str(row.get("ended_at") or "") or None,
+				"minutes": round(float(row.get("minutes") or 0), 1),
+				"ended_by": row.get("ended_by") or None,
+				"reason": row.get("reason") or None,
+				"running": not row.get("ended_at"),
+			}
+		)
 	return out
 
 
@@ -4974,9 +4964,7 @@ def _pause_assignment(name: str, reason: str, when: str, automatic: bool) -> dic
 	path is how the two would come to disagree about what a pause is.
 	"""
 	doc = frappe.get_doc(FARM_TASK_ASSIGNMENT, name)
-	minutes = _close_segment(
-		doc, when, SEGMENT_AUTO_PAUSE if automatic else SEGMENT_PAUSE, reason
-	)
+	minutes = _close_segment(doc, when, SEGMENT_AUTO_PAUSE if automatic else SEGMENT_PAUSE, reason)
 	doc.state = PAUSED
 	doc.paused_at = when
 	doc.pause_reason = reason or None
@@ -5009,9 +4997,7 @@ def _auto_pause_for(worker: str, exclude_task: str, reason: str) -> dict | None:
 	running = in_progress_assignment(worker, exclude_task=exclude_task)
 	if not running:
 		return None
-	return _pause_assignment(
-		str(running["name"]), reason, frappe.utils.now(), automatic=True
-	)
+	return _pause_assignment(str(running["name"]), reason, frappe.utils.now(), automatic=True)
 
 
 # ── pause_farm_task ─────────────────────────────────────────────────────────
@@ -5072,9 +5058,7 @@ def resume_farm_task(args: dict) -> ToolResult:
 			"Nothing was changed."
 		)
 	if assignment.get("state") == IN_PROGRESS:
-		raise ToolError(
-			f"{assignment['name']} is already in progress. Nothing was changed."
-		)
+		raise ToolError(f"{assignment['name']} is already in progress. Nothing was changed.")
 	if assignment.get("state") != PAUSED:
 		raise ToolError(
 			f"{assignment['name']} is {assignment.get('state')}, not {PAUSED}. Nothing was changed."
@@ -5201,14 +5185,17 @@ def _write_link(doc, other: dict, relationship: str, by: str, note: str) -> bool
 			f"{doc.name} already links to {LINK_CAP} other tasks, which is a board being tied "
 			"together rather than a job. Nothing was changed."
 		)
-	doc.append("linked_tasks", {
-		"linked_task": other["name"],
-		"linked_task_name": other.get("task_name"),
-		"relationship": relationship,
-		"linked_by": by or None,
-		"linked_on": frappe.utils.now(),
-		"note": note or None,
-	})
+	doc.append(
+		"linked_tasks",
+		{
+			"linked_task": other["name"],
+			"linked_task_name": other.get("task_name"),
+			"relationship": relationship,
+			"linked_by": by or None,
+			"linked_on": frappe.utils.now(),
+			"note": note or None,
+		},
+	)
 	return True
 
 
@@ -5217,14 +5204,16 @@ def _describe_links(row: dict) -> list:
 	out = []
 	for link in row.get("linked_tasks") or []:
 		link = dict(link)
-		out.append({
-			"task": link.get("linked_task"),
-			"task_name": link.get("linked_task_name") or None,
-			"relationship": link.get("relationship") or LINK_RELATED,
-			"linked_by": link.get("linked_by") or None,
-			"linked_on": str(link.get("linked_on") or "") or None,
-			"note": link.get("note") or None,
-		})
+		out.append(
+			{
+				"task": link.get("linked_task"),
+				"task_name": link.get("linked_task_name") or None,
+				"relationship": link.get("relationship") or LINK_RELATED,
+				"linked_by": link.get("linked_by") or None,
+				"linked_on": str(link.get("linked_on") or "") or None,
+				"note": link.get("note") or None,
+			}
+		)
 	return out
 
 
@@ -5253,7 +5242,15 @@ def open_tasks_on(asset: str, exclude: str = "", location_doctype: str = "", loc
 					filters={**filters, "state": ("in", live)},
 					fields=compat.existing_fields(
 						FARM_TASK,
-						("name", "task_name", "task_type", "state", "assigned_to", "assigned_to_name", "creation"),
+						(
+							"name",
+							"task_name",
+							"task_type",
+							"state",
+							"assigned_to",
+							"assigned_to_name",
+							"creation",
+						),
 					),
 					order_by="creation asc",
 					limit=20,
@@ -5271,7 +5268,7 @@ def open_tasks_on(asset: str, exclude: str = "", location_doctype: str = "", loc
 
 
 def _duplicate_hint(task: dict) -> dict | None:
-	""""There is already an open task for this asset" — the sentence, not the act.
+	""" "There is already an open task for this asset" — the sentence, not the act.
 
 	SURFACED, NEVER ACTED ON. Two reports of a valve are sometimes two valves,
 	and a server that merged them on a name match would be destroying one
@@ -5328,9 +5325,7 @@ def link_farm_tasks(args: dict) -> ToolResult:
 	first = task_row(as_str(args, "task", required=True))
 	second = task_row(as_str(args, "linked_task", required=True) or as_str(args, "other_task"))
 	if first["name"] == second["name"]:
-		raise ToolError(
-			f"{first['name']} cannot be linked to itself. Nothing was changed."
-		)
+		raise ToolError(f"{first['name']} cannot be linked to itself. Nothing was changed.")
 
 	relationship = as_str(args, "relationship") or LINK_RELATED
 	if relationship not in LINK_RELATIONSHIPS:
@@ -5351,9 +5346,7 @@ def link_farm_tasks(args: dict) -> ToolResult:
 		back.save(ignore_permissions=True)
 
 	if not (wrote_forward or wrote_back):
-		raise ToolError(
-			f"{first['name']} and {second['name']} are already linked. Nothing was changed."
-		)
+		raise ToolError(f"{first['name']} and {second['name']} are already linked. Nothing was changed.")
 
 	return ToolResult(
 		data={
@@ -5458,9 +5451,7 @@ def merge_farm_task(args: dict) -> ToolResult:
 		raise ToolError("A task cannot be merged into itself. Nothing was changed.")
 	if duplicate["state"] == MERGED:
 		existing = frappe.db.get_value(FARM_TASK, duplicate["name"], "merged_into")
-		raise ToolError(
-			f"{duplicate['name']} was already merged into {existing}. Nothing was changed."
-		)
+		raise ToolError(f"{duplicate['name']} was already merged into {existing}. Nothing was changed.")
 	if duplicate["state"] in TERMINAL_STATES:
 		raise ToolError(
 			f"{duplicate['name']} is {duplicate['state']}. A finished task is a record of work that "
@@ -5609,17 +5600,19 @@ def subtasks_of(task: str, limit: int = SUBTASK_CAP) -> list:
 	out = []
 	for raw in rows:
 		row = dict(raw)
-		out.append({
-			"name": row.get("name"),
-			"task_name": row.get("task_name"),
-			"task_type": row.get("task_type") or None,
-			"state": row.get("state"),
-			"urgency": row.get("urgency") or "Normal",
-			"assigned_to": row.get("assigned_to") or None,
-			"assigned_to_name": row.get("assigned_to_name") or row.get("assigned_to") or None,
-			"open": row.get("state") not in TERMINAL_STATES,
-			"raised_at": str(row.get("creation") or "") or None,
-		})
+		out.append(
+			{
+				"name": row.get("name"),
+				"task_name": row.get("task_name"),
+				"task_type": row.get("task_type") or None,
+				"state": row.get("state"),
+				"urgency": row.get("urgency") or "Normal",
+				"assigned_to": row.get("assigned_to") or None,
+				"assigned_to_name": row.get("assigned_to_name") or row.get("assigned_to") or None,
+				"open": row.get("state") not in TERMINAL_STATES,
+				"raised_at": str(row.get("creation") or "") or None,
+			}
+		)
 	return out
 
 

@@ -16,6 +16,7 @@ SIX CLAIMS.
 6. `SigningOnBehalfOfSomebodyElse` — an authorized person may file for another
    authorized person, and for nobody else.
 """
+
 import frappe
 
 from erpnext_mcp.tools import signers
@@ -247,9 +248,7 @@ class TheRoster(SignerTestCase):
 
 	def test_update_changes_the_printed_name(self):
 		self.add()
-		data = self.tool_data(
-			"update_authorized_signer", {"user": ANA, "full_name": "Ana Ramos-Ortega"}
-		)
+		data = self.tool_data("update_authorized_signer", {"user": ANA, "full_name": "Ana Ramos-Ortega"})
 		self.assertEqual(data["signer"]["full_name"], "Ana Ramos-Ortega")
 		self.assertEqual(data["updated"], ["full_name"])
 

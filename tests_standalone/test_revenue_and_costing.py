@@ -35,14 +35,13 @@ from erpnext_mcp import enforcement
 from erpnext_mcp.tools import costing
 
 from .fixtures import (
-    MAIN,
-    MAIN_ABBR,
-    MASTER_CUSTOMER,
-    OTHER,
-    V12TestCase,
-    cash,
-    sales,
-    seed_masters,
+	MAIN,
+	MAIN_ABBR,
+	MASTER_CUSTOMER,
+	V12TestCase,
+	cash,
+	sales,
+	seed_masters,
 )
 from .harness import STORE
 
@@ -131,7 +130,10 @@ class TheContractIsTheUnitOfAccount(RevenueTestCase):
 				"company": MAIN,
 				"customer": MASTER_CUSTOMER,
 				"total_value": 100,
-				"obligations": [{"obligation": "A", "allocated_amount": 90}, {"obligation": "B", "allocated_amount": 30}],
+				"obligations": [
+					{"obligation": "A", "allocated_amount": 90},
+					{"obligation": "B", "allocated_amount": 30},
+				],
 			},
 		)
 		self.assertIn("more than the contract", error)
@@ -241,7 +243,7 @@ class TheContractIsTheUnitOfAccount(RevenueTestCase):
 				],
 			},
 		)["contract"]
-		delivered = [row for row in after["obligations"] if row["obligation"].startswith("Deliver")][0]
+		delivered = next(row for row in after["obligations"] if row["obligation"].startswith("Deliver"))
 		self.assertTrue(delivered["satisfied"])
 		self.assertEqual(delivered["satisfied_on"], "2026-09-12")
 		self.assertEqual(delivered["evidence"], "SCALE-0031")
@@ -402,9 +404,7 @@ class TheTraceReportsItsOwnBreaks(RevenueTestCase):
 	def test_linking_a_settlement_adds_the_hop(self):
 		created = self.a_contract()["contract"]
 		settlement = self.a_settlement()
-		self.tool_data(
-			"link_settlement_to_contract", {"settlement": settlement, "contract": created["name"]}
-		)
+		self.tool_data("link_settlement_to_contract", {"settlement": settlement, "contract": created["name"]})
 		data = self.tool_data("trace_contract_to_cash", {"contract": created["name"]})
 		self.assertIn("settlement", data["hops_present"])
 
@@ -466,7 +466,9 @@ class ACarryingValueIsAlwaysEvidenced(RevenueTestCase):
 		self.assertIn("different statements", data["valuation_note"])
 
 	def test_an_opening_value_becomes_the_first_history_row(self):
-		data = self.a_block(current_value=450000, basis="establishment cost", valuation_date="2026-01-01")["asset"]
+		data = self.a_block(current_value=450000, basis="establishment cost", valuation_date="2026-01-01")[
+			"asset"
+		]
 		self.assertEqual(data["current_value"], 450000)
 		self.assertEqual(data["valuation_count"], 1)
 		self.assertEqual(data["valuations"][0]["basis"], "establishment cost")
@@ -496,9 +498,7 @@ class ACarryingValueIsAlwaysEvidenced(RevenueTestCase):
 		"""A fair value with no stated basis is somebody's opinion formatted as
 		a figure."""
 		created = self.a_block()["asset"]
-		error = self.tool_error(
-			"record_biological_asset_valuation", {"asset": created["name"], "value": 100}
-		)
+		error = self.tool_error("record_biological_asset_valuation", {"asset": created["name"], "value": 100})
 		self.assertIn("basis", error)
 
 	def test_a_future_dated_valuation_is_refused(self):

@@ -88,8 +88,7 @@ class MinimumWageTestCase(IntegrationTestCase):
 	def one_short_day(self, employee=WORKER, state="OR"):
 		"""Eight hours that earn almost nothing, so the floor is what pays them."""
 		self.seed_shifts(
-			shift("S1", "2025-06-02", start="06:00:00", end="14:00:00", state=state,
-			      crew=[member(employee)]),
+			shift("S1", "2025-06-02", start="06:00:00", end="14:00:00", state=state, crew=[member(employee)]),
 		)
 
 	def summary_of(self, tool, args):
@@ -373,9 +372,7 @@ class TheCrossCheckReadsTheSameTable(MinimumWageTestCase):
 		self.set_min_wage("OR", minimum_wage=OR_LOCAL)
 		self.structure(WORKER, rate=15.0)
 		self.one_short_day()
-		slip = next(
-			row for row in self.period_preview()["slips"] if row["employee"] == WORKER
-		)
+		slip = next(row for row in self.period_preview()["slips"] if row["employee"] == WORKER)
 		detail = slip["minimum_wage_detail"]
 		self.assertTrue(detail["meets_minimum_wage"], detail)
 		self.assertEqual(detail["by_state"]["OR"]["minimum_wage"], OR_LOCAL)
@@ -391,7 +388,5 @@ class TheCrossCheckReadsTheSameTable(MinimumWageTestCase):
 	def test_the_region_reaches_the_period_run_too(self):
 		self.structure(WORKER, rate=15.00, min_wage_region="Portland Metro")
 		self.one_short_day()
-		slip = next(
-			row for row in self.period_preview()["slips"] if row["employee"] == WORKER
-		)
+		slip = next(row for row in self.period_preview()["slips"] if row["employee"] == WORKER)
 		self.assertEqual(slip["minimum_wage_detail"]["by_state"]["OR"]["minimum_wage"], 15.95)

@@ -122,9 +122,7 @@ class TheDetectorBacklogIsInTheRegisterToo(HousingTestCase):
 
 	def test_recording_both_dates_takes_it_off_the_list(self):
 		self.a_parcel()
-		unit = self.a_facility(
-			smoke_detector_last_test=self.TODAY, co_detector_last_test=self.TODAY
-		)["name"]
+		unit = self.a_facility(smoke_detector_last_test=self.TODAY, co_detector_last_test=self.TODAY)["name"]
 		data = self.tool_data("list_housing_units", {"company": MAIN})
 		self.assertNotIn(unit, data["overdue_detector_tests"])
 		row = next(entry for entry in data["units"] if entry["name"] == unit)
@@ -135,9 +133,9 @@ class TheDetectorBacklogIsInTheRegisterToo(HousingTestCase):
 		"""An alert saying only 'a detector is overdue' sends somebody to test the
 		wrong one, and so would a register column."""
 		self.a_parcel()
-		unit = self.a_facility(
-			smoke_detector_last_test=self.TODAY, co_detector_last_test="2024-01-01"
-		)["name"]
+		unit = self.a_facility(smoke_detector_last_test=self.TODAY, co_detector_last_test="2024-01-01")[
+			"name"
+		]
 		row = next(
 			entry
 			for entry in self.tool_data("list_housing_units", {"company": MAIN})["units"]
@@ -160,7 +158,9 @@ class TheDetectorBacklogIsInTheRegisterToo(HousingTestCase):
 		)
 		self.assertFalse(row["detectors_required"])
 		self.assertIsNone(row["detector_test_overdue"])
-		self.assertNotIn(unit, self.tool_data("list_housing_units", {"company": MAIN})["overdue_detector_tests"])
+		self.assertNotIn(
+			unit, self.tool_data("list_housing_units", {"company": MAIN})["overdue_detector_tests"]
+		)
 
 	def test_an_uninhabitable_facility_is_not_chased_for_a_detector_test(self):
 		"""Assignments into it are already refused, so there is nobody to protect
@@ -548,9 +548,7 @@ class TheHousingDeductionIsTheEntitysAnswerAndNotTheForemans(HousingTestCase):
 		self._company_default("No")
 		created = self.an_assignment()
 		self.assertEqual(
-			frappe.db.get_value(
-				"Housing Assignment", created["name"], "housing_deduction_from_wages"
-			),
+			frappe.db.get_value("Housing Assignment", created["name"], "housing_deduction_from_wages"),
 			"No",
 		)
 
@@ -561,9 +559,7 @@ class TheHousingDeductionIsTheEntitysAnswerAndNotTheForemans(HousingTestCase):
 		self._company_default("No")
 		created = self.an_assignment(housing_deduction_from_wages="Yes")
 		self.assertEqual(
-			frappe.db.get_value(
-				"Housing Assignment", created["name"], "housing_deduction_from_wages"
-			),
+			frappe.db.get_value("Housing Assignment", created["name"], "housing_deduction_from_wages"),
 			"Yes",
 		)
 
@@ -574,9 +570,7 @@ class TheHousingDeductionIsTheEntitysAnswerAndNotTheForemans(HousingTestCase):
 		unset and the register reports it as Unknown."""
 		created = self.an_assignment()
 		self.assertEqual(
-			frappe.db.get_value(
-				"Housing Assignment", created["name"], "housing_deduction_from_wages"
-			),
+			frappe.db.get_value("Housing Assignment", created["name"], "housing_deduction_from_wages"),
 			"Unknown",
 		)
 		listed = self.tool_data("list_housing_assignments", {"company": MAIN})

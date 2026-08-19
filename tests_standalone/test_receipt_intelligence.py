@@ -288,7 +288,9 @@ class AliasLearning(ReceiptIntelligenceTestCase):
 
 	def test_clearing_a_supplier_teaches_nothing(self):
 		name = self.capture(supplier=ACE)["name"]
-		self.assertIsNone(self.tool_data("update_expense_receipt", {"name": name, "supplier": ""})["alias_learned"])
+		self.assertIsNone(
+			self.tool_data("update_expense_receipt", {"name": name, "supplier": ""})["alias_learned"]
+		)
 		self.assertEqual(STORE.rows(MERCHANT_ALIAS), [])
 
 	def test_a_register_that_refuses_a_row_does_not_fail_the_update(self):
@@ -523,9 +525,7 @@ class CascadeOrdering(ReceiptIntelligenceTestCase):
 		self.assertEqual(out["supplier"], ACE)
 
 	def test_a_domain_outranks_a_name_score(self):
-		out = receipts.resolve_merchant(
-			"CASCADE IRRIGATION SUPPLY CO", merchant_url="cascadeirrigation.com"
-		)
+		out = receipts.resolve_merchant("CASCADE IRRIGATION SUPPLY CO", merchant_url="cascadeirrigation.com")
 		self.assertEqual(out["method"], "URL")
 		self.assertGreater(out["confidence"], receipts._MATCH_CEILING - 0.1)
 
@@ -548,9 +548,7 @@ class CascadeOrdering(ReceiptIntelligenceTestCase):
 		self.assertEqual([step["step"] for step in self.resolve()["steps"]], ["alias"])
 
 	def test_the_step_that_won_names_the_supplier_it_matched(self):
-		out = receipts.resolve_merchant(
-			"CASCADE IRRIGATION SUPPLY CO", merchant_url="cascadeirrigation.com"
-		)
+		out = receipts.resolve_merchant("CASCADE IRRIGATION SUPPLY CO", merchant_url="cascadeirrigation.com")
 		url_step = next(step for step in out["steps"] if step["step"] == "url")
 		self.assertEqual(url_step["matched"], "Cascade Irrigation Supply")
 
@@ -873,9 +871,7 @@ class TheSchema(ReceiptIntelligenceTestCase):
 		self.assertEqual(self.alias_row("VALLEY OP 14")["alias_key"], "VALLEY OP 14")
 
 	def test_an_alias_that_normalises_to_nothing_is_refused(self):
-		doc = frappe.get_doc(
-			{"doctype": MERCHANT_ALIAS, "alias": "LLC, Inc.", "canonical_supplier": ACE}
-		)
+		doc = frappe.get_doc({"doctype": MERCHANT_ALIAS, "alias": "LLC, Inc.", "canonical_supplier": ACE})
 		with self.assertRaises(Exception) as caught:
 			doc.insert()
 		self.assertIn("empty key", str(caught.exception))

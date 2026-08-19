@@ -55,15 +55,9 @@ def compliance_custom_fields(doctype=None) -> list:
 	way. This filter is what keeps them about their own subject.
 	"""
 	declared = {
-		(target.doctype, field.fieldname)
-		for target in compliance_fields.TARGETS
-		for field in target.fields
+		(target.doctype, field.fieldname) for target in compliance_fields.TARGETS for field in target.fields
 	}
-	return [
-		row
-		for row in custom_fields(doctype)
-		if (row.get("dt"), row.get("fieldname")) in declared
-	]
+	return [row for row in custom_fields(doctype) if (row.get("dt"), row.get("fieldname")) in declared]
 
 
 class TheTable(V12TestCase):

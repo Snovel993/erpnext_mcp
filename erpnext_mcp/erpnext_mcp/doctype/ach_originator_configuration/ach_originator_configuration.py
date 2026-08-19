@@ -9,6 +9,7 @@ The blanks are filled in here rather than at generation time, so that what an
 operator sees on the form is what will actually appear in the file — a default
 resolved silently downstream is a default nobody can check before payday.
 """
+
 from __future__ import annotations
 
 import re
@@ -25,7 +26,8 @@ class ACHOriginatorConfiguration(Document):
 
 		if str(self.immediate_destination or "").strip():
 			self.immediate_destination = _clean_routing(
-				self.immediate_destination, "immediate destination",
+				self.immediate_destination,
+				"immediate destination",
 			)
 		else:
 			self.immediate_destination = self.originating_dfi

@@ -213,9 +213,7 @@ class TheDoubleActuallyRefuses(SeededTestCase):
 
 	def test_a_linked_document_is_refused(self):
 		STORE.seed("Related Party", [{"name": "RP-0001", "party_name": "Alex", "company": MAIN}])
-		STORE.seed(
-			"Family", [{"name": "Cousin", "family_member_name": "Cousin", "related_party": "RP-0001"}]
-		)
+		STORE.seed("Family", [{"name": "Cousin", "family_member_name": "Cousin", "related_party": "RP-0001"}])
 		with self.assertRaises(frappe.LinkExistsError):
 			frappe.delete_doc("Related Party", "RP-0001")
 
@@ -229,9 +227,7 @@ class TheDoubleActuallyRefuses(SeededTestCase):
 	def test_the_message_names_both_ends(self):
 		"""The app prints this. "Cannot delete" with no names is not actionable."""
 		STORE.seed("Related Party", [{"name": "RP-0003", "party_name": "Cy", "company": MAIN}])
-		STORE.seed(
-			"Family", [{"name": "Nephew", "family_member_name": "Nephew", "related_party": "RP-0003"}]
-		)
+		STORE.seed("Family", [{"name": "Nephew", "family_member_name": "Nephew", "related_party": "RP-0003"}])
 		with self.assertRaises(frappe.LinkExistsError) as caught:
 			frappe.delete_doc("Related Party", "RP-0003")
 		self.assertIn("RP-0003", str(caught.exception))

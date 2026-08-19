@@ -32,11 +32,13 @@ SEVEN CLASSES.
 7. `TheRegisterReadsBack` — what an operator sees when they ask what is enforced.
 """
 
+from typing import ClassVar
+
 import frappe
 
 from erpnext_mcp import compliance_rules, controls, enforcement
 
-from .fixtures import MAIN, MAIN_ABBR, OTHER, V12TestCase, cash, sales, supplies
+from .fixtures import MAIN, MAIN_ABBR, OTHER, V12TestCase, cash, supplies
 from .harness import STORE
 
 TODAY = "2026-08-16"
@@ -68,7 +70,9 @@ class ControlsTestCase(V12TestCase):
 	def setUp(self):
 		super().setUp()
 		self.configure(**ALL_ON)
-		STORE.seed("Role", [{"name": name} for name in ("Farm Manager", "Accounts Manager", "System Manager")])
+		STORE.seed(
+			"Role", [{"name": name} for name in ("Farm Manager", "Accounts Manager", "System Manager")]
+		)
 		compliance_rules.seed_compliance_rules()
 
 	# ── helpers ─────────────────────────────────────────────────────────────
@@ -78,16 +82,12 @@ class ControlsTestCase(V12TestCase):
 		Through the rule record rather than by monkey-patching, because the switch
 		being a RECORD an operator edits is half of what this release is.
 		"""
-		rows = frappe.db.get_all(
-			"Compliance Rule", filters={"control_point": control_point}, pluck="name"
-		)
+		rows = frappe.db.get_all("Compliance Rule", filters={"control_point": control_point}, pluck="name")
 		self.assertTrue(rows, f"no seeded rule for control point {control_point!r}")
 		frappe.db.set_value("Compliance Rule", rows[0], "enforcement_mode", "Enforced")
 
 	def disable(self, control_point: str) -> None:
-		rows = frappe.db.get_all(
-			"Compliance Rule", filters={"control_point": control_point}, pluck="name"
-		)
+		rows = frappe.db.get_all("Compliance Rule", filters={"control_point": control_point}, pluck="name")
 		frappe.db.set_value("Compliance Rule", rows[0], "enabled", 0)
 
 	def a_threshold(self, **overrides):
@@ -128,7 +128,7 @@ class ControlsTestCase(V12TestCase):
 class TheChainIsEvaluatedByAmount(ControlsTestCase):
 	"""The pure engine. No site, no tools — a table in, an authority out."""
 
-	CHAIN = {
+	CHAIN: ClassVar[dict] = {
 		"name": "T-1",
 		"auto_approve_below": 1000,
 		"levels": [
@@ -157,7 +157,9 @@ class TheChainIsEvaluatedByAmount(ControlsTestCase):
 
 	def test_a_ceiling_is_inclusive(self):
 		self.assertEqual(controls.required_authority(self.CHAIN, 5000)["approver_role"], "Farm Manager")
-		self.assertEqual(controls.required_authority(self.CHAIN, 5000.01)["approver_role"], "Accounts Manager")
+		self.assertEqual(
+			controls.required_authority(self.CHAIN, 5000.01)["approver_role"], "Accounts Manager"
+		)
 
 	def test_the_uncapped_rung_is_the_top_however_it_was_typed(self):
 		verdict = controls.required_authority(self.CHAIN, 10_000_000)
@@ -276,9 +278,10 @@ class PeriodsAndTheirSteps(ControlsTestCase):
 			"create_closing_checklist",
 			{"company": MAIN, "period_start": "2026-03-01", "period_end": "2026-03-31"},
 		)
-		self.assertEqual(data["checklist"]["item_count"], len(__import__(
-			"erpnext_mcp.tools.controls", fromlist=["DEFAULT_STEPS"]
-		).DEFAULT_STEPS))
+		self.assertEqual(
+			data["checklist"]["item_count"],
+			len(__import__("erpnext_mcp.tools.controls", fromlist=["DEFAULT_STEPS"]).DEFAULT_STEPS),
+		)
 		self.assertIn("defaults_note", data)
 
 	def test_the_seeded_steps_carry_spanish(self):
@@ -326,7 +329,7 @@ class PeriodsAndTheirSteps(ControlsTestCase):
 				"evidence": "ACC-2026-0031",
 			},
 		)
-		row = [item for item in data["checklist"]["items"] if item["step"] == "Post accruals"][0]
+		row = next(item for item in data["checklist"]["items"] if item["step"] == "Post accruals")
 		self.assertTrue(row["completed"])
 		self.assertEqual(row["completed_by"], "Administrator")
 		self.assertEqual(row["evidence"], "ACC-2026-0031")
@@ -356,7 +359,7 @@ class PeriodsAndTheirSteps(ControlsTestCase):
 				],
 			},
 		)
-		row = [item for item in after["checklist"]["items"] if item["step"] == "Post accruals"][0]
+		row = next(item for item in after["checklist"]["items"] if item["step"] == "Post accruals")
 		self.assertTrue(row["completed"])
 		self.assertEqual(row["completed_by"], "Administrator")
 
@@ -552,20 +555,26 @@ class AdvisoryAndEnforcedDifferByRefusalAlone(ControlsTestCase):
 	def test_both_modes_reach_an_identical_finding(self):
 		"""THE EQUIVALENCE, FIELD BY FIELD."""
 		self.a_locked_march()
-		advisory = self.tool_data("check_journal_entry_controls", {
-			"company": MAIN,
-			"posting_date": "2026-03-15",
-			"total": 250,
-			"accounts": [supplies(MAIN_ABBR), cash(MAIN_ABBR)],
-		})["controls"]["period_close_lockdown"]["findings"]
+		advisory = self.tool_data(
+			"check_journal_entry_controls",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-15",
+				"total": 250,
+				"accounts": [supplies(MAIN_ABBR), cash(MAIN_ABBR)],
+			},
+		)["controls"]["period_close_lockdown"]["findings"]
 
 		self.enforce("period_close_lockdown")
-		enforced = self.tool_data("check_journal_entry_controls", {
-			"company": MAIN,
-			"posting_date": "2026-03-15",
-			"total": 250,
-			"accounts": [supplies(MAIN_ABBR), cash(MAIN_ABBR)],
-		})["controls"]["period_close_lockdown"]["findings"]
+		enforced = self.tool_data(
+			"check_journal_entry_controls",
+			{
+				"company": MAIN,
+				"posting_date": "2026-03-15",
+				"total": 250,
+				"accounts": [supplies(MAIN_ABBR), cash(MAIN_ABBR)],
+			},
+		)["controls"]["period_close_lockdown"]["findings"]
 
 		self.assertEqual(advisory, enforced)
 		self.assertEqual(len(advisory), 1)

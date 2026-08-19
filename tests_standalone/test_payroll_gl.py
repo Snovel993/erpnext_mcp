@@ -193,7 +193,8 @@ class TheComponentsAreTheUnit(V12TestCase):
 		for component in payroll_gl.EMPLOYER_COMPONENTS:
 			with self.subTest(component=component):
 				self.assertEqual(
-					payroll_gl.COMPONENT_INDEX[component]["sides"], ("debit", "credit"),
+					payroll_gl.COMPONENT_INDEX[component]["sides"],
+					("debit", "credit"),
 				)
 
 	def test_amounts_come_off_the_slip_under_the_names_a_slip_uses(self):
@@ -224,10 +225,18 @@ class TheComponentsAreTheUnit(V12TestCase):
 
 	def test_a_pre_v0_40_slip_is_recognised_as_carrying_no_employer_figures(self):
 		"""Four zeros and four absences are different facts about a payroll."""
-		old = {k: v for k, v in slip().items() if k not in (
-			"social_security_employer", "medicare_employer", "futa",
-			"state_unemployment", "state_employer_other",
-		)}
+		old = {
+			k: v
+			for k, v in slip().items()
+			if k
+			not in (
+				"social_security_employer",
+				"medicare_employer",
+				"futa",
+				"state_unemployment",
+				"state_employer_other",
+			)
+		}
 		self.assertFalse(payroll_gl.employer_taxes_recorded(old))
 		self.assertTrue(payroll_gl.employer_taxes_recorded(slip()))
 
@@ -288,9 +297,7 @@ class TheMappingIsARecord(V12TestCase):
 	def test_dropping_the_employer_half_drops_its_requirements_too(self):
 		rows = [row for row in ROWS if row["component"] in payroll_gl.CORE_COMPONENTS]
 		amounts = payroll_gl.component_amounts(slip())
-		self.assertTrue(
-			payroll_gl.validate_mapping(rows, amounts, include_employer=False)["complete"]
-		)
+		self.assertTrue(payroll_gl.validate_mapping(rows, amounts, include_employer=False)["complete"])
 		self.assertFalse(payroll_gl.validate_mapping(rows, amounts)["complete"])
 
 	def test_a_component_name_this_app_never_heard_of_is_named(self):
@@ -300,7 +307,8 @@ class TheMappingIsARecord(V12TestCase):
 	def test_a_mapping_keyed_by_component_reads_the_same(self):
 		keyed = {row["component"]: row for row in ROWS}
 		self.assertEqual(
-			payroll_gl.mapping_index(keyed), payroll_gl.mapping_index(ROWS),
+			payroll_gl.mapping_index(keyed),
+			payroll_gl.mapping_index(ROWS),
 		)
 
 
@@ -342,9 +350,20 @@ class TheEntryBalances(V12TestCase):
 
 	def test_each_employer_component_balances_against_itself(self):
 		"""An expense and a liability of the same amount, from one component."""
-		entry = self.entry(slip(gross=0, federal=0, social=0, medicare=0, state=0,
-		                        ss_employer=0, medicare_employer=0, futa=0, suta=40.0,
-		                        state_other=0))
+		entry = self.entry(
+			slip(
+				gross=0,
+				federal=0,
+				social=0,
+				medicare=0,
+				state=0,
+				ss_employer=0,
+				medicare_employer=0,
+				futa=0,
+				suta=40.0,
+				state_other=0,
+			)
+		)
 		self.assertTrue(entry["balanced"])
 		self.assertEqual(entry["total_debit"], 40.0)
 		accounts = {line["account"] for line in entry["accounts"]}
@@ -370,7 +389,10 @@ class TheEntryBalances(V12TestCase):
 
 	def test_the_remark_names_the_run_the_worker_and_the_slip(self):
 		entry = payroll_gl.build_journal_entry(
-			slip(), ROWS, payroll_entry="PAY-2025-0001", slip_name="abc123",
+			slip(),
+			ROWS,
+			payroll_entry="PAY-2025-0001",
+			slip_name="abc123",
 		)
 		self.assertIn("PAY-2025-0001", entry["user_remark"])
 		self.assertIn("Ana Reyes", entry["user_remark"])
@@ -379,15 +401,24 @@ class TheEntryBalances(V12TestCase):
 
 	def test_a_zero_gross_slip_is_warned_about_and_not_refused(self):
 		entry = payroll_gl.build_journal_entry(
-			slip(gross=0, federal=0, social=0, medicare=0, state=0), ROWS,
+			slip(gross=0, federal=0, social=0, medicare=0, state=0),
+			ROWS,
 		)
 		self.assertTrue(any("zero gross pay" in w for w in entry["warnings"]))
 
 	def test_a_pre_v0_40_slip_says_its_employer_taxes_are_not_posted(self):
-		old = {k: v for k, v in slip().items() if k not in (
-			"social_security_employer", "medicare_employer", "futa",
-			"state_unemployment", "state_employer_other",
-		)}
+		old = {
+			k: v
+			for k, v in slip().items()
+			if k
+			not in (
+				"social_security_employer",
+				"medicare_employer",
+				"futa",
+				"state_unemployment",
+				"state_employer_other",
+			)
+		}
 		entry = payroll_gl.build_journal_entry(old, ROWS)
 		self.assertTrue(entry["balanced"])
 		self.assertTrue(any("before v0.40.0" in w for w in entry["warnings"]))
@@ -405,10 +436,7 @@ class LinesMerge(V12TestCase):
 
 	def test_employee_fica_is_one_credit_line_not_two(self):
 		entry = payroll_gl.build_journal_entry(slip(), ROWS)
-		fica = [
-			line for line in entry["accounts"]
-			if line["account"] == FICA_PAYABLE and line.get("credit")
-		]
+		fica = [line for line in entry["accounts"] if line["account"] == FICA_PAYABLE and line.get("credit")]
 		self.assertEqual(len(fica), 1)
 		# 62.00 employee SS + 14.50 employee Medicare + 62.00 employer SS
 		# + 14.50 employer Medicare, all one remittance and one account.
@@ -417,8 +445,7 @@ class LinesMerge(V12TestCase):
 	def test_the_merged_line_still_says_what_it_was_built_from(self):
 		entry = payroll_gl.build_journal_entry(slip(), ROWS)
 		fica = next(
-			line for line in entry["accounts"]
-			if line["account"] == FICA_PAYABLE and line.get("credit")
+			line for line in entry["accounts"] if line["account"] == FICA_PAYABLE and line.get("credit")
 		)
 		self.assertIn("Social Security withheld", fica["user_remark"])
 		self.assertIn("Medicare", fica["user_remark"])
@@ -432,17 +459,15 @@ class LinesMerge(V12TestCase):
 
 	def test_the_four_employer_expenses_are_one_debit_line(self):
 		entry = payroll_gl.build_journal_entry(slip(), ROWS)
-		expense = [
-			line for line in entry["accounts"]
-			if line["account"] == TAX_EXPENSE and line.get("debit")
-		]
+		expense = [line for line in entry["accounts"] if line["account"] == TAX_EXPENSE and line.get("debit")]
 		self.assertEqual(len(expense), 1)
 		self.assertEqual(expense[0]["debit"], 62.0 + 14.5 + 6.0 + 12.0 + 25.0)
 
 	def test_a_component_with_no_account_is_reported_rather_than_dropped(self):
 		rows = [row for row in ROWS if row["component"] != "SUTA"]
 		_lines, _breakdown, unmapped = payroll_gl.journal_lines(
-			payroll_gl.component_amounts(slip()), rows,
+			payroll_gl.component_amounts(slip()),
+			rows,
 		)
 		self.assertEqual([row["component"] for row in unmapped], ["SUTA"])
 
@@ -454,8 +479,10 @@ class ConsolidatedAndPerEmployee(V12TestCase):
 	"""Same totals, different number of entries. Nothing else differs."""
 
 	def slips(self):
-		return [slip(WORKER), slip(PICKER, gross=2000.0, federal=190.0, social=124.0,
-		                            medicare=29.0, state=61.0)]
+		return [
+			slip(WORKER),
+			slip(PICKER, gross=2000.0, federal=190.0, social=124.0, medicare=29.0, state=61.0),
+		]
 
 	def test_consolidated_is_one_entry_for_the_whole_run(self):
 		plan = payroll_gl.build_payroll_journal_entries(self.slips(), ROWS, company=MAIN)
@@ -465,17 +492,24 @@ class ConsolidatedAndPerEmployee(V12TestCase):
 
 	def test_per_employee_is_one_each(self):
 		plan = payroll_gl.build_payroll_journal_entries(
-			self.slips(), ROWS, company=MAIN, mode="per_employee",
+			self.slips(),
+			ROWS,
+			company=MAIN,
+			mode="per_employee",
 		)
 		self.assertEqual(plan["entry_count"], 2)
 		self.assertEqual(
-			[entry["employee"] for entry in plan["journal_entries"]], [WORKER, PICKER],
+			[entry["employee"] for entry in plan["journal_entries"]],
+			[WORKER, PICKER],
 		)
 
 	def test_the_two_modes_book_the_same_money(self):
 		one = payroll_gl.build_payroll_journal_entries(self.slips(), ROWS, company=MAIN)
 		many = payroll_gl.build_payroll_journal_entries(
-			self.slips(), ROWS, company=MAIN, mode="per_employee",
+			self.slips(),
+			ROWS,
+			company=MAIN,
+			mode="per_employee",
 		)
 		self.assertEqual(one["total_debit"], many["total_debit"])
 		self.assertEqual(one["total_credit"], many["total_credit"])
@@ -485,30 +519,65 @@ class ConsolidatedAndPerEmployee(V12TestCase):
 		for mode in ("consolidated", "per_employee"):
 			with self.subTest(mode=mode):
 				plan = payroll_gl.build_payroll_journal_entries(
-					self.slips(), ROWS, company=MAIN, mode=mode,
+					self.slips(),
+					ROWS,
+					company=MAIN,
+					mode=mode,
 				)
 				self.assertTrue(plan["balanced"], plan["unbalanced"])
 
 	def test_a_slip_of_zeros_is_skipped_and_named_in_both_modes(self):
-		rows = [*self.slips(), slip(IDLE, gross=0, federal=0, social=0, medicare=0,
-		                            state=0, ss_employer=0, medicare_employer=0,
-		                            futa=0, suta=0, state_other=0)]
+		rows = [
+			*self.slips(),
+			slip(
+				IDLE,
+				gross=0,
+				federal=0,
+				social=0,
+				medicare=0,
+				state=0,
+				ss_employer=0,
+				medicare_employer=0,
+				futa=0,
+				suta=0,
+				state_other=0,
+			),
+		]
 		for mode in ("consolidated", "per_employee"):
 			with self.subTest(mode=mode):
 				plan = payroll_gl.build_payroll_journal_entries(
-					rows, ROWS, company=MAIN, mode=mode,
+					rows,
+					ROWS,
+					company=MAIN,
+					mode=mode,
 				)
 				self.assertEqual([row["employee"] for row in plan["skipped"]], [IDLE])
 
 	def test_a_run_of_nothing_but_zeros_produces_no_entry_at_all(self):
-		rows = [slip(IDLE, gross=0, federal=0, social=0, medicare=0, state=0,
-		             ss_employer=0, medicare_employer=0, futa=0, suta=0, state_other=0)]
+		rows = [
+			slip(
+				IDLE,
+				gross=0,
+				federal=0,
+				social=0,
+				medicare=0,
+				state=0,
+				ss_employer=0,
+				medicare_employer=0,
+				futa=0,
+				suta=0,
+				state_other=0,
+			)
+		]
 		plan = payroll_gl.build_payroll_journal_entries(rows, ROWS, company=MAIN)
 		self.assertEqual(plan["entry_count"], 0)
 
 	def test_an_unknown_mode_falls_back_to_consolidated_in_the_pure_function(self):
 		plan = payroll_gl.build_payroll_journal_entries(
-			self.slips(), ROWS, company=MAIN, mode="whatever",
+			self.slips(),
+			ROWS,
+			company=MAIN,
+			mode="whatever",
 		)
 		self.assertEqual(plan["mode"], "consolidated")
 
@@ -516,8 +585,13 @@ class ConsolidatedAndPerEmployee(V12TestCase):
 		old = []
 		for employee in (WORKER, PICKER):
 			row = slip(employee)
-			for key in ("social_security_employer", "medicare_employer", "futa",
-			            "state_unemployment", "state_employer_other"):
+			for key in (
+				"social_security_employer",
+				"medicare_employer",
+				"futa",
+				"state_unemployment",
+				"state_employer_other",
+			):
 				row.pop(key)
 			old.append(row)
 		plan = payroll_gl.build_payroll_journal_entries(old, ROWS, company=MAIN, mode="per_employee")
@@ -556,43 +630,63 @@ class PayrollGLTestCase(V12TestCase):
 		counter = 900
 		for number, name, root, is_group in chart:
 			counter += 2
-			rows.append({
-				"name": f"{number} - {name} - {MAIN_ABBR}",
-				"account_name": name,
-				"account_number": number,
-				"is_group": is_group,
-				"root_type": root,
-				"account_type": "",
-				"account_currency": "USD",
-				"disabled": 0,
-				"company": MAIN,
-				"lft": counter,
-				"rgt": counter + 1,
-			})
+			rows.append(
+				{
+					"name": f"{number} - {name} - {MAIN_ABBR}",
+					"account_name": name,
+					"account_number": number,
+					"is_group": is_group,
+					"root_type": root,
+					"account_type": "",
+					"account_currency": "USD",
+					"disabled": 0,
+					"company": MAIN,
+					"lft": counter,
+					"rgt": counter + 1,
+				}
+			)
 		STORE.seed("Account", rows)
 
 	def _seed_employees(self):
-		STORE.seed("Employee", [
-			{"name": name, "employee_name": NAMES[name], "company": MAIN,
-			 "status": "Active", "date_of_joining": "2025-01-15"}
-			for name in (WORKER, PICKER, IDLE)
-		])
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": name,
+					"employee_name": NAMES[name],
+					"company": MAIN,
+					"status": "Active",
+					"date_of_joining": "2025-01-15",
+				}
+				for name in (WORKER, PICKER, IDLE)
+			],
+		)
 
 	def configure_mapping(self, components=None, **extra):
-		return self.tool_data("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": components if components is not None else FULL_MAPPING,
-			**extra,
-		})
+		return self.tool_data(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": components if components is not None else FULL_MAPPING,
+				**extra,
+			},
+		)
 
 	def seed_run(self, slips=None, status="Calculated", name="PAY-2025-00001"):
 		"""A Farm Payroll Entry as `run_payroll_for_period` would have left it."""
 		rows = slips if slips is not None else [slip(WORKER), slip(PICKER, gross=2000.0)]
 		child = []
 		for index, row in enumerate(rows, start=1):
-			entry = {k: v for k, v in row.items() if k not in (
-				"pay_period_start", "pay_period_end", "company",
-			)}
+			entry = {
+				k: v
+				for k, v in row.items()
+				if k
+				not in (
+					"pay_period_start",
+					"pay_period_end",
+					"company",
+				)
+			}
 			entry["name"] = f"{name}-slip-{index}"
 			entry["parent"] = name
 			entry["parenttype"] = "Farm Payroll Entry"
@@ -600,24 +694,29 @@ class PayrollGLTestCase(V12TestCase):
 			entry["minimum_wage_check"] = 1
 			child.append(entry)
 
-		STORE.seed("Farm Payroll Entry", [{
-			"name": name,
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"pay_frequency": "Biweekly",
-			"status": status,
-			"total_gross": round(sum(r["gross_pay"] for r in rows), 2),
-			"total_deductions": round(sum(r["total_deductions"] for r in rows), 2),
-			"total_net": round(sum(r["net_pay"] for r in rows), 2),
-			"employee_count": len(rows),
-			"gl_status": "Not Posted",
-			"slips": child,
-			"gl_postings": [],
-		}])
+		STORE.seed(
+			"Farm Payroll Entry",
+			[
+				{
+					"name": name,
+					"company": MAIN,
+					"pay_period_start": PERIOD_START,
+					"pay_period_end": PERIOD_END,
+					"pay_frequency": "Biweekly",
+					"status": status,
+					"total_gross": round(sum(r["gross_pay"] for r in rows), 2),
+					"total_deductions": round(sum(r["total_deductions"] for r in rows), 2),
+					"total_net": round(sum(r["net_pay"] for r in rows), 2),
+					"employee_count": len(rows),
+					"gl_status": "Not Posted",
+					"slips": child,
+					"gl_postings": [],
+				}
+			],
+		)
 		return name
 
-    # -- shorthands ------------------------------------------------------
+		# -- shorthands ------------------------------------------------------
 
 	def preview(self, **extra):
 		return self.tool_data("preview_payroll_gl", {"payroll_entry": "PAY-2025-00001", **extra})
@@ -655,10 +754,11 @@ class PostingWritesDraftsOnly(PayrollGLTestCase):
 	def test_the_entry_balances_on_the_site_too(self):
 		data = self.post()
 		name = data["journal_entries"][0]
-		rows = [
-			row for row in STORE.rows("Journal Entry Account")
-			if row.get("parent") == name
-		] or STORE.tables["Journal Entry"][name].get("accounts") or []
+		rows = (
+			[row for row in STORE.rows("Journal Entry Account") if row.get("parent") == name]
+			or STORE.tables["Journal Entry"][name].get("accounts")
+			or []
+		)
 		debit = round(sum(float(row.get("debit") or 0) for row in rows), 2)
 		credit = round(sum(float(row.get("credit") or 0) for row in rows), 2)
 		self.assertEqual(debit, credit)
@@ -671,10 +771,7 @@ class PostingWritesDraftsOnly(PayrollGLTestCase):
 
 	def test_a_per_employee_remark_names_the_slip_it_came_from(self):
 		data = self.post(mode="per_employee")
-		remarks = [
-			STORE.tables["Journal Entry"][name]["user_remark"]
-			for name in data["journal_entries"]
-		]
+		remarks = [STORE.tables["Journal Entry"][name]["user_remark"] for name in data["journal_entries"]]
 		self.assertTrue(any("PAY-2025-00001-slip-1" in text for text in remarks))
 
 	def test_the_entries_are_linked_back_onto_the_run(self):
@@ -787,8 +884,9 @@ class TheRefusals(PayrollGLTestCase):
 
 	def test_an_inactive_mapping_cannot_post(self):
 		self.configure_mapping()
-		self.tool_data("configure_payroll_accounts", {"company": MAIN, "components": [], "is_active": 0}) \
-			if False else self.set_mapping_inactive()
+		self.tool_data(
+			"configure_payroll_accounts", {"company": MAIN, "components": [], "is_active": 0}
+		) if False else self.set_mapping_inactive()
 		self.seed_run()
 		error = self.post_error()
 		self.assertIn("inactive", error)
@@ -811,9 +909,23 @@ class TheRefusals(PayrollGLTestCase):
 
 	def test_a_run_of_zeros_has_nothing_to_post(self):
 		self.configure_mapping()
-		self.seed_run([slip(IDLE, gross=0, federal=0, social=0, medicare=0, state=0,
-		                    ss_employer=0, medicare_employer=0, futa=0, suta=0,
-		                    state_other=0)])
+		self.seed_run(
+			[
+				slip(
+					IDLE,
+					gross=0,
+					federal=0,
+					social=0,
+					medicare=0,
+					state=0,
+					ss_employer=0,
+					medicare_employer=0,
+					futa=0,
+					suta=0,
+					state_other=0,
+				)
+			]
+		)
 		self.assertIn("nothing to book", self.post_error())
 
 	def test_an_unbalanced_slip_is_refused_rather_than_posted(self):
@@ -891,34 +1003,46 @@ class ConfiguringTheMapping(PayrollGLTestCase):
 		self.assertEqual(row["debit_account"], WAGE_EXPENSE)
 
 	def test_a_group_account_is_refused_when_the_mapping_is_written(self):
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": [{"component": "Net Pay", "credit_account": PAYROLL_LIABILITIES}],
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": [{"component": "Net Pay", "credit_account": PAYROLL_LIABILITIES}],
+			},
+		)
 		self.assertIn("group account", error)
 		self.assertIn("can never post", error)
 
 	def test_a_component_name_that_does_not_exist_lists_the_ones_that_do(self):
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": [{"component": "Wages", "debit_account": WAGE_EXPENSE}],
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": [{"component": "Wages", "debit_account": WAGE_EXPENSE}],
+			},
+		)
 		self.assertIn("not a payroll component", error)
 		self.assertIn("Gross Pay", error)
 
 	def test_a_credit_on_gross_pay_is_refused_by_name(self):
 		"""Gross pay has no credit side; a caller who sent one meant something else."""
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": [{"component": "Gross Pay", "credit_account": CLEARING}],
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": [{"component": "Gross Pay", "credit_account": CLEARING}],
+			},
+		)
 		self.assertIn("no credit side", error)
 
 	def test_a_single_account_on_a_two_sided_component_is_refused(self):
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": [{"component": "FUTA", "account": FUTA_PAYABLE}],
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": [{"component": "FUTA", "account": FUTA_PAYABLE}],
+			},
+		)
 		self.assertIn("BOTH sides", error)
 
 	def test_a_single_account_on_a_one_sided_component_is_accepted(self):
@@ -927,13 +1051,16 @@ class ConfiguringTheMapping(PayrollGLTestCase):
 		self.assertEqual(row["credit_account"], CLEARING)
 
 	def test_one_component_twice_in_one_call_is_refused(self):
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN,
-			"components": [
-				{"component": "Net Pay", "credit_account": CLEARING},
-				{"component": "Net Pay", "credit_account": FICA_PAYABLE},
-			],
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": [
+					{"component": "Net Pay", "credit_account": CLEARING},
+					{"component": "Net Pay", "credit_account": FICA_PAYABLE},
+				],
+			},
+		)
 		self.assertIn("appears twice", error)
 
 	def test_a_mapping_keyed_by_component_is_accepted(self):
@@ -960,9 +1087,14 @@ class ConfiguringTheMapping(PayrollGLTestCase):
 		self.assertTrue(all(line.get("cost_center") for line in lines))
 
 	def test_an_unknown_mode_is_refused_by_name(self):
-		error = self.tool_error("configure_payroll_accounts", {
-			"company": MAIN, "components": FULL_MAPPING, "default_posting_mode": "weekly",
-		})
+		error = self.tool_error(
+			"configure_payroll_accounts",
+			{
+				"company": MAIN,
+				"components": FULL_MAPPING,
+				"default_posting_mode": "weekly",
+			},
+		)
 		self.assertIn("consolidated", error)
 
 
@@ -1033,53 +1165,74 @@ class EndToEnd(PayrollGLTestCase):
 		}
 
 	def _seed_state_configs(self):
-		STORE.seed("State Tax Configuration", [{
-			"name": "STC-OR-2025", "company": MAIN, "state": "OR",
-			"tax_year": 2025, "status": "Active",
-			"or_income_tax_enabled": 0,
-			"or_transit_tax_rate": 0.1,
-			"or_paid_leave_rate": 1.0,
-			"or_paid_leave_employee_share": 60,
-			"or_paid_leave_employer_share": 40,
-			"or_paid_leave_small_employer": 0,
-			"or_workers_comp_rate": 1.5,
-			"suta_rate": 2.4,
-			"suta_wage_base": 54300,
-		}])
+		STORE.seed(
+			"State Tax Configuration",
+			[
+				{
+					"name": "STC-OR-2025",
+					"company": MAIN,
+					"state": "OR",
+					"tax_year": 2025,
+					"status": "Active",
+					"or_income_tax_enabled": 0,
+					"or_transit_tax_rate": 0.1,
+					"or_paid_leave_rate": 1.0,
+					"or_paid_leave_employee_share": 60,
+					"or_paid_leave_employer_share": 40,
+					"or_paid_leave_small_employer": 0,
+					"or_workers_comp_rate": 1.5,
+					"suta_rate": 2.4,
+					"suta_wage_base": 54300,
+				}
+			],
+		)
 
 	def _seed_shifts(self):
 		rows = []
 		for index, day in enumerate(("2025-06-02", "2025-06-03", "2025-06-04"), start=1):
-			rows.append({
-				"name": f"SHIFT-{index:03d}",
-				"company": MAIN,
-				"shift_type": "Harvest",
-				"work_state": "OR",
-				"start_datetime": f"{day} 06:00:00",
-				"end_datetime": f"{day} 14:00:00",
-				"status": "Closed",
-				"cancelled": 0,
-				"crew": [{
-					"employee": WORKER,
-					"employee_name": NAMES[WORKER],
-					"joined_at": None,
-					"left_at": None,
-				}],
-			})
+			rows.append(
+				{
+					"name": f"SHIFT-{index:03d}",
+					"company": MAIN,
+					"shift_type": "Harvest",
+					"work_state": "OR",
+					"start_datetime": f"{day} 06:00:00",
+					"end_datetime": f"{day} 14:00:00",
+					"status": "Closed",
+					"cancelled": 0,
+					"crew": [
+						{
+							"employee": WORKER,
+							"employee_name": NAMES[WORKER],
+							"joined_at": None,
+							"left_at": None,
+						}
+					],
+				}
+			)
 		STORE.seed("Farm Shift", rows)
 
 	def test_hours_become_a_slip_with_employer_taxes_and_then_a_balanced_entry(self):
 		self._seed_shifts()
-		self.tool_data("create_salary_structure", {
-			"employee": WORKER, "company": MAIN, "pay_type": "Hourly",
-			"base_rate": 20.0, "effective_from": "2025-01-01",
-		})
-		run = self.tool_data("run_payroll_for_period", {
-			"company": MAIN,
-			"pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END,
-			"employee": WORKER,
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": WORKER,
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
+		run = self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"employee": WORKER,
+			},
+		)
 		self.assertEqual(run["status"], "Calculated")
 
 		entry = self.tool_data("get_payroll_entry", {"name": run["name"]})
@@ -1106,14 +1259,25 @@ class EndToEnd(PayrollGLTestCase):
 		STORE.tables["State Tax Configuration"]["STC-OR-2025"]["suta_rate"] = 0
 		STORE.commit()
 		self._seed_shifts()
-		self.tool_data("create_salary_structure", {
-			"employee": WORKER, "company": MAIN, "pay_type": "Hourly",
-			"base_rate": 20.0, "effective_from": "2025-01-01",
-		})
-		run = self.tool_data("run_payroll_for_period", {
-			"company": MAIN, "pay_period_start": PERIOD_START,
-			"pay_period_end": PERIOD_END, "employee": WORKER,
-		})
+		self.tool_data(
+			"create_salary_structure",
+			{
+				"employee": WORKER,
+				"company": MAIN,
+				"pay_type": "Hourly",
+				"base_rate": 20.0,
+				"effective_from": "2025-01-01",
+			},
+		)
+		run = self.tool_data(
+			"run_payroll_for_period",
+			{
+				"company": MAIN,
+				"pay_period_start": PERIOD_START,
+				"pay_period_end": PERIOD_END,
+				"employee": WORKER,
+			},
+		)
 		entry = self.tool_data("get_payroll_entry", {"name": run["name"]})
 		worker = next(row for row in entry["slips"] if row["employee"] == WORKER)
 		self.assertEqual(worker["state_unemployment"], 0.0)
@@ -1144,8 +1308,11 @@ class TheTools(PayrollGLTestCase):
 
 		path = (
 			pathlib.Path(__file__).resolve().parents[1]
-			/ "erpnext_mcp" / "erpnext_mcp" / "doctype"
-			/ "erpnext_mcp_settings" / "erpnext_mcp_settings.json"
+			/ "erpnext_mcp"
+			/ "erpnext_mcp"
+			/ "doctype"
+			/ "erpnext_mcp_settings"
+			/ "erpnext_mcp_settings.json"
 		)
 		return json.loads(path.read_text())
 
@@ -1159,11 +1326,14 @@ class TheTools(PayrollGLTestCase):
 		):
 			with self.subTest(tool=tool):
 				self.configure(enabled=1, **{**ON, f"allow_{tool}": 0})
-				error = self.tool_error(tool, {
-					"company": MAIN,
-					"payroll_entry": "PAY-2025-00001",
-					"components": FULL_MAPPING,
-				})
+				error = self.tool_error(
+					tool,
+					{
+						"company": MAIN,
+						"payroll_entry": "PAY-2025-00001",
+						"components": FULL_MAPPING,
+					},
+				)
 				self.assertIn(tool, error)
 
 	def test_the_kill_switch_stops_all_four(self):
@@ -1175,10 +1345,13 @@ class TheTools(PayrollGLTestCase):
 			"post_payroll_to_gl",
 		):
 			with self.subTest(tool=tool):
-				_body, status = self.call("tools/call", {
-					"name": tool,
-					"arguments": {"company": MAIN, "payroll_entry": "PAY-2025-00001"},
-				})
+				_body, status = self.call(
+					"tools/call",
+					{
+						"name": tool,
+						"arguments": {"company": MAIN, "payroll_entry": "PAY-2025-00001"},
+					},
+				)
 				self.assertEqual(status, 404)
 
 	def test_posting_is_audited(self):

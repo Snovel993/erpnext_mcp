@@ -143,7 +143,8 @@ gone back to work. What is NOT best-effort is any of the checking above.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 import frappe
 
@@ -494,14 +495,13 @@ def hash_exclusions(doctype: str) -> tuple:
 				columns.add(name)
 	return tuple(sorted(columns))
 
+
 #: alert_type → the box that alert is about. THE SAME `alert_types` THE TASK
 #: LOOKUP USES, read the other way round: `_task_for` asks "which task belongs to
 #: this box", and the compliance calendar asks "which box is this alert about".
 #: One mapping rather than two means an alert can never offer a signature route
 #: to a column this module would refuse to write.
-BOXES_BY_ALERT_TYPE = {
-	alert_type: box for box in SIGNATURE_BOXES for alert_type in box.alert_types
-}
+BOXES_BY_ALERT_TYPE = {alert_type: box for box in SIGNATURE_BOXES for alert_type in box.alert_types}
 
 #: Spellings a caller will reasonably send for each doctype. A phone composing
 #: this call from a Farm Task's `subject_doctype` sends the exact docname; a
@@ -682,10 +682,7 @@ def _box(args: dict) -> SignatureBox:
 def _form_name(box: SignatureBox, args: dict) -> str:
 	"""The docname being signed, accepting the same aliases its own tools do."""
 	given = (
-		as_str(args, "form")
-		or as_str(args, "form_name")
-		or as_str(args, "name")
-		or as_str(args, "docname")
+		as_str(args, "form") or as_str(args, "form_name") or as_str(args, "name") or as_str(args, "docname")
 	)
 	inner = dict(args)
 	if given:
@@ -751,7 +748,7 @@ def _child_row(box: SignatureBox, doc, args: dict) -> object:
 				f"{index}. {row.get('name')} ({_row_caption(box, row)})"
 				for index, row in enumerate(rows, start=1)
 			)
-			+ f". Pass the row docname"
+			+ ". Pass the row docname"
 			+ (f", the {box.child_subject_field}" if box.child_subject_field else "")
 			+ " or its 1-based position. Nothing was changed."
 		)
@@ -764,9 +761,7 @@ def _child_row(box: SignatureBox, doc, args: dict) -> object:
 			f"changed."
 		)
 	if box.child_order_field:
-		unsigned.sort(
-			key=lambda row: str(row.get(box.child_order_field) or ""), reverse=box.child_order_desc
-		)
+		unsigned.sort(key=lambda row: str(row.get(box.child_order_field) or ""), reverse=box.child_order_desc)
 	return unsigned[0]
 
 
@@ -792,9 +787,7 @@ def _row_caption(box: SignatureBox, row) -> str:
 	"""How one row is described when a refusal lists them all."""
 	if box.child_subject_field:
 		return str(
-			row.get(f"{box.child_subject_field}_name")
-			or row.get(box.child_subject_field)
-			or "unnamed"
+			row.get(f"{box.child_subject_field}_name") or row.get(box.child_subject_field) or "unnamed"
 		)
 	return str(row.get(box.child_order_field or "") or "undated")
 
@@ -989,9 +982,7 @@ def collect_form_signature(args: dict) -> ToolResult:
 	# THE FINGERPRINT, TAKEN NOW. `doc` has not been touched yet, so this is the
 	# record as the signer was shown it — which is the only moment at which the
 	# question "what did they see" has an answer. See `hash_exclusions`.
-	fingerprint = signing_evidence.document_fingerprint(
-		doc, exclude=hash_exclusions(box.doctype)
-	)
+	fingerprint = signing_evidence.document_fingerprint(doc, exclude=hash_exclusions(box.doctype))
 
 	overwrite = as_bool(args, "overwrite", False)
 	existing = str(target.get(box.field) or "").strip()
@@ -1193,9 +1184,7 @@ def _record_evidence(
 		ip_address=context["ip_address"],
 		gps_latitude=context["latitude"],
 		gps_longitude=context["longitude"],
-		supersedes=(
-			signing_evidence.supersede_target(box.doctype, doc.name, box.field) if replaced else ""
-		),
+		supersedes=(signing_evidence.supersede_target(box.doctype, doc.name, box.field) if replaced else ""),
 	)
 
 
@@ -1407,9 +1396,7 @@ def _identity(box: SignatureBox, doc, role: str, args: dict, target=None) -> dic
 			out["employee_name"] = subject_name
 		return out
 
-	resolved = badges.resolve_badge(
-		{"badge_id": badge_id, "company": str(doc.get("company") or "")}
-	).data
+	resolved = badges.resolve_badge({"badge_id": badge_id, "company": str(doc.get("company") or "")}).data
 	holder = str(resolved.get("employee") or "")
 	if role == "Employee" and subject and holder != subject:
 		raise ToolError(
@@ -1622,9 +1609,7 @@ def _task_for(box: SignatureBox, form: str) -> str:
 		limit=20,
 	)
 	for row in rows or []:
-		alert_type = str(
-			frappe.db.get_value("Compliance Alert", row.get("source_alert"), "alert_type") or ""
-		)
+		alert_type = str(frappe.db.get_value("Compliance Alert", row.get("source_alert"), "alert_type") or "")
 		if alert_type in box.alert_types:
 			return str(row["name"])
 	return ""
@@ -1683,8 +1668,7 @@ def _redraw(box: SignatureBox, form: str, ensure: bool = False) -> dict:
 				f"the signature is on the record and the PDF was {'not drawn' if not existing else 'not redrawn'} "
 				f"({exc}). "
 				+ (
-					f"The rendered page at {existing} is now out of date with the record it was "
-					f"drawn from; "
+					f"The rendered page at {existing} is now out of date with the record it was drawn from; "
 					if existing
 					else "There is no rendered page; "
 				)

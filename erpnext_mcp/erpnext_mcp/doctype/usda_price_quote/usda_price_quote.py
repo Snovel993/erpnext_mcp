@@ -55,7 +55,9 @@ class USDAPriceQuote(Document):
 			frappe.throw(_("Commodity is required — a price with no commodity belongs to nothing."))
 		if not self.report_date:
 			frappe.throw(
-				_("Report Date is required. It is what says how stale the number is, and a quote with no date wins every 'most recent' lookup forever.")
+				_(
+					"Report Date is required. It is what says how stale the number is, and a quote with no date wins every 'most recent' lookup forever."
+				)
 			)
 		if str(self.source or "") not in SOURCES:
 			frappe.throw(_("Source must be one of: {0}.").format(", ".join(SOURCES)))

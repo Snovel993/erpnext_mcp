@@ -207,9 +207,7 @@ def outstanding_steps(items: list) -> list:
 	doctype's own description on why that distinction is worth a column.
 	"""
 	rows = [
-		row
-		for row in items or []
-		if int(row.get("required") or 0) and not int(row.get("completed") or 0)
+		row for row in items or [] if int(row.get("required") or 0) and not int(row.get("completed") or 0)
 	]
 	return sorted(rows, key=lambda row: (int(row.get("sequence") or 0), str(row.get("step") or "")))
 
@@ -225,7 +223,9 @@ def account_signature(lines: list) -> tuple:
 	posted with the sides reversed is a different and worse problem, and it is one
 	this signature should still surface rather than hide.
 	"""
-	return tuple(sorted({str(line.get("account") or "").strip() for line in lines or [] if line.get("account")}))
+	return tuple(
+		sorted({str(line.get("account") or "").strip() for line in lines or [] if line.get("account")})
+	)
 
 
 def duplicate_findings(candidate: dict, existing: list) -> list:
@@ -322,7 +322,9 @@ def unusual_amount(total: float, history: list) -> dict:
 	typical = median(sample)
 	out["median"] = typical
 	if not typical:
-		out["basis"] = "every comparable entry on these accounts is zero, so there is no scale to judge against."
+		out["basis"] = (
+			"every comparable entry on these accounts is zero, so there is no scale to judge against."
+		)
 		return out
 
 	multiple = round(total / typical, 2)

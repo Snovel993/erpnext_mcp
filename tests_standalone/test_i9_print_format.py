@@ -145,7 +145,11 @@ class TheSeeder(PrintFormatTestCase):
 
 		path = os.path.join(
 			os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-			"erpnext_mcp", "erpnext_mcp", "doctype", "i_9_form", "i_9_form.json",
+			"erpnext_mcp",
+			"erpnext_mcp",
+			"doctype",
+			"i_9_form",
+			"i_9_form.json",
 		)
 		with open(path, encoding="utf-8") as handle:
 			declared = json.load(handle).get("default_print_format")
@@ -241,9 +245,7 @@ class WhatThePageSays(PrintFormatTestCase):
 
 	def test_a_receipt_is_flagged_with_the_deadline_it_carries(self):
 		name = self.a_complete_i9()
-		frappe.db.set_value(
-			"I-9 Form", name, {"receipt_pending": 1, "receipt_expires_on": "2026-06-30"}
-		)
+		frappe.db.set_value("I-9 Form", name, {"receipt_pending": 1, "receipt_expires_on": "2026-06-30"})
 		page = self.render(name)
 		self.assertIn("RECEIPT PENDING", page)
 		self.assertIn("8 CFR 274a.2(b)(1)(vi)", page)
@@ -256,7 +258,8 @@ class WhatThePageSays(PrintFormatTestCase):
 		self.assertIn("not filed", self.render(name))
 
 		frappe.db.set_value(
-			"I-9 Form", name,
+			"I-9 Form",
+			name,
 			{"signed_pdf": "/private/files/signed.pdf", "signed_pdf_on": "2026-04-03 10:00:00"},
 		)
 		self.assertIn("2026-04-03", self.render(name))

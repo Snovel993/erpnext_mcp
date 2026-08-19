@@ -291,7 +291,9 @@ class OneDefinitionOfDocumented(RelatedPartyControlsTestCase):
 		party = self.a_related_party(supplier=HAULER)
 		memo = self.a_memo(party, status="Draft")
 		self.seed_gl(self.a_gl_row("PINV-01", HAULER, 4000))
-		self.assertEqual(self.tool_data("get_related_party_transactions", {"company": MAIN})["undocumented_count"], 1)
+		self.assertEqual(
+			self.tool_data("get_related_party_transactions", {"company": MAIN})["undocumented_count"], 1
+		)
 
 		updated = self.tool_data(
 			"update_transfer_pricing_doc",
@@ -304,7 +306,9 @@ class OneDefinitionOfDocumented(RelatedPartyControlsTestCase):
 			},
 		)
 		self.assertEqual(updated["status_change"], "Draft → Complete")
-		self.assertEqual(self.tool_data("get_related_party_transactions", {"company": MAIN})["undocumented_count"], 0)
+		self.assertEqual(
+			self.tool_data("get_related_party_transactions", {"company": MAIN})["undocumented_count"], 0
+		)
 
 
 # ── 3 · the match is never a guess ──────────────────────────────────────────

@@ -185,9 +185,7 @@ def seal_bin(args: dict) -> ToolResult:
 				"Nothing was created."
 			)
 
-	company = resolve_company(
-		as_str(args, "company") or str(shift_row.get("company") or ""), required=False
-	)
+	company = resolve_company(as_str(args, "company") or str(shift_row.get("company") or ""), required=False)
 	if company:
 		employee_tool.require_company_scope(actor, company)
 
@@ -401,12 +399,7 @@ def _resolve_contributor(given: str, company: str, cache: dict) -> tuple:
 	if compat.doctype_exists("Employee") and frappe.db.exists("Employee", given):
 		answer = (given, "")
 	elif compat.doctype_exists(BADGE_DOCTYPE):
-		row = (
-			frappe.db.get_value(
-				BADGE_DOCTYPE, given, ["employee", "company", "active"], as_dict=True
-			)
-			or {}
-		)
+		row = frappe.db.get_value(BADGE_DOCTYPE, given, ["employee", "company", "active"], as_dict=True) or {}
 		if row and (not company or str(row.get("company") or "") == company) and row.get("employee"):
 			answer = (str(row["employee"]), given)
 	cache[key] = answer

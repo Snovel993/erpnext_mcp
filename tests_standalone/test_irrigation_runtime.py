@@ -328,9 +328,7 @@ class ClosesNobodyPerformed(RuntimeTestCase):
 		STORE.tables["Asset Register"]["MC-Main-05"]["current_state"] = '{"state": "open"}'
 		STORE.tables["Asset Register"]["MC-Drop-05"]["current_state"] = '{"state": "open"}'
 
-		self.tool_data(
-			"log_asset_state_change", {"asset_name": "MC-Main-05", "action": "close_valve"}
-		)
+		self.tool_data("log_asset_state_change", {"asset_name": "MC-Main-05", "action": "close_valve"})
 		data = self.runtime("MC-Main-05", from_date="2026-07-01", to_date="2026-07-31")
 
 		self.assertEqual(data["valve_count"], 2)
@@ -348,9 +346,7 @@ class MinutesIntoGallons(RuntimeTestCase):
 
 	def test_an_explicit_rate_prices_the_runtime(self):
 		self.a_measured_valve()
-		data = self.runtime(
-			"MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31", flow_rate_gpm=250
-		)
+		data = self.runtime("MC-Valve-05", from_date="2026-07-01", to_date="2026-07-31", flow_rate_gpm=250)
 		self.assertEqual(data["gallons"], 15000.0)
 		self.assertIn("argument", data["flow_rate_source"])
 
@@ -414,9 +410,7 @@ class MinutesIntoGallons(RuntimeTestCase):
 		move between two identical calls."""
 		self.a_measured_valve()
 		self.event("MC-Valve-05", "open", "2026-07-12 06:00:00")
-		data = self.runtime(
-			"MC-Valve-05", from_date="2026-07-01", to_date="2026-07-15", flow_rate_gpm=250
-		)
+		data = self.runtime("MC-Valve-05", from_date="2026-07-01", to_date="2026-07-15", flow_rate_gpm=250)
 		self.assertEqual(data["gallons"], 15000.0)
 		self.assertGreater(data["open_run_minutes"], 0)
 

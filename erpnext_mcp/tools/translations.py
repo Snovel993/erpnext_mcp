@@ -238,10 +238,19 @@ _WIZARD_LABELS = {
 #: Compliance form labels. The vocabulary an inspector and a worker both have to
 #: read, and the half of this catalogue with the most legal weight on it.
 _COMPLIANCE_FORMS = {
-	"compliance.form.i9": ("Employment Eligibility Verification (Form I-9)", "Verificación de Elegibilidad de Empleo (Formulario I-9)"),
-	"compliance.form.w4": ("Employee's Withholding Certificate (Form W-4)", "Certificado de Retenciones del Empleado (Formulario W-4)"),
+	"compliance.form.i9": (
+		"Employment Eligibility Verification (Form I-9)",
+		"Verificación de Elegibilidad de Empleo (Formulario I-9)",
+	),
+	"compliance.form.w4": (
+		"Employee's Withholding Certificate (Form W-4)",
+		"Certificado de Retenciones del Empleado (Formulario W-4)",
+	),
 	"compliance.form.heat_illness": ("Heat Illness Prevention", "Prevención de enfermedades por calor"),
-	"compliance.form.pesticide_safety": ("Pesticide Safety Training", "Capacitación en seguridad de pesticidas"),
+	"compliance.form.pesticide_safety": (
+		"Pesticide Safety Training",
+		"Capacitación en seguridad de pesticidas",
+	),
 	"compliance.form.hazard_communication": ("Hazard Communication", "Comunicación de peligros"),
 	"compliance.form.field_sanitation": ("Field Sanitation", "Saneamiento en el campo"),
 	"compliance.form.housing_inspection": ("Housing Inspection", "Inspección de vivienda"),
@@ -730,7 +739,9 @@ def list_translations(args: dict) -> ToolResult:
 		# row has no Spanish row to return, so filtering the Spanish rows by
 		# "keys with no Spanish row" is guaranteed to be empty. What a translator
 		# needs handed to them is the ENGLISH they are being asked to translate.
-		filters["language"] = DEFAULT_LANGUAGE if (missing_only and language != DEFAULT_LANGUAGE) else language
+		filters["language"] = (
+			DEFAULT_LANGUAGE if (missing_only and language != DEFAULT_LANGUAGE) else language
+		)
 	category = as_str(args, "category")
 	if category:
 		filters["category"] = category
@@ -872,7 +883,17 @@ def get_translation(args: dict) -> ToolResult:
 			filters={"translation_key": key},
 			fields=compat.existing_fields(
 				DOCTYPE,
-				("name", "translation_key", "language", "value", "category", "enabled", "shipped_default", "operator_edited", "notes"),
+				(
+					"name",
+					"translation_key",
+					"language",
+					"value",
+					"category",
+					"enabled",
+					"shipped_default",
+					"operator_edited",
+					"notes",
+				),
 			),
 			order_by="language asc",
 			limit=len(LANGUAGES) * 4,
@@ -909,7 +930,8 @@ def get_translation(args: dict) -> ToolResult:
 		)
 	return ToolResult(
 		data=data,
-		summary=f"{key} [{language}]: {value[:80]}" + ("" if not fell_back else f" (fell back to {DEFAULT_LANGUAGE})"),
+		summary=f"{key} [{language}]: {value[:80]}"
+		+ ("" if not fell_back else f" (fell back to {DEFAULT_LANGUAGE})"),
 	)
 
 
@@ -1068,9 +1090,7 @@ def install_translations() -> dict:
 		for language, value in (("en", english), ("es", spanish)):
 			docname = f"{key}::{language}"
 			try:
-				existing = frappe.db.get_value(
-					DOCTYPE, docname, ["value", "operator_edited"], as_dict=True
-				)
+				existing = frappe.db.get_value(DOCTYPE, docname, ["value", "operator_edited"], as_dict=True)
 				if existing:
 					if compat.checked(existing.get("operator_edited")):
 						report["left_alone"].append(docname)

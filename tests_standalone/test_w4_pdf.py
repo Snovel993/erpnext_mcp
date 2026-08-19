@@ -357,13 +357,13 @@ class TheFieldTableIsCheckedAgainstGeometry(unittest.TestCase):
 		could move silently — so if a future year makes them fillable, this
 		fails and the module should read the widget instead of the constant.
 		"""
-		floor = self.bottom(w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS) + self.rects[
-			w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS
-		][3] - self.rects[w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS][1]
+		floor = (
+			self.bottom(w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS)
+			+ self.rects[w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS][3]
+			- self.rects[w4_pdf.FIELD_EMPLOYER_NAME_ADDRESS][1]
+		)
 		ceiling = self.bottom(w4_pdf.FIELD_EXEMPT)
-		between = [
-			name for name, rect in self.rects.items() if floor < rect[1] < ceiling
-		]
+		between = [name for name, rect in self.rects.items() if floor < rect[1] < ceiling]
 		self.assertEqual(
 			between,
 			[],
@@ -390,9 +390,7 @@ class TheFieldPlan(unittest.TestCase):
 		self.assertEqual(page_one(employee=dict(EMPLOYEE, middle_name=""))[w4_pdf.FIELD_FIRST_NAME], "Maria")
 
 	def test_one_filing_status_box_is_ticked_and_only_one(self):
-		ticked = [
-			field for field, _ in w4_pdf.FILING_STATUS_BOXES.values() if field in self.plan
-		]
+		ticked = [field for field, _ in w4_pdf.FILING_STATUS_BOXES.values() if field in self.plan]
 		self.assertEqual(ticked, [w4_pdf.FILING_STATUS_BOXES["Married Filing Jointly"][0]])
 		self.assertEqual(self.plan[ticked[0]], "/2")
 
@@ -726,7 +724,6 @@ class RenderTool(I9TestCase):
 		self.assertEqual(frappe.db.get_value("W-4 Form", "W4-2026-0001", "status"), "Active")
 
 
-
 # ── 8 ─────────────────────────────────────────────────────────────────────────
 def a_capture(width=700, height=200) -> bytes:
 	"""What `SignatureCanvas.renderPNG` produces: opaque, white paper, black ink."""
@@ -735,14 +732,18 @@ def a_capture(width=700, height=200) -> bytes:
 	image = Image.new("RGB", (width, height), (255, 255, 255))
 	ImageDraw.Draw(image).line(
 		[(150, 130), (200, 70), (250, 130), (300, 60), (360, 120), (420, 80), (470, 110)],
-		fill=(0, 0, 0), width=5, joint="curve")
+		fill=(0, 0, 0),
+		width=5,
+		joint="curve",
+	)
 	buffer = io.BytesIO()
 	image.save(buffer, format="PNG")
 	return buffer.getvalue()
 
 
-@unittest.skipUnless(pdf_signing.available() and w4_pdf.available(),
-                     "needs Pillow, reportlab, pypdf and the shipped template")
+@unittest.skipUnless(
+	pdf_signing.available() and w4_pdf.available(), "needs Pillow, reportlab, pypdf and the shipped template"
+)
 class TheSignatureIsStampedIntoStep5(unittest.TestCase):
 	"""v0.51.0. "This form is not valid unless you sign it" is on the page.
 
@@ -774,8 +775,11 @@ class TheSignatureIsStampedIntoStep5(unittest.TestCase):
 	def test_the_signature_reaches_the_page_content(self):
 		_payload, reader = self.rendered(signature=a_capture())
 		page = reader.pages[w4_pdf.PAGE_FORM]
-		images = [key for key, value in (page["/Resources"].get("/XObject") or {}).items()
-		          if value.get_object().get("/Subtype") == "/Image"]
+		images = [
+			key
+			for key, value in (page["/Resources"].get("/XObject") or {}).items()
+			if value.get_object().get("/Subtype") == "/Image"
+		]
 		self.assertTrue(images, "the signature did not reach the page")
 
 	def test_an_unsigned_w4_is_still_the_page_somebody_prints_and_signs(self):

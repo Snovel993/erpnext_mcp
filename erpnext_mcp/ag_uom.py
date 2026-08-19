@@ -113,7 +113,11 @@ SEED_CONTEXTS = (
 		),
 		"uoms": (
 			{"uom": "Acre", "is_default": 1, "notes": "The unit every per-acre figure is stated in."},
-			{"uom": "Square Foot", "is_default": 0, "notes": "As measured off a drawing; 43,560 to the acre."},
+			{
+				"uom": "Square Foot",
+				"is_default": 0,
+				"notes": "As measured off a drawing; 43,560 to the acre.",
+			},
 		),
 	},
 	{

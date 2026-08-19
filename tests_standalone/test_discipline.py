@@ -362,9 +362,7 @@ class NothingIsDestroyed(DisciplineTestCase):
 
 	def test_an_expired_step_drops_out_of_the_active_chain(self):
 		first = self.step("Verbal Warning")["name"]
-		self.tool_data(
-			"expire_incident_record", {"record": first, "status": "Expired", "reason": "aged out"}
-		)
+		self.tool_data("expire_incident_record", {"record": first, "status": "Expired", "reason": "aged out"})
 		second = self.step("Written Warning", incident_date=_days_ago(10))
 		self.assertIsNone(second["prior_record"])
 
@@ -384,7 +382,9 @@ class NothingIsDestroyed(DisciplineTestCase):
 			"expire_incident_record",
 			{"record": record, "status": "Rescinded", "reason": "withdrawn on review"},
 		)
-		notes = self.tool_data("list_task_notes", {"doctype": "Farm Incident Record", "name": record})["notes"]
+		notes = self.tool_data("list_task_notes", {"doctype": "Farm Incident Record", "name": record})[
+			"notes"
+		]
 		self.assertTrue(any("Rescinded" in note["narrative"] for note in notes))
 
 	def test_expiring_twice_is_refused(self):
@@ -487,8 +487,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 			"report_direction": "Worker Report",
 			"incident_date": _days_ago(5),
 			"incident_description": (
-				"Was told to re-pick two bins already counted, and the buckets were not "
-				"credited to my badge."
+				"Was told to re-pick two bins already counted, and the buckets were not credited to my badge."
 			),
 			"company": MAIN,
 		}
@@ -541,9 +540,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 		self.grievance(incident_date=_days_ago(3))
 		first = self.step("Verbal Warning")
 		self.assertIsNone(first["prior_record"])
-		self.assertEqual(
-			first["step_number"], 1, "a worker's own reports became rungs on their escalation"
-		)
+		self.assertEqual(first["step_number"], 1, "a worker's own reports became rungs on their escalation")
 
 	def test_and_the_report_a_lawyer_reads_contains_only_the_farms_direction(self):
 		"""`get_incident_report` is what the module docstring calls "what an HR
@@ -613,9 +610,7 @@ class TheProtocolRunsBothWays(DisciplineTestCase):
 	def test_an_unknown_direction_is_refused_by_name(self):
 		self.assertIn(
 			"direction must be one of",
-			self.tool_error(
-				"list_incident_history", {"employee": WORKER, "direction": "Grievance"}
-			),
+			self.tool_error("list_incident_history", {"employee": WORKER, "direction": "Grievance"}),
 		)
 
 	# ── the migration fact ──────────────────────────────────────────────────

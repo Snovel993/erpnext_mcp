@@ -1128,9 +1128,7 @@ def list_financial_kpi_history(args: dict) -> ToolResult:
 			"kpi_key, company, computation_step or a from_date/to_date range before treating the "
 			"series above as complete."
 		)
-	orphaned = sorted(
-		{entry["kpi_key"] for entry in records if entry.get("kpi_key")} - set(definitions)
-	)
+	orphaned = sorted({entry["kpi_key"] for entry in records if entry.get("kpi_key")} - set(definitions))
 	if orphaned and definitions:
 		data["orphan_note"] = (
 			f"{len(orphaned)} kpi_key(s) in this series have no Financial KPI Definition on this "

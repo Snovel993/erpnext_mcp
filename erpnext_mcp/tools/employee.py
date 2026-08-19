@@ -204,7 +204,7 @@ HR_ROLES = ("System Manager", "HR Manager", "HR User", "Farm Manager")
 #: naming it here costs nothing on a site that has not got one — `frappe.get_roles`
 #: simply never returns it — while a site that does have one stops being a site
 #: where the app's own iOS client offers a button its server refuses.
-SHIFT_ROLES = HR_ROLES + ("Foreman", "Crew Leader")
+SHIFT_ROLES = (*HR_ROLES, "Foreman", "Crew Leader")
 
 #: Who may bring a person onto the farm and complete their first day.
 #:
@@ -500,9 +500,7 @@ def require_hiring_role() -> str:
 	the caller afterwards. See `HIRING_ROLES` for why bringing somebody onto the
 	farm is a different question from reading the register they land in.
 	"""
-	return _require_one_of(
-		HIRING_ROLES, "a hire", "bring a person onto the farm or complete their first day"
-	)
+	return _require_one_of(HIRING_ROLES, "a hire", "bring a person onto the farm or complete their first day")
 
 
 def _require_one_of(allowed: tuple, attribution: str, refusal: str) -> str:

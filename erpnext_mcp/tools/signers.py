@@ -51,6 +51,7 @@ same reason `destroy_i9` writes a certificate instead of dropping a row: a form
 signed in 2026 was signed by whoever was authorised in 2026, and a roster that
 forgets its own history cannot answer the question an inspection asks.
 """
+
 from __future__ import annotations
 
 import frappe
@@ -77,8 +78,16 @@ FORM_FLAGS = {
 #: writes `I9`, `i-9`, `Form I-9` and `W4` with roughly equal probability, and
 #: each has one unambiguous reading.
 FORM_ALIASES = {
-	"I-9": "I-9", "I9": "I-9", "FORM I-9": "I-9", "FORM I9": "I-9", "I-9 FORM": "I-9",
-	"W-4": "W-4", "W4": "W-4", "FORM W-4": "W-4", "FORM W4": "W-4", "W-4 FORM": "W-4",
+	"I-9": "I-9",
+	"I9": "I-9",
+	"FORM I-9": "I-9",
+	"FORM I9": "I-9",
+	"I-9 FORM": "I-9",
+	"W-4": "W-4",
+	"W4": "W-4",
+	"FORM W-4": "W-4",
+	"FORM W4": "W-4",
+	"W-4 FORM": "W-4",
 }
 
 #: The columns a roster row reports. `user` is included because the whole point
@@ -280,7 +289,6 @@ def authorized_signer_for_company(user: str, form_type: str, company: str = "") 
 	return signer
 
 
-
 def _refuse_unconfigured(form: str) -> None:
 	"""Refuse an employer signature on a site with no roster, IF the operator asked.
 
@@ -331,8 +339,9 @@ def _fail_closed() -> bool:
 		return False
 
 
-def resolve_signature(args: dict, form_type: str, name_key: str, title_key: str,
-                      required: bool = True) -> dict:
+def resolve_signature(
+	args: dict, form_type: str, name_key: str, title_key: str, required: bool = True
+) -> dict:
 	"""The name and title that go on the form, and where each of them came from.
 
 	THE CALL SITE FOR `submit_i9_section_2` AND `submit_w4`, written once
@@ -570,14 +579,17 @@ def add_authorized_signer(args: dict) -> ToolResult:
 		)
 
 	was_configured = roster_is_configured(_rows(doc))
-	doc.append(SIGNERS_FIELD, {
-		"user": user,
-		"full_name": full_name,
-		"title": as_str(args, "title"),
-		"can_sign_i9": 1 if as_bool(args, "can_sign_i9", True) else 0,
-		"can_sign_w4": 1 if as_bool(args, "can_sign_w4", True) else 0,
-		"active": 1 if as_bool(args, "active", True) else 0,
-	})
+	doc.append(
+		SIGNERS_FIELD,
+		{
+			"user": user,
+			"full_name": full_name,
+			"title": as_str(args, "title"),
+			"can_sign_i9": 1 if as_bool(args, "can_sign_i9", True) else 0,
+			"can_sign_w4": 1 if as_bool(args, "can_sign_w4", True) else 0,
+			"active": 1 if as_bool(args, "active", True) else 0,
+		},
+	)
 	doc.flags.ignore_permissions = True
 	doc.save()
 
@@ -622,8 +634,7 @@ def update_authorized_signer(args: dict) -> ToolResult:
 
 	if not changed:
 		raise ToolError(
-			"no fields to update. Pass at least one of full_name, title, can_sign_i9, "
-			"can_sign_w4 or active."
+			"no fields to update. Pass at least one of full_name, title, can_sign_i9, can_sign_w4 or active."
 		)
 
 	doc.flags.ignore_permissions = True

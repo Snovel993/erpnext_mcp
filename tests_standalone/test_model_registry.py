@@ -578,7 +578,9 @@ class TheManifestSchema(unittest.TestCase):
 
 	def test_is_bundle_payload_reads_the_origin_and_not_the_mere_presence_of_a_manifest(self):
 		from_bundle = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
-		from_record = engine.normalize_manifest({}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD)
+		from_record = engine.normalize_manifest(
+			{}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD
+		)
 		self.assertTrue(engine.is_bundle_payload(model(bundle_manifest=json.dumps(from_bundle))))
 		self.assertFalse(engine.is_bundle_payload(model(bundle_manifest=json.dumps(from_record))))
 		self.assertFalse(engine.is_bundle_payload(model()))
@@ -586,7 +588,9 @@ class TheManifestSchema(unittest.TestCase):
 		self.assertTrue(engine.is_bundle_payload(model(bundle_manifest=json.dumps(MANIFEST))))
 
 	def test_a_migrated_record_does_not_tell_an_ios_client_to_unpack_a_raw_model(self):
-		from_record = engine.normalize_manifest({}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD)
+		from_record = engine.normalize_manifest(
+			{}, model(class_names='["a"]'), origin=engine.MANIFEST_ORIGIN_RECORD
+		)
 		bundle_block = engine.build_model_manifest(
 			model(bundle_manifest=json.dumps(from_record), manifest_source=engine.MANIFEST_SOURCE_MIGRATED)
 		)["metadata"]["bundle"]
@@ -605,7 +609,9 @@ class TheManifestSchema(unittest.TestCase):
 
 	def test_a_normalized_record_needs_nothing(self):
 		normalized = engine.normalize_manifest(MANIFEST, model(), origin=engine.MANIFEST_ORIGIN_BUNDLE)
-		record = model(class_names=json.dumps(MANIFEST["class_names"]), bundle_manifest=json.dumps(normalized))
+		record = model(
+			class_names=json.dumps(MANIFEST["class_names"]), bundle_manifest=json.dumps(normalized)
+		)
 		report = engine.manifest_migration_report(record)
 		self.assertFalse(report["needs_migration"])
 		self.assertEqual(report["reasons"], [])

@@ -350,7 +350,9 @@ class Finding:
 	def as_dict(self) -> dict:
 		return {
 			"control_point": self.control_point,
-			"control": (CONTROL_POINTS[self.control_point].title if self.control_point in CONTROL_POINTS else ""),
+			"control": (
+				CONTROL_POINTS[self.control_point].title if self.control_point in CONTROL_POINTS else ""
+			),
 			"message": self.message,
 			"remedy": self.remedy,
 			"source_doctype": self.source_doctype or None,
@@ -516,8 +518,7 @@ def evaluate(control_point: str, findings, *, company: str = "", raise_on_enforc
 def _refusal(control_point: str, findings: list, written: list) -> str:
 	spec = CONTROL_POINTS[control_point]
 	lines = [
-		f"REFUSED by the {spec.title!r} control, which this site has set to Enforced. "
-		f"Nothing was written."
+		f"REFUSED by the {spec.title!r} control, which this site has set to Enforced. Nothing was written."
 	]
 	for index, finding in enumerate(findings, start=1):
 		prefix = f"({index}) " if len(findings) > 1 else ""
@@ -614,9 +615,7 @@ def _upsert_alert(
 	message = finding.message
 	if finding.remedy:
 		message = f"{message} {finding.remedy}"
-	message = (
-		f"{message} [{'blocked' if blocked else 'advisory — the work was allowed through'}]"
-	)
+	message = f"{message} [{'blocked' if blocked else 'advisory — the work was allowed through'}]"
 	company = finding.company or company or ""
 
 	if frappe.db.exists(ALERT_DOCTYPE, key):

@@ -213,9 +213,7 @@ def _fiscal_window(fiscal_year: str, args: dict) -> tuple[str, str]:
 			"this site has no Fiscal Year doctype, so a year cannot be turned into a window. "
 			"Pass period_start and period_end instead."
 		)
-	row = frappe.db.get_value(
-		"Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"], as_dict=True
-	)
+	row = frappe.db.get_value("Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"], as_dict=True)
 	if not row:
 		known = frappe.db.get_all("Fiscal Year", pluck="name", limit=20)
 		raise ToolError(
@@ -448,7 +446,9 @@ def update_cost_activity(args: dict) -> ToolResult:
 	activity_type = as_str(args, "activity_type")
 	if activity_type:
 		if activity_type not in ACTIVITY_TYPES:
-			raise ToolError(f"activity_type must be one of: {', '.join(ACTIVITY_TYPES)}. Got {activity_type!r}.")
+			raise ToolError(
+				f"activity_type must be one of: {', '.join(ACTIVITY_TYPES)}. Got {activity_type!r}."
+			)
 		doc.activity_type = activity_type
 		changed.append("activity_type")
 	phase = as_str(args, "phase")
@@ -813,7 +813,9 @@ def _supplied_drivers(raw) -> dict:
 			raise ToolError(f"driver_quantities[{index}] must be an object.")
 		activity = str(entry.get("activity") or "").strip()
 		if not activity:
-			raise ToolError(f"driver_quantities[{index}] needs an activity — its docname or its activity_name.")
+			raise ToolError(
+				f"driver_quantities[{index}] needs an activity — its docname or its activity_name."
+			)
 		cost_object = str(entry.get("cost_object") or entry.get("field") or "").strip()
 		if not cost_object:
 			raise ToolError(
@@ -826,14 +828,18 @@ def _supplied_drivers(raw) -> dict:
 		try:
 			quantity = float(quantity)
 		except (TypeError, ValueError):
-			raise ToolError(f"driver_quantities[{index}] quantity must be a number, got {quantity!r}.") from None
+			raise ToolError(
+				f"driver_quantities[{index}] quantity must be a number, got {quantity!r}."
+			) from None
 		if quantity < 0:
 			raise ToolError(
 				f"driver_quantities[{index}] quantity is negative. A negative driver quantity gives one "
 				"block a negative share of a positive pool, which credits it at every other block's "
 				"expense."
 			)
-		out.setdefault(activity, {})[cost_object] = out.setdefault(activity, {}).get(cost_object, 0.0) + quantity
+		out.setdefault(activity, {})[cost_object] = (
+			out.setdefault(activity, {}).get(cost_object, 0.0) + quantity
+		)
 	return out
 
 
@@ -960,8 +966,7 @@ def compute_abc_allocation(args: dict) -> ToolResult:
 	only_field = as_str(args, "field")
 	if only_field and not frappe.db.exists(kpi.FIELD_DOCTYPE, only_field):
 		raise ToolError(
-			f"no Field named {only_field!r} on this site. list_fields has the register. Nothing was "
-			"computed."
+			f"no Field named {only_field!r} on this site. list_fields has the register. Nothing was computed."
 		)
 	supplied = _supplied_drivers(args.get("driver_quantities"))
 

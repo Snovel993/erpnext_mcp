@@ -573,9 +573,7 @@ def _parcels_in_county(county: str, company: str) -> list:
 			"County is the parcel's fact and a Field never carries a copy of it."
 		)
 	scope = {"owning_entity": company} if company else {}
-	names = frappe.db.get_all(
-		PARCEL, filters={**scope, "county": county}, pluck="name", limit=REGISTER_CAP
-	)
+	names = frappe.db.get_all(PARCEL, filters={**scope, "county": county}, pluck="name", limit=REGISTER_CAP)
 	if names:
 		return sorted(names)
 	known = sorted(

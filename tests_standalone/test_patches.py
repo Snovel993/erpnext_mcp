@@ -316,9 +316,7 @@ class TheLiteralNewlineFix(FreshSite):
 			],
 		)
 		fix_literal_newlines_in_instructions.execute()  # must not raise
-		self.assertEqual(
-			frappe.db.get_value("Farm Task Template", "Empty Template", "instructions"), ""
-		)
+		self.assertEqual(frappe.db.get_value("Farm Task Template", "Empty Template", "instructions"), "")
 
 	def test_running_it_twice_only_reports_the_row_once(self):
 		STORE.seed(

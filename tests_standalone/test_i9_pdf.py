@@ -278,7 +278,8 @@ class TheShippedTemplate(unittest.TestCase):
 
 		names = [str(name).lower() for name in (PdfReader(i9_pdf.TEMPLATE_PATH).get_fields() or {})]
 		suspects = [
-			name for name in names
+			name
+			for name in names
 			if "ein" in name.replace("_", " ").split() or "identification number" in name
 		]
 		self.assertEqual(
@@ -369,24 +370,20 @@ class TheFieldPlan(unittest.TestCase):
 	def test_all_three_alien_identifiers_reach_their_own_boxes(self):
 		self.assertEqual(self.page["USCIS ANumber"], "A123456789")
 		self.assertEqual(self.page["Form I94 Admission Number"], "12345678901")
-		self.assertEqual(
-			self.page["Foreign Passport Number and Country of IssuanceRow1"], "P9988 / Mexico"
-		)
+		self.assertEqual(self.page["Foreign Passport Number and Country of IssuanceRow1"], "P9988 / Mexico")
 		self.assertEqual(self.page["Exp Date mmddyyyy"], "06/01/2027")
 
 	def test_a_permanent_residents_a_number_goes_in_the_other_box(self):
 		"""One column here, two boxes on the form, and the status decides which."""
-		page = i9_pdf.plan(
-			a_record(citizenship_status="Lawful Permanent Resident"), EMPLOYER
-		)[i9_pdf.PAGE_FORM]
+		page = i9_pdf.plan(a_record(citizenship_status="Lawful Permanent Resident"), EMPLOYER)[
+			i9_pdf.PAGE_FORM
+		]
 		self.assertEqual(page["3 A lawful permanent resident Enter USCIS or ANumber"], "A123456789")
 		self.assertNotIn("USCIS ANumber", page)
 		self.assertEqual(page["CB_3"], "/On")
 
 	def test_section_2_documents_and_the_employer_block(self):
-		self.assertEqual(
-			self.page["Document Title 1"], "Employment Authorization Document (Form I-766)"
-		)
+		self.assertEqual(self.page["Document Title 1"], "Employment Authorization Document (Form I-766)")
 		self.assertEqual(self.page["Issuing Authority 1"], "USCIS")
 		self.assertEqual(self.page["Document Number 0 (if any)"], "SRC1234567890")
 		self.assertEqual(self.page["Expiration Date if any"], "06/01/2027")
@@ -395,9 +392,7 @@ class TheFieldPlan(unittest.TestCase):
 			"Ana Ramos, Farm Manager",
 		)
 		self.assertEqual(self.page["Employers Business or Org Name"], "Test Farm LLC")
-		self.assertEqual(
-			self.page["Employers Business or Org Address"], "123 Orchard Rd, Yakima WA 98901"
-		)
+		self.assertEqual(self.page["Employers Business or Org Address"], "123 Orchard Rd, Yakima WA 98901")
 
 	def test_list_b_and_list_c_fill_their_own_columns(self):
 		page = i9_pdf.plan(
@@ -518,9 +513,7 @@ class AdditionalInformation(unittest.TestCase):
 
 	def test_a_receipt_names_the_list_and_the_deadline(self):
 		"""M-274 §4.3: the receipt goes in the document boxes, the fact goes here."""
-		body = self.note(
-			a_record(list_a_is_receipt=1, receipt_pending=1, receipt_expires_on="2026-06-30")
-		)
+		body = self.note(a_record(list_a_is_receipt=1, receipt_pending=1, receipt_expires_on="2026-06-30"))
 		self.assertIn("RECEIPT under 8 CFR 274a.2(b)(1)(vi)", body)
 		self.assertIn("List A", body)
 		self.assertIn("must present the document by 06/30/2026", body)
@@ -528,12 +521,12 @@ class AdditionalInformation(unittest.TestCase):
 	def test_the_receipt_is_not_written_into_the_document_title(self):
 		"""A prefix there would say it in the wrong place and overflow the box."""
 		page = i9_pdf.plan(a_record(list_a_is_receipt=1), EMPLOYER)[i9_pdf.PAGE_FORM]
-		self.assertEqual(
-			page["Document Title 1"], "Employment Authorization Document (Form I-766)"
-		)
+		self.assertEqual(page["Document Title 1"], "Employment Authorization Document (Form I-766)")
 
 	def test_a_callers_own_lines_are_carried(self):
-		self.assertIn("Rehired for the 2026 cherry harvest.", self.note(notes=["Rehired for the 2026 cherry harvest."]))
+		self.assertIn(
+			"Rehired for the 2026 cherry harvest.", self.note(notes=["Rehired for the 2026 cherry harvest."])
+		)
 
 	def test_the_lines_are_separated_by_newlines_not_run_together(self):
 		"""The box is the form's one multiline field; a viewer wraps a paragraph
@@ -659,9 +652,7 @@ class TheFilledPage(unittest.TestCase):
 			],
 			"Ortega",
 		)
-		self.assertEqual(
-			page_values(self.payload, i9_pdf.PAGE_SUPPLEMENT_B)["Document Number 0"], "SRC0001"
-		)
+		self.assertEqual(page_values(self.payload, i9_pdf.PAGE_SUPPLEMENT_B)["Document Number 0"], "SRC0001")
 
 	def test_the_page_of_acceptable_documents_is_left_alone(self):
 		"""Page 2 is USCIS's instructions and has nothing to fill."""
@@ -757,11 +748,7 @@ class I9PdfToolTestCase(I9TestCase):
 		return doc.name
 
 	def audit_actions(self, i9_name: str) -> list:
-		return [
-			row["action"]
-			for row in STORE.rows("I-9 Audit Log")
-			if row.get("i9_form") == i9_name
-		]
+		return [row["action"] for row in STORE.rows("I-9 Audit Log") if row.get("i9_form") == i9_name]
 
 
 # ── 8 ─────────────────────────────────────────────────────────────────────────
@@ -785,9 +772,7 @@ class RenderTool(I9PdfToolTestCase):
 	def test_the_attached_file_is_private_and_belongs_to_the_form(self):
 		name = self.a_complete_i9()
 		self.tool_data("render_i9_pdf", {"i9_form": name})
-		attachment = next(
-			row for row in STORE.rows("File") if row.get("attached_to_name") == name
-		)
+		attachment = next(row for row in STORE.rows("File") if row.get("attached_to_name") == name)
 		self.assertEqual(int(attachment["is_private"]), 1)
 		self.assertEqual(attachment["attached_to_doctype"], "I-9 Form")
 		self.assertEqual(attachment["attached_to_field"], "generated_pdf")
@@ -867,9 +852,7 @@ class RenderTool(I9PdfToolTestCase):
 
 	def test_additional_information_accepts_a_string_or_a_list(self):
 		name = self.a_complete_i9()
-		self.tool_data(
-			"render_i9_pdf", {"i9_form": name, "additional_information": "One line."}
-		)
+		self.tool_data("render_i9_pdf", {"i9_form": name, "additional_information": "One line."})
 		self.tool_data(
 			"render_i9_pdf",
 			{"i9_form": name, "additional_information": ["Two.", "Lines."], "overwrite": True},
@@ -918,7 +901,9 @@ class AttachSignedTool(I9PdfToolTestCase):
 		self.tool_data("attach_signed_i9", {"i9_form": name, "file_token": token})
 
 		row = frappe.db.get_value(
-			"File", token, ["is_private", "attached_to_doctype", "attached_to_name", "attached_to_field"],
+			"File",
+			token,
+			["is_private", "attached_to_doctype", "attached_to_name", "attached_to_field"],
 			as_dict=True,
 		)
 		self.assertEqual(int(row["is_private"]), 1)
@@ -991,9 +976,7 @@ class AttachSignedTool(I9PdfToolTestCase):
 
 	def test_overwrite_replaces_it_and_says_what_it_replaced(self):
 		name = self.a_complete_i9()
-		first = self.tool_data(
-			"attach_signed_i9", {"i9_form": name, "file_token": self.a_scan("first.pdf")}
-		)
+		first = self.tool_data("attach_signed_i9", {"i9_form": name, "file_token": self.a_scan("first.pdf")})
 		second = self.tool_data(
 			"attach_signed_i9",
 			{"i9_form": name, "file_token": self.a_scan("second.pdf"), "overwrite": True},
@@ -1003,9 +986,7 @@ class AttachSignedTool(I9PdfToolTestCase):
 	def test_a_destroyed_i9_takes_no_signed_copy(self):
 		name = self.a_complete_i9()
 		frappe.db.set_value("I-9 Form", name, "status", "Destroyed")
-		error = self.tool_error(
-			"attach_signed_i9", {"i9_form": name, "file_token": self.a_scan()}
-		)
+		error = self.tool_error("attach_signed_i9", {"i9_form": name, "file_token": self.a_scan()})
 		self.assertIn("destroyed", error)
 
 	def test_get_i9_form_reports_both_halves(self):
@@ -1034,7 +1015,10 @@ def a_capture(width=700, height=200, opaque=True) -> bytes:
 	ink = (0, 0, 0) if opaque else (0, 0, 0, 255)
 	ImageDraw.Draw(image).line(
 		[(150, 130), (200, 70), (250, 130), (300, 60), (360, 120), (420, 80), (470, 110)],
-		fill=ink, width=5, joint="curve")
+		fill=ink,
+		width=5,
+		joint="curve",
+	)
 	buffer = io.BytesIO()
 	image.save(buffer, format="PNG")
 	return buffer.getvalue()
@@ -1075,7 +1059,7 @@ class TheCaptureBecomesInk(unittest.TestCase):
 		self.assertGreater(cropped_w / cropped_h, original.width / original.height)
 
 	def test_an_already_transparent_capture_is_left_alone_and_cropped(self):
-		png, width, height = pdf_signing.ink_only(a_capture(opaque=False))
+		png, width, _height = pdf_signing.ink_only(a_capture(opaque=False))
 		self.assertLess(width, 400)
 		self.assertTrue(png.startswith(b"\x89PNG"))
 
@@ -1115,8 +1099,7 @@ class TheSignedFormCannotBeEdited(unittest.TestCase):
 		self.assertIsNone(reader.get_fields())
 		self.assertNotIn("/AcroForm", reader.trailer["/Root"])
 		for page in reader.pages:
-			widgets = [a for a in (page.get("/Annots") or [])
-			           if a.get_object().get("/Subtype") == "/Widget"]
+			widgets = [a for a in (page.get("/Annots") or []) if a.get_object().get("/Subtype") == "/Widget"]
 			self.assertEqual(widgets, [], "a widget survived the flatten")
 
 	def test_flattening_keeps_every_value_that_was_filled_in(self):
@@ -1132,8 +1115,11 @@ class TheSignedFormCannotBeEdited(unittest.TestCase):
 	def test_the_signature_is_page_content_rather_than_an_annotation(self):
 		_pdf, reader = self.rendered(signatures={"section_1": a_capture()})
 		page = reader.pages[i9_pdf.PAGE_FORM]
-		images = [key for key, value in (page["/Resources"].get("/XObject") or {}).items()
-		          if value.get_object().get("/Subtype") == "/Image"]
+		images = [
+			key
+			for key, value in (page["/Resources"].get("/XObject") or {}).items()
+			if value.get_object().get("/Subtype") == "/Image"
+		]
 		self.assertTrue(images, "the signature did not reach the page's resources")
 		# No widget survives. USCIS's own /Link annotations to uscis.gov DO —
 		# they are the government's page furniture, not this app's form fields,
@@ -1155,19 +1141,22 @@ class TheSignedFormCannotBeEdited(unittest.TestCase):
 	def test_flatten_can_be_forced_either_way(self):
 		from pypdf import PdfReader
 
-		forced = PdfReader(io.BytesIO(i9_pdf.fill_i9_pdf(
-			a_record(), EMPLOYER, [], flatten=True)))
+		forced = PdfReader(io.BytesIO(i9_pdf.fill_i9_pdf(a_record(), EMPLOYER, [], flatten=True)))
 		self.assertIsNone(forced.get_fields())
 
-		kept = PdfReader(io.BytesIO(i9_pdf.fill_i9_pdf(
-			a_record(), EMPLOYER, [], signatures={"section_1": a_capture()}, flatten=False)))
+		kept = PdfReader(
+			io.BytesIO(
+				i9_pdf.fill_i9_pdf(
+					a_record(), EMPLOYER, [], signatures={"section_1": a_capture()}, flatten=False
+				)
+			)
+		)
 		self.assertTrue(kept.get_fields())
 
 	def test_an_unreadable_capture_costs_the_signature_and_not_the_form(self):
 		"""A File that moved, a truncated upload, a format Pillow will not open.
 		The employer still gets a printable I-9 with an empty signature line."""
-		pdf = i9_pdf.fill_i9_pdf(a_record(), EMPLOYER, [],
-		                         signatures={"section_1": b"not a png at all"})
+		pdf = i9_pdf.fill_i9_pdf(a_record(), EMPLOYER, [], signatures={"section_1": b"not a png at all"})
 		self.assertTrue(pdf.startswith(b"%PDF"))
 
 	def test_the_signature_lands_on_its_own_line_and_not_the_next_row(self):
@@ -1182,7 +1171,7 @@ class TheSignedFormCannotBeEdited(unittest.TestCase):
 		employee = boxes["Signature of Employee"]
 
 		self.assertEqual(employee["page"], i9_pdf.PAGE_FORM)
-		x0, y0, x1, y1 = employee["rect"]
+		_x0, y0, _x1, y1 = employee["rect"]
 		# Taller than the widget, because a 12.9pt signature on a 323pt line is
 		# a smudge — and still clear of the row above, which starts at 444.2.
 		self.assertGreater(employee["max_height"], y1 - y0)
@@ -1231,9 +1220,7 @@ class PatchRedrawsThePage(I9PdfToolTestCase):
 		name = self._filed_with_gaps()
 		before = frappe.db.get_value("I-9 Form", name, "generated_pdf")
 
-		data = self.tool_data(
-			"patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"}
-		)
+		data = self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
 
 		self.assertTrue(data["pdf"]["regenerated"])
 		self.assertEqual(data["pdf"]["replaced"], before)
@@ -1251,7 +1238,9 @@ class PatchRedrawsThePage(I9PdfToolTestCase):
 		"""Read back OUT of the AcroForm, the way this file reads every page:
 		"the renderer ran" and "the form says 11/05/1978" are different claims."""
 		name = self._filed_with_gaps()
-		self.assertNotIn("11/05/1978", set(page_values(self._bytes(self._pages(name)[-1]), i9_pdf.PAGE_FORM).values()))
+		self.assertNotIn(
+			"11/05/1978", set(page_values(self._bytes(self._pages(name)[-1]), i9_pdf.PAGE_FORM).values())
+		)
 
 		self.tool_data("patch_i9_section_1", {"i9_form": name, "date_of_birth": "1978-11-05"})
 

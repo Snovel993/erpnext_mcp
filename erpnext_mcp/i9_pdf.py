@@ -554,10 +554,12 @@ def _attestation_lines(record: dict) -> list[str]:
 	"""
 	lines = []
 	employee = " ".join(
-		part for part in (
+		part
+		for part in (
 			_text(record.get("legal_first_name")),
 			_text(record.get("legal_last_name")),
-		) if part
+		)
+		if part
 	) or _text(record.get("employee_name"))
 
 	for label, who, stamp, address, capture in (
@@ -674,8 +676,7 @@ def _overflow_note(reverifications: list) -> list[str]:
 	return lines
 
 
-def _additional_information(record: dict, employer: dict, reverifications: list,
-                            notes: list | None) -> str:
+def _additional_information(record: dict, employer: dict, reverifications: list, notes: list | None) -> str:
 	"""The Section 2 free-text box, as one string the widget will take.
 
 	ORDER IS DELIBERATE: the receipt first, because it is the only entry that
@@ -806,8 +807,13 @@ def _supplement_b(record: dict, reverifications: list) -> dict:
 # ── the fill ────────────────────────────────────────────────────────────────
 
 
-def plan(record: dict, employer: dict, reverifications: list | None = None,
-         full_ssn: str = "", notes: list | None = None) -> dict:
+def plan(
+	record: dict,
+	employer: dict,
+	reverifications: list | None = None,
+	full_ssn: str = "",
+	notes: list | None = None,
+) -> dict:
 	"""Every value this form will carry, keyed by page. No PDF is opened.
 
 	Split out from `fill_i9_pdf` so a test — and a caller who wants to know what
@@ -971,9 +977,7 @@ def _split_shared_title(writer) -> bool:
 
 		kids = parent.get("/Kids")
 		if kids is not None:
-			parent[NameObject("/Kids")] = ArrayObject(
-				[kid for kid in kids if kid.idnum != reference.idnum]
-			)
+			parent[NameObject("/Kids")] = ArrayObject([kid for kid in kids if kid.idnum != reference.idnum])
 		writer.root_object["/AcroForm"][NameObject("/Fields")].append(reference)
 		return True
 	return False  # pragma: no cover - a template whose duplicate name was fixed
@@ -992,9 +996,15 @@ SIGNATURE_BOXES = {
 }
 
 
-def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = None,
-                full_ssn: str = "", notes: list | None = None,
-                signatures: dict | None = None, flatten: bool | None = None) -> bytes:
+def fill_i9_pdf(
+	record: dict,
+	employer: dict,
+	reverifications: list | None = None,
+	full_ssn: str = "",
+	notes: list | None = None,
+	signatures: dict | None = None,
+	flatten: bool | None = None,
+) -> bytes:
 	"""The shipped USCIS form with this record's values in its boxes.
 
 	Args:
@@ -1046,8 +1056,7 @@ def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = Non
 	# and only then is the ink laid down — see `pdf_signing`, which argues the
 	# order at length. Getting it backwards paints an empty signature box over
 	# the signature.
-	pending = {key: data for key, data in (signatures or {}).items()
-	           if key in SIGNATURE_BOXES and data}
+	pending = {key: data for key, data in (signatures or {}).items() if key in SIGNATURE_BOXES and data}
 	boxes = pdf_signing.box_for(writer, {SIGNATURE_BOXES[key] for key in pending}) if pending else {}
 
 	should_flatten = flatten if flatten is not None else bool(pending)
@@ -1058,8 +1067,7 @@ def fill_i9_pdf(record: dict, employer: dict, reverifications: list | None = Non
 		box = boxes.get(SIGNATURE_BOXES[key])
 		if not box:  # pragma: no cover - a template whose box was renamed
 			continue
-		pdf_signing.stamp(writer, box["page"], box["rect"], data,
-		                  max_height=box["max_height"])
+		pdf_signing.stamp(writer, box["page"], box["rect"], data, max_height=box["max_height"])
 
 	buffer = io.BytesIO()
 	writer.write(buffer)

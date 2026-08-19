@@ -158,22 +158,30 @@ class RendererBytes(unittest.TestCase):
 		return {
 			"W-2": renderer.render_w2_pdf(
 				generators.generate_w2_data(EMPLOYEE_INFO, slips, COMPANY_INFO, 2025),
-				COMPANY_INFO, EMPLOYEE_INFO,
+				COMPANY_INFO,
+				EMPLOYEE_INFO,
 			),
 			"1099-NEC": renderer.render_1099_nec_pdf(
 				generators.generate_1099_nec_data(
-					CONTRACTOR_INFO, [{"amount": 2500.0, "date": "2025-03-01"}], COMPANY_INFO, 2025,
+					CONTRACTOR_INFO,
+					[{"amount": 2500.0, "date": "2025-03-01"}],
+					COMPANY_INFO,
+					2025,
 				),
-				COMPANY_INFO, CONTRACTOR_INFO,
+				COMPANY_INFO,
+				CONTRACTOR_INFO,
 			),
 			"941": renderer.render_941_pdf(
-				generators.generate_941_data(quarter, COMPANY_INFO, "Q1", 2025), COMPANY_INFO,
+				generators.generate_941_data(quarter, COMPANY_INFO, "Q1", 2025),
+				COMPANY_INFO,
 			),
 			"OR-WR": renderer.render_or_wr_pdf(
-				generators.generate_or_wr_data(slips, COMPANY_INFO, 2025), COMPANY_INFO,
+				generators.generate_or_wr_data(slips, COMPANY_INFO, 2025),
+				COMPANY_INFO,
 			),
 			"OQ": renderer.render_or_oq_pdf(
-				generators.generate_or_oq_data(quarter, COMPANY_INFO, "Q1", 2025), COMPANY_INFO,
+				generators.generate_or_oq_data(quarter, COMPANY_INFO, "Q1", 2025),
+				COMPANY_INFO,
 			),
 			"WA-ESD": renderer.render_wa_esd_pdf(
 				generators.generate_wa_esd_data([wa_slip(employee="E1")], COMPANY_INFO, "Q1", 2025),
@@ -194,12 +202,19 @@ class RendererBytes(unittest.TestCase):
 		for form_type in generators.FORM_TYPES:
 			with self.subTest(form=form_type):
 				form_data = generators.generate_form_data(
-					form_type, slips, COMPANY_INFO, 2025, quarter="Q1",
+					form_type,
+					slips,
+					COMPANY_INFO,
+					2025,
+					quarter="Q1",
 					subject_info=EMPLOYEE_INFO if form_type == "W-2" else CONTRACTOR_INFO,
 					payments=[{"amount": 900.0}],
 				)
 				payload = renderer.render_form_pdf(
-					form_type, form_data, COMPANY_INFO, EMPLOYEE_INFO,
+					form_type,
+					form_data,
+					COMPANY_INFO,
+					EMPLOYEE_INFO,
 				)
 				self.assertTrue(payload.startswith(b"%PDF-1"))
 
@@ -215,7 +230,8 @@ class RendererBytes(unittest.TestCase):
 		not a traceback — the same promise the generators make."""
 		payload = renderer.render_w2_pdf(
 			generators.generate_w2_data(EMPLOYEE_INFO, [], COMPANY_INFO, 2025),
-			COMPANY_INFO, EMPLOYEE_INFO,
+			COMPANY_INFO,
+			EMPLOYEE_INFO,
 		)
 		self.assertTrue(payload.startswith(b"%PDF-1"))
 		self.assertIn("no payroll slips found", text_of(payload))
@@ -228,7 +244,8 @@ class RendererBytes(unittest.TestCase):
 
 	def test_the_file_name_says_what_the_form_is(self):
 		name = renderer.file_name_for(
-			"941", {"tax_year": 2025, "quarter": "Q2"},
+			"941",
+			{"tax_year": 2025, "quarter": "Q2"},
 		)
 		self.assertEqual(name, "941-2025-Q2.pdf")
 		self.assertEqual(
@@ -251,17 +268,21 @@ class W2Page(unittest.TestCase):
 			company_info or COMPANY_INFO,
 			2025,
 		)
-		return text_of(renderer.render_w2_pdf(
-			form_data, company_info or COMPANY_INFO, employee_info or EMPLOYEE_INFO,
-		))
+		return text_of(
+			renderer.render_w2_pdf(
+				form_data,
+				company_info or COMPANY_INFO,
+				employee_info or EMPLOYEE_INFO,
+			)
+		)
 
 	def test_the_money_boxes(self):
 		page = self.a_page()
 		# 4 x 1,000 gross; 4 x 100 federal; 6.2% and 1.45% of the same.
-		self.assertIn("4,000.00", page)   # boxes 1, 3 and 5
-		self.assertIn("400.00", page)     # box 2
-		self.assertIn("248.00", page)     # box 4
-		self.assertIn("58.00", page)      # box 6
+		self.assertIn("4,000.00", page)  # boxes 1, 3 and 5
+		self.assertIn("400.00", page)  # box 2
+		self.assertIn("248.00", page)  # box 4
+		self.assertIn("58.00", page)  # box 6
 
 	def test_a_changed_figure_changes_the_page(self):
 		"""The values are read off the form data, not hardcoded in the layout."""
@@ -318,8 +339,8 @@ class W2Page(unittest.TestCase):
 		self.assertIn("17  State income tax", page)
 		self.assertIn("20  Locality name", page)
 		self.assertIn("OR", page)
-		self.assertIn("1234567-8", page)     # box 15, the employer's Oregon BIN
-		self.assertIn("240.00", page)        # box 17, four quarters of income tax
+		self.assertIn("1234567-8", page)  # box 15, the employer's Oregon BIN
+		self.assertIn("240.00", page)  # box 17, four quarters of income tax
 
 	def test_a_worker_in_two_states_gets_both_rows(self):
 		slips = [*a_year_of_oregon_slips(), wa_slip(employee="HR-EMP-00001", period_end="2025-06-13")]
@@ -352,18 +373,28 @@ class W2Page(unittest.TestCase):
 	def test_an_address_the_form_data_lacks_is_filled_from_the_argument(self):
 		"""The record wins on figures; an argument fills a hole it has."""
 		form_data = generators.generate_w2_data(
-			{**EMPLOYEE_INFO, "address": ""}, a_year_of_oregon_slips(), COMPANY_INFO, 2025,
+			{**EMPLOYEE_INFO, "address": ""},
+			a_year_of_oregon_slips(),
+			COMPANY_INFO,
+			2025,
 		)
 		page = text_of(renderer.render_w2_pdf(form_data, COMPANY_INFO, EMPLOYEE_INFO))
 		self.assertIn("The Dalles OR 97058", page)
 
 	def test_an_argument_never_displaces_a_figure_the_record_holds(self):
 		form_data = generators.generate_w2_data(
-			EMPLOYEE_INFO, a_year_of_oregon_slips(), COMPANY_INFO, 2025,
+			EMPLOYEE_INFO,
+			a_year_of_oregon_slips(),
+			COMPANY_INFO,
+			2025,
 		)
-		page = text_of(renderer.render_w2_pdf(
-			form_data, {**COMPANY_INFO, "name": "Some Other Co"}, EMPLOYEE_INFO,
-		))
+		page = text_of(
+			renderer.render_w2_pdf(
+				form_data,
+				{**COMPANY_INFO, "name": "Some Other Co"},
+				EMPLOYEE_INFO,
+			)
+		)
 		self.assertIn("Example Trading Co", page)
 		self.assertNotIn("Some Other Co", page)
 
@@ -377,7 +408,9 @@ class Form941Page(unittest.TestCase):
 		info = company_info or COMPANY_INFO
 		form_data = generators.generate_941_data(
 			[or_slip(employee="E1"), or_slip(employee="E2", gross=2000.0)] if slips is None else slips,
-			info, quarter, 2025,
+			info,
+			quarter,
+			2025,
 		)
 		return text_of(renderer.render_941_pdf(form_data, info))
 
@@ -395,33 +428,36 @@ class Form941Page(unittest.TestCase):
 		page = self.a_page()
 		self.assertIn("Number of employees who received wages", page)
 		self.assertIn("Wages, tips, and other compensation", page)
-		self.assertIn("3,000.00", page)   # line 2, two employees
-		self.assertIn("200.00", page)     # line 3, two lots of federal withholding
+		self.assertIn("3,000.00", page)  # line 2, two employees
+		self.assertIn("200.00", page)  # line 3, two lots of federal withholding
 
 	def test_line_five_carries_both_columns(self):
 		page = self.a_page()
 		self.assertIn("Taxable social security wages", page)
-		self.assertIn("372.00", page)     # 12.4% of 3,000
+		self.assertIn("372.00", page)  # 12.4% of 3,000
 		self.assertIn("Taxable Medicare wages and tips", page)
-		self.assertIn("87.00", page)      # 2.9% of 3,000
+		self.assertIn("87.00", page)  # 2.9% of 3,000
 
 	def test_the_totals_and_the_balance(self):
 		page = self.a_page()
 		self.assertIn("Total taxes before adjustments", page)
-		self.assertIn("659.00", page)     # lines 6, 10, 12 and 14 with no deposits
+		self.assertIn("659.00", page)  # lines 6, 10, 12 and 14 with no deposits
 		self.assertIn("Balance due", page)
 
 	def test_deposits_move_the_balance_onto_the_page(self):
 		page = self.a_page(company_info={**COMPANY_INFO, "deposits": 700.0})
-		self.assertIn("700.00", page)     # line 13
-		self.assertIn("41.00", page)      # line 15, the overpayment
+		self.assertIn("700.00", page)  # line 13
+		self.assertIn("41.00", page)  # line 15, the overpayment
 
 	def test_every_line_number_one_to_fifteen_is_drawn(self):
 		page = self.a_page()
 		for label in (
-			"Total social security and Medicare taxes", "Section 3121(q)",
-			"fractions of cents", "adjustment for sick pay",
-			"small business payroll tax credit", "Total deposits for this quarter",
+			"Total social security and Medicare taxes",
+			"Section 3121(q)",
+			"fractions of cents",
+			"adjustment for sick pay",
+			"small business payroll tax credit",
+			"Total deposits for this quarter",
 			"Overpayment",
 		):
 			with self.subTest(line=label):
@@ -442,18 +478,20 @@ class Form941Page(unittest.TestCase):
 class StateFormPages(unittest.TestCase):
 	def test_or_wr_carries_the_quarters_and_the_annual_total(self):
 		form_data = generators.generate_or_wr_data(
-			a_year_of_oregon_slips(), COMPANY_INFO, 2025,
+			a_year_of_oregon_slips(),
+			COMPANY_INFO,
+			2025,
 		)
 		page = text_of(renderer.render_or_wr_pdf(form_data, COMPANY_INFO))
 		self.assertIn("Form OR-WR", page)
 		self.assertIn("Oregon Annual Withholding Tax Reconciliation Report", page)
-		self.assertIn("1234567-8", page)          # the BIN
+		self.assertIn("1234567-8", page)  # the BIN
 		self.assertIn("1st quarter", page)
 		self.assertIn("4th quarter", page)
 		self.assertIn("Annual total", page)
-		self.assertIn("4,000.00", page)           # the year's Oregon wages
-		self.assertIn("240.00", page)             # the year's income tax
-		self.assertIn("2026-01-31", page)         # the due date
+		self.assertIn("4,000.00", page)  # the year's Oregon wages
+		self.assertIn("240.00", page)  # the year's income tax
+		self.assertIn("2026-01-31", page)  # the due date
 
 	def test_or_wr_prints_the_reconciliation_verdict(self):
 		filed = {"or_income_tax": 60.0, "or_transit_tax": 1.0, "or_paid_leave_employee": 6.0}
@@ -468,26 +506,32 @@ class StateFormPages(unittest.TestCase):
 		form_data = generators.generate_or_wr_data(a_year_of_oregon_slips(), info, 2025)
 		page = text_of(renderer.render_or_wr_pdf(form_data, info))
 		self.assertIn("DOES NOT RECONCILE", page)
-		self.assertIn("235.00", page)             # 240 computed against 5 filed
+		self.assertIn("235.00", page)  # 240 computed against 5 filed
 
 	def test_oq_carries_the_four_programs(self):
 		info = {**COMPANY_INFO, "ui_rate": 2.4}
 		form_data = generators.generate_or_oq_data(
-			[or_slip(employee="E1"), or_slip(employee="E2")], info, "Q1", 2025,
+			[or_slip(employee="E1"), or_slip(employee="E2")],
+			info,
+			"Q1",
+			2025,
 		)
 		page = text_of(renderer.render_or_oq_pdf(form_data, info))
 		self.assertIn("Form OQ", page)
 		self.assertIn("Q1 2025", page)
-		self.assertIn("2,000.00", page)           # subject wages
-		self.assertIn("120.00", page)             # state withholding
+		self.assertIn("2,000.00", page)  # subject wages
+		self.assertIn("120.00", page)  # state withholding
 		self.assertIn("Statewide transit tax withheld", page)
 		self.assertIn("Paid Leave Oregon - total", page)
-		self.assertIn("48.00", page)              # UI tax at 2.4%
+		self.assertIn("48.00", page)  # UI tax at 2.4%
 		self.assertIn("2.40 %", page)
 
 	def test_oq_carries_the_per_month_employee_counts(self):
 		form_data = generators.generate_or_oq_data(
-			[or_slip(employee="E1", period_end="2025-02-14")], COMPANY_INFO, "Q1", 2025,
+			[or_slip(employee="E1", period_end="2025-02-14")],
+			COMPANY_INFO,
+			"Q1",
+			2025,
 		)
 		page = text_of(renderer.render_or_oq_pdf(form_data, COMPANY_INFO))
 		self.assertIn("Employees paid in January", page)
@@ -497,11 +541,14 @@ class StateFormPages(unittest.TestCase):
 	def test_wa_esd_carries_the_wage_and_hour_detail(self):
 		info = {**COMPANY_INFO, "ui_rate": 1.0, "ssn_last4_by_employee": {"E1": "6789"}}
 		form_data = generators.generate_wa_esd_data(
-			[wa_slip(employee="E1", gross=1000.0)], info, "Q1", 2025,
+			[wa_slip(employee="E1", gross=1000.0)],
+			info,
+			"Q1",
+			2025,
 		)
 		page = text_of(renderer.render_wa_esd_pdf(form_data, info))
 		self.assertIn("WA ESD Quarterly Report", page)
-		self.assertIn("000123456", page)          # the ESD account number
+		self.assertIn("000123456", page)  # the ESD account number
 		self.assertIn("Hours worked", page)
 		self.assertIn("Worker E1", page)
 		self.assertIn("XXX-XX-6789", page)
@@ -515,8 +562,8 @@ class StateFormPages(unittest.TestCase):
 		self.assertIn("Paid Family & Medical Leave", page)
 		self.assertIn("WA Cares Fund", page)
 		self.assertIn("Unemployment insurance tax", page)
-		self.assertIn("10.00", page)              # UI at 1% of 1,000
-		self.assertIn("5.80", page)               # WA Cares
+		self.assertIn("10.00", page)  # UI at 1% of 1,000
+		self.assertIn("5.80", page)  # WA Cares
 		self.assertIn("TOTAL DUE", page)
 
 	def test_wa_esd_says_when_hours_are_missing(self):
@@ -574,7 +621,10 @@ class Disclaimers(unittest.TestCase):
 		working copy, and a reader who only sees page two must be told."""
 		info = {**COMPANY_INFO, "ssn_last4_by_employee": {f"E{n:02d}": "6789" for n in range(1, 41)}}
 		form_data = generators.generate_wa_esd_data(
-			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)], info, "Q1", 2025,
+			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)],
+			info,
+			"Q1",
+			2025,
 		)
 		payload = renderer.render_wa_esd_pdf(form_data, info)
 		pages = page_texts(payload)
@@ -587,7 +637,10 @@ class Disclaimers(unittest.TestCase):
 	def test_the_wage_detail_repeats_its_header_on_the_second_page(self):
 		info = {**COMPANY_INFO, "ssn_last4_by_employee": {f"E{n:02d}": "6789" for n in range(1, 41)}}
 		form_data = generators.generate_wa_esd_data(
-			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)], info, "Q1", 2025,
+			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)],
+			info,
+			"Q1",
+			2025,
 		)
 		pages = page_texts(renderer.render_wa_esd_pdf(form_data, info))
 		for index, page in enumerate(pages[:2], start=1):
@@ -597,7 +650,10 @@ class Disclaimers(unittest.TestCase):
 	def test_the_totals_row_counts_every_employee_across_the_break(self):
 		info = {**COMPANY_INFO, "ssn_last4_by_employee": {f"E{n:02d}": "6789" for n in range(1, 41)}}
 		form_data = generators.generate_wa_esd_data(
-			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)], info, "Q1", 2025,
+			[wa_slip(employee=f"E{n:02d}") for n in range(1, 41)],
+			info,
+			"Q1",
+			2025,
 		)
 		page = text_of(renderer.render_wa_esd_pdf(form_data, info))
 		self.assertIn("TOTAL - 40 employee(s)", page)
@@ -614,22 +670,38 @@ class PdfToolTestCase(TaxFormToolTestCase):
 
 	def a_w2(self, employee="HR-EMP-00001") -> str:
 		self.seed_a_year(employee=employee)
-		return self.tool_data("generate_tax_form", {
-			"form_type": "W-2", "company": MAIN, "fiscal_year": "2025", "employee": employee,
-		})["name"]
+		return self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "W-2",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"employee": employee,
+			},
+		)["name"]
 
 	def a_941(self, quarter="Q1") -> str:
 		self.seed_payroll(
-			f"PAY-{quarter}", "2025-02-01", "2025-02-14",
+			f"PAY-{quarter}",
+			"2025-02-01",
+			"2025-02-14",
 			[or_slip(employee="HR-EMP-00001", gross=1000.0)],
 		)
-		return self.tool_data("generate_tax_form", {
-			"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": quarter,
-		})["name"]
+		return self.tool_data(
+			"generate_tax_form",
+			{
+				"form_type": "941",
+				"company": MAIN,
+				"fiscal_year": "2025",
+				"quarter": quarter,
+			},
+		)["name"]
 
 	def attached_pdf(self, form_name: str) -> bytes:
 		file_name = frappe.db.get_value(
-			"File", {"attached_to_doctype": "Tax Form", "attached_to_name": form_name}, "name",
+			"File",
+			{"attached_to_doctype": "Tax Form", "attached_to_name": form_name},
+			"name",
 		)
 		self.assertTrue(file_name, f"no File attached to {form_name}")
 		return STORE.file_contents[file_name]
@@ -684,8 +756,9 @@ class RenderTool(PdfToolTestCase):
 		slip would silently change the form the page claims to render."""
 		name = self.a_w2()
 		before = frappe.db.get_value("Tax Form", name, "form_data_json")
-		self.seed_payroll("PAY-LATE", "2025-12-01", "2025-12-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=9000.0)])
+		self.seed_payroll(
+			"PAY-LATE", "2025-12-01", "2025-12-14", [or_slip(employee="HR-EMP-00001", gross=9000.0)]
+		)
 		self.tool_data("render_tax_form_pdf", {"name": name})
 		self.assertEqual(frappe.db.get_value("Tax Form", name, "form_data_json"), before)
 		self.assertNotIn("13,000.00", text_of(self.attached_pdf(name)))
@@ -710,9 +783,13 @@ class RenderTool(PdfToolTestCase):
 
 	def test_a_company_address_argument_fills_a_hole_the_record_has(self):
 		name = self.a_w2()
-		self.tool_data("render_tax_form_pdf", {
-			"name": name, "company_address": "1 Orchard Road, Hood River OR 97031",
-		})
+		self.tool_data(
+			"render_tax_form_pdf",
+			{
+				"name": name,
+				"company_address": "1 Orchard Road, Hood River OR 97031",
+			},
+		)
 		self.assertIn("Hood River OR 97031", text_of(self.attached_pdf(name)))
 
 	def test_overwrite_repoints_the_field_and_keeps_the_old_file(self):
@@ -721,7 +798,8 @@ class RenderTool(PdfToolTestCase):
 		second = self.tool_data("render_tax_form_pdf", {"name": name, "overwrite": True})
 		self.assertEqual(second["replaced"], first["attachment"]["file_url"])
 		attachments = frappe.db.get_all(
-			"File", filters={"attached_to_doctype": "Tax Form", "attached_to_name": name},
+			"File",
+			filters={"attached_to_doctype": "Tax Form", "attached_to_name": name},
 			fields=["name"],
 		)
 		self.assertEqual(len(attachments), 2, "the earlier File was thrown away")
@@ -731,10 +809,12 @@ class RenderTool(PdfToolTestCase):
 		self.assertAudited("render_tax_form_pdf", "Success")
 
 	def test_every_form_type_renders_through_the_tool(self):
-		self.seed_payroll("PAY-OR", "2025-02-01", "2025-02-14",
-		                  [or_slip(employee="HR-EMP-00001", gross=1000.0)])
-		self.seed_payroll("PAY-WA", "2025-03-01", "2025-03-14",
-		                  [wa_slip(employee="HR-EMP-00002", gross=1000.0)])
+		self.seed_payroll(
+			"PAY-OR", "2025-02-01", "2025-02-14", [or_slip(employee="HR-EMP-00001", gross=1000.0)]
+		)
+		self.seed_payroll(
+			"PAY-WA", "2025-03-01", "2025-03-14", [wa_slip(employee="HR-EMP-00002", gross=1000.0)]
+		)
 		for form_type, extra in (
 			("W-2", {"employee": "HR-EMP-00001"}),
 			("941", {"quarter": "Q1"}),
@@ -743,9 +823,15 @@ class RenderTool(PdfToolTestCase):
 			("WA-ESD", {"quarter": "Q1"}),
 		):
 			with self.subTest(form=form_type):
-				created = self.tool_data("generate_tax_form", {
-					"form_type": form_type, "company": MAIN, "fiscal_year": "2025", **extra,
-				})
+				created = self.tool_data(
+					"generate_tax_form",
+					{
+						"form_type": form_type,
+						"company": MAIN,
+						"fiscal_year": "2025",
+						**extra,
+					},
+				)
 				self.tool_data("render_tax_form_pdf", {"name": created["name"]})
 				self.assertTrue(self.attached_pdf(created["name"]).startswith(b"%PDF-1"))
 
@@ -759,20 +845,34 @@ class BulkRenderTool(PdfToolTestCase):
 		names = []
 		for index, quarter in enumerate(("Q1", "Q2", "Q3")):
 			self.seed_payroll(
-				f"PAY-{quarter}", f"2025-0{index * 3 + 2}-01", f"2025-0{index * 3 + 2}-14",
-				[or_slip(employee="HR-EMP-00001", gross=1000.0,
-				         period_end=f"2025-0{index * 3 + 2}-14")],
+				f"PAY-{quarter}",
+				f"2025-0{index * 3 + 2}-01",
+				f"2025-0{index * 3 + 2}-14",
+				[or_slip(employee="HR-EMP-00001", gross=1000.0, period_end=f"2025-0{index * 3 + 2}-14")],
 			)
-			names.append(self.tool_data("generate_tax_form", {
-				"form_type": "941", "company": MAIN, "fiscal_year": "2025", "quarter": quarter,
-			})["name"])
+			names.append(
+				self.tool_data(
+					"generate_tax_form",
+					{
+						"form_type": "941",
+						"company": MAIN,
+						"fiscal_year": "2025",
+						"quarter": quarter,
+					},
+				)["name"]
+			)
 		return names
 
 	def test_a_filtered_batch_renders_every_form_it_matched(self):
 		names = self.three_941s()
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025",
-		})
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertEqual(data["matched"], 3)
 		self.assertEqual(data["rendered_count"], 3)
 		self.assertEqual(data["failed_count"], 0)
@@ -794,9 +894,14 @@ class BulkRenderTool(PdfToolTestCase):
 	def test_a_form_that_already_has_a_pdf_is_skipped_and_counted(self):
 		names = self.three_941s()
 		self.tool_data("render_tax_form_pdf", {"name": names[0]})
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025",
-		})
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertEqual(data["rendered_count"], 2)
 		self.assertEqual(data["skipped_count"], 1)
 		self.assertEqual(data["skipped"][0]["name"], names[0])
@@ -804,12 +909,23 @@ class BulkRenderTool(PdfToolTestCase):
 
 	def test_overwrite_renders_the_skipped_ones_too(self):
 		self.three_941s()
-		self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025",
-		})
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025", "overwrite": True,
-		})
+		self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+			},
+		)
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+				"overwrite": True,
+			},
+		)
 		self.assertEqual(data["rendered_count"], 3)
 		self.assertEqual(data["skipped_count"], 0)
 
@@ -817,9 +933,14 @@ class BulkRenderTool(PdfToolTestCase):
 		"""A form with no computed values fails by name and the rest come out."""
 		names = self.three_941s()
 		frappe.db.set_value("Tax Form", names[1], "form_data_json", "")
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025",
-		})
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertEqual(data["rendered_count"], 2)
 		self.assertEqual(data["failed_count"], 1)
 		self.assertEqual(data["failed"][0]["name"], names[1])
@@ -828,15 +949,27 @@ class BulkRenderTool(PdfToolTestCase):
 	def test_every_w2_for_a_year_in_one_call(self):
 		for employee in ("HR-EMP-00001", "HR-EMP-00002"):
 			self.seed_payroll(
-				f"PAY-{employee}", "2025-02-01", "2025-02-14",
+				f"PAY-{employee}",
+				"2025-02-01",
+				"2025-02-14",
 				[or_slip(employee=employee, gross=1000.0)],
 			)
-			self.tool_data("generate_tax_form", {
-				"form_type": "W-2", "company": MAIN, "fiscal_year": "2025", "employee": employee,
-			})
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"form_type": "W-2", "fiscal_year": "2025",
-		})
+			self.tool_data(
+				"generate_tax_form",
+				{
+					"form_type": "W-2",
+					"company": MAIN,
+					"fiscal_year": "2025",
+					"employee": employee,
+				},
+			)
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"form_type": "W-2",
+				"fiscal_year": "2025",
+			},
+		)
 		self.assertEqual(data["rendered_count"], 2)
 		self.assertEqual(
 			{row["subject"] for row in data["rendered"]},
@@ -845,9 +978,15 @@ class BulkRenderTool(PdfToolTestCase):
 
 	def test_the_filters_that_chose_the_batch_are_reported_back(self):
 		self.three_941s()
-		data = self.tool_data("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "fiscal_year": "2025", "quarter": "Q2",
-		})
+		data = self.tool_data(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"fiscal_year": "2025",
+				"quarter": "Q2",
+			},
+		)
 		self.assertEqual(data["selection"]["quarter"], "Q2")
 		self.assertEqual(data["selection"]["form_type"], "941")
 		self.assertEqual(data["matched"], 1)
@@ -906,7 +1045,8 @@ class RenderRefusals(PdfToolTestCase):
 		self.tool_data("render_tax_form_pdf", {"name": name})
 		self.tool_error("render_tax_form_pdf", {"name": name})
 		attachments = frappe.db.get_all(
-			"File", filters={"attached_to_doctype": "Tax Form", "attached_to_name": name},
+			"File",
+			filters={"attached_to_doctype": "Tax Form", "attached_to_name": name},
 			fields=["name"],
 		)
 		self.assertEqual(len(attachments), 1)
@@ -918,27 +1058,41 @@ class RenderRefusals(PdfToolTestCase):
 
 	def test_a_bulk_selection_that_matches_nothing_is_refused(self):
 		self.a_w2()
-		error = self.tool_error("bulk_render_tax_form_pdfs", {
-			"form_type": "W-2", "fiscal_year": "2019",
-		})
+		error = self.tool_error(
+			"bulk_render_tax_form_pdfs",
+			{
+				"form_type": "W-2",
+				"fiscal_year": "2019",
+			},
+		)
 		self.assertIn("no Tax Form matches", error)
 		self.assertIn("list_tax_forms", error)
 
 	def test_a_bulk_selection_over_the_limit_is_refused_rather_than_truncated(self):
 		self.three_941s = BulkRenderTool.three_941s.__get__(self)
 		self.three_941s()
-		error = self.tool_error("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "limit": 2,
-		})
+		error = self.tool_error(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"limit": 2,
+			},
+		)
 		self.assertIn("more than 2", error)
 		self.assertIn("Nothing was rendered", error)
 
 	def test_the_over_limit_refusal_rendered_nothing(self):
 		self.three_941s = BulkRenderTool.three_941s.__get__(self)
 		names = self.three_941s()
-		self.tool_error("bulk_render_tax_form_pdfs", {
-			"company": MAIN, "form_type": "941", "limit": 2,
-		})
+		self.tool_error(
+			"bulk_render_tax_form_pdfs",
+			{
+				"company": MAIN,
+				"form_type": "941",
+				"limit": 2,
+			},
+		)
 		for name in names:
 			with self.subTest(form=name):
 				self.assertFalse(frappe.db.get_value("Tax Form", name, "generated_pdf"))

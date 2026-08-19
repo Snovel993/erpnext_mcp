@@ -215,9 +215,7 @@ def tag_html(tag: dict, spec: dict, index: int) -> str:
 	else:
 		parts.append('<div class="tag-nosymbol"></div>')
 
-	meta = " · ".join(
-		_esc(value) for value in (tag.get("asset_type"), tag.get("location")) if value
-	)
+	meta = " · ".join(_esc(value) for value in (tag.get("asset_type"), tag.get("location")) if value)
 	parts.append('<div class="tag-text">')
 	parts.append(f'<div class="tag-name">{_esc(tag.get("asset_name"))}</div>')
 	if meta:
@@ -226,7 +224,7 @@ def tag_html(tag: dict, spec: dict, index: int) -> str:
 	return "".join(parts)
 
 
-def sheet_html(tags: list, errors: list = None, template: str = DEFAULT_TEMPLATE) -> str:
+def sheet_html(tags: list, errors: list | None = None, template: str = DEFAULT_TEMPLATE) -> str:
 	"""The whole printable document, as a string. A PURE FUNCTION — no site needed.
 
 	THE SKIPPED ASSETS ARE PRINTED ON THE PAGE, which is `badge_sheet.sheet_html`'s
@@ -244,14 +242,13 @@ def sheet_html(tags: list, errors: list = None, template: str = DEFAULT_TEMPLATE
 	body = [
 		'<div class="sheet-bar no-print">',
 		'<button type="button" onclick="window.print()">Print</button>',
-		f"<span>{count} tag(s) on {max(1, len(pages))} sheet(s) of "
-		f"{_esc(spec['label'])}.</span>",
+		f"<span>{count} tag(s) on {max(1, len(pages))} sheet(s) of {_esc(spec['label'])}.</span>",
 	]
 	if spec["substituted"]:
 		body.append(
 			'<span class="warn"> &nbsp;Asked for &quot;'
 			+ _esc(spec["requested"])
-			+ '&quot;, which this app has no geometry for &mdash; laid out on '
+			+ "&quot;, which this app has no geometry for &mdash; laid out on "
 			+ _esc(spec["key"])
 			+ ". Check the stock in the printer.</span>"
 		)

@@ -107,40 +107,69 @@ class RegisteringACapitalAsset(InsuranceTestCase):
 # ── parent_asset ──────────────────────────────────────────────────────────────
 class TheParentGoesInAtRegistration(InsuranceTestCase):
 	def test_parent_asset_sets_the_hierarchy(self):
-		self.tool_data("register_asset", {"name": "MC-Main-01", "asset_type": "Irrigation Valve", "company": MAIN})
-		data = self.tool_data("register_asset", {
-			"name": "MC-Lat-A", "asset_type": "Irrigation Valve", "company": MAIN,
-			"parent_asset": "MC-Main-01",
-		})
+		self.tool_data(
+			"register_asset", {"name": "MC-Main-01", "asset_type": "Irrigation Valve", "company": MAIN}
+		)
+		data = self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Lat-A",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+				"parent_asset": "MC-Main-01",
+			},
+		)
 		self.assertEqual(data["parent_asset"], "MC-Main-01")
 		self.assertEqual(data["location"], "MC-Main-01")
 
 	def test_location_still_works_and_means_the_same_thing(self):
 		"""The column has been `location` since v0.25.0. Renaming it would break
 		every stored filter and every client already sending it."""
-		self.tool_data("register_asset", {"name": "MC-Main-02", "asset_type": "Irrigation Valve", "company": MAIN})
-		data = self.tool_data("register_asset", {
-			"name": "MC-Lat-B", "asset_type": "Irrigation Valve", "company": MAIN,
-			"location": "MC-Main-02",
-		})
+		self.tool_data(
+			"register_asset", {"name": "MC-Main-02", "asset_type": "Irrigation Valve", "company": MAIN}
+		)
+		data = self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Lat-B",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+				"location": "MC-Main-02",
+			},
+		)
 		self.assertEqual(data["parent_asset"], "MC-Main-02")
 
 	def test_the_two_spellings_disagreeing_is_refused(self):
 		"""There is no reading of that call which is not somebody's mistake, and
 		picking a winner silently puts a valve under the wrong turnout."""
-		self.tool_data("register_asset", {"name": "MC-Main-03", "asset_type": "Irrigation Valve", "company": MAIN})
-		self.tool_data("register_asset", {"name": "MC-Main-04", "asset_type": "Irrigation Valve", "company": MAIN})
-		error = self.tool_error("register_asset", {
-			"name": "MC-Lat-C", "asset_type": "Irrigation Valve", "company": MAIN,
-			"parent_asset": "MC-Main-03", "location": "MC-Main-04",
-		})
+		self.tool_data(
+			"register_asset", {"name": "MC-Main-03", "asset_type": "Irrigation Valve", "company": MAIN}
+		)
+		self.tool_data(
+			"register_asset", {"name": "MC-Main-04", "asset_type": "Irrigation Valve", "company": MAIN}
+		)
+		error = self.tool_error(
+			"register_asset",
+			{
+				"name": "MC-Lat-C",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+				"parent_asset": "MC-Main-03",
+				"location": "MC-Main-04",
+			},
+		)
 		self.assertIn("two names for one column", error)
 
 	def test_an_unregistered_parent_is_refused_by_name(self):
-		error = self.tool_error("register_asset", {
-			"name": "MC-Lat-D", "asset_type": "Irrigation Valve", "company": MAIN,
-			"parent_asset": "MC-Nope",
-		})
+		error = self.tool_error(
+			"register_asset",
+			{
+				"name": "MC-Lat-D",
+				"asset_type": "Irrigation Valve",
+				"company": MAIN,
+				"parent_asset": "MC-Nope",
+			},
+		)
 		self.assertIn("MC-Nope", error)
 		self.assertIn("registered first", error)
 
@@ -158,8 +187,11 @@ class ThePhotographAtRegistration(InsuranceTestCase):
 	def test_an_uploaded_file_is_attached_to_the_new_asset(self):
 		rows = STORE.tables.setdefault("File", {})
 		rows["FILE-0001"] = {
-			"name": "FILE-0001", "docstatus": 0, "file_name": "vin.jpg",
-			"file_url": "/private/files/vin.jpg", "is_private": 1,
+			"name": "FILE-0001",
+			"docstatus": 0,
+			"file_name": "vin.jpg",
+			"file_url": "/private/files/vin.jpg",
+			"is_private": 1,
 		}
 		data = self.an_asset(photo_file_token="FILE-0001")
 		self.assertEqual(data["photo_attached"], "FILE-0001")
@@ -201,20 +233,22 @@ class TheSchedule(InsuranceTestCase):
 		"""A valve is a fitting and a block is land. A default that included them
 		would make the first thing anybody did with this tool be filtering it."""
 		self.an_asset()
-		self.tool_data("register_asset", {"name": "MC-Valve-05", "asset_type": "Irrigation Valve", "company": MAIN})
+		self.tool_data(
+			"register_asset", {"name": "MC-Valve-05", "asset_type": "Irrigation Valve", "company": MAIN}
+		)
 		self.tool_data("register_asset", {"name": "MC-Block-A", "asset_type": "Block", "company": MAIN})
 		self.assertEqual([row["asset"] for row in self.schedule()["schedule"]], ["MC-Tractor-01"])
 
 	def test_asset_types_widens_it(self):
 		self.an_asset()
-		self.tool_data("register_asset", {"name": "MC-Cold-01", "asset_type": "Cold Storage", "company": MAIN})
+		self.tool_data(
+			"register_asset", {"name": "MC-Cold-01", "asset_type": "Cold Storage", "company": MAIN}
+		)
 		found = self.schedule(asset_types=["Tractor", "Cold Storage"])
 		self.assertEqual(sorted(row["asset"] for row in found["schedule"]), ["MC-Cold-01", "MC-Tractor-01"])
 
 	def test_an_unknown_asset_type_is_refused_with_the_real_list(self):
-		error = self.tool_error(
-			"export_insurance_schedule", {"company": MAIN, "asset_types": ["Combine"]}
-		)
+		error = self.tool_error("export_insurance_schedule", {"company": MAIN, "asset_types": ["Combine"]})
 		self.assertIn("Combine", error)
 		self.assertIn("Irrigation Valve", error)
 
@@ -249,9 +283,15 @@ class TheSchedule(InsuranceTestCase):
 
 	def test_where_it_lives_is_the_chain_of_assets_above_it(self):
 		self.tool_data("register_asset", {"name": "MC-Ranch", "asset_type": "General", "company": MAIN})
-		self.tool_data("register_asset", {
-			"name": "MC-Shed", "asset_type": "Storage", "company": MAIN, "parent_asset": "MC-Ranch",
-		})
+		self.tool_data(
+			"register_asset",
+			{
+				"name": "MC-Shed",
+				"asset_type": "Storage",
+				"company": MAIN,
+				"parent_asset": "MC-Ranch",
+			},
+		)
 		self.an_asset(parent_asset="MC-Shed")
 		row = self.schedule()["schedule"][0]
 		self.assertEqual(row["location_path"], ["MC-Ranch", "MC-Shed"])
@@ -366,9 +406,7 @@ class TheScheduleSaysWhichClock(InsuranceTestCase):
 
 	def test_an_unknown_zone_is_refused(self):
 		self.an_asset()
-		error = self.tool_error(
-			"export_insurance_schedule", {"company": MAIN, "timezone": "Pacific/Nowhere"}
-		)
+		error = self.tool_error("export_insurance_schedule", {"company": MAIN, "timezone": "Pacific/Nowhere"})
 		self.assertIn("Pacific/Nowhere", error)
 
 

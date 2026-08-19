@@ -97,9 +97,7 @@ class ThePageHasSomethingOnIt(OnboardTestCase):
 		page shows nothing, which is indistinguishable from a broken install."""
 		self.build()
 		rendered = {
-			entry["data"]["shortcut_name"]
-			for entry in self.content()
-			if entry.get("type") == "shortcut"
+			entry["data"]["shortcut_name"] for entry in self.content() if entry.get("type") == "shortcut"
 		}
 		for row in self.page().get("shortcuts") or []:
 			with self.subTest(shortcut=row["label"]):
@@ -118,9 +116,7 @@ class ThePageHasSomethingOnIt(OnboardTestCase):
 
 	def test_the_link_cards_are_rendered_too(self):
 		self.build()
-		cards = {
-			entry["data"]["card_name"] for entry in self.content() if entry.get("type") == "card"
-		}
+		cards = {entry["data"]["card_name"] for entry in self.content() if entry.get("type") == "card"}
 		self.assertTrue(cards)
 
 	def test_a_link_card_names_only_doctypes_this_site_has(self):
@@ -172,9 +168,7 @@ class TheOrderIsTheContent(OnboardTestCase):
 		what makes it a sequence."""
 		self.build()
 		text = " ".join(
-			entry["data"].get("text", "")
-			for entry in self.content()
-			if entry.get("type") == "paragraph"
+			entry["data"].get("text", "") for entry in self.content() if entry.get("type") == "paragraph"
 		)
 		self.assertIn("Hire them", text)
 

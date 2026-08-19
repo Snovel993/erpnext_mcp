@@ -120,7 +120,11 @@ class TradeDocument(Document):
 
 		if self.document_data:
 			try:
-				parsed = json.loads(self.document_data) if isinstance(self.document_data, str) else self.document_data
+				parsed = (
+					json.loads(self.document_data)
+					if isinstance(self.document_data, str)
+					else self.document_data
+				)
 			except (json.JSONDecodeError, ValueError, TypeError):
 				frappe.throw(
 					_(
@@ -201,9 +205,7 @@ class TradeDocument(Document):
 			# hatch; what is refused is editing one and leaving it looking live.
 			return
 		changed = [
-			field
-			for field in SEALED_FIELDS
-			if str(before.get(field) or "") != str(self.get(field) or "")
+			field for field in SEALED_FIELDS if str(before.get(field) or "") != str(self.get(field) or "")
 		]
 		if changed:
 			frappe.throw(

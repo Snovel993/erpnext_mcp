@@ -69,7 +69,8 @@ from urllib.parse import unquote
 
 import frappe
 
-from .. import bucket_bridge, compat, shifts as shift_register
+from .. import bucket_bridge, compat
+from .. import shifts as shift_register
 from ..args import as_int, as_str
 from ..erpnext_mcp.doctype.farm_task.farm_task import STATES, TERMINAL_STATES
 from ..errors import ToolError
@@ -359,9 +360,12 @@ def _alert_due_dates(tasks: list) -> dict:
 	names = sorted({str(task.get("source_alert") or "") for task in tasks} - {""})
 	if not names or not compat.doctype_exists(ALERT) or not compat.has_field(ALERT, "due_date"):
 		return {}
-	rows = frappe.db.get_all(
-		ALERT, filters={"name": ("in", names)}, fields=["name", "due_date"], limit=len(names)
-	) or []
+	rows = (
+		frappe.db.get_all(
+			ALERT, filters={"name": ("in", names)}, fields=["name", "due_date"], limit=len(names)
+		)
+		or []
+	)
 	return {str(row["name"]): str(row.get("due_date") or "") or None for row in rows}
 
 
@@ -424,18 +428,20 @@ def _alerts_for(doctype: str, docname: str, today: str) -> list:
 	for row in rows or []:
 		due = str(row.get("due_date") or "") or None
 		remaining = _days_until(due, today)
-		out.append({
-			"name": row.get("name"),
-			"alert_type": row.get("alert_type"),
-			"severity": row.get("severity") or "Warning",
-			"category": row.get("category") or "Other",
-			"message": row.get("alert_message") or None,
-			"due_date": due,
-			"days_until_due": remaining,
-			"overdue": bool(remaining is not None and remaining < 0),
-			"first_seen": str(row.get("first_seen") or "") or None,
-			"can_dismiss": bool(frappe.utils.cint(row.get("can_dismiss"))),
-		})
+		out.append(
+			{
+				"name": row.get("name"),
+				"alert_type": row.get("alert_type"),
+				"severity": row.get("severity") or "Warning",
+				"category": row.get("category") or "Other",
+				"message": row.get("alert_message") or None,
+				"due_date": due,
+				"days_until_due": remaining,
+				"overdue": bool(remaining is not None and remaining < 0),
+				"first_seen": str(row.get("first_seen") or "") or None,
+				"can_dismiss": bool(frappe.utils.cint(row.get("can_dismiss"))),
+			}
+		)
 	return out
 
 
@@ -769,9 +775,7 @@ def _field_branch(candidate: str, args: dict) -> dict | None:
 		"status": {
 			"status": None,
 			"needs_attention": bool(reis),
-			"warnings": [
-				{"kind": "rei", "severity": "Critical", "message": rei["warning"]} for rei in reis
-			],
+			"warnings": [{"kind": "rei", "severity": "Critical", "message": rei["warning"]} for rei in reis],
 		},
 	}
 

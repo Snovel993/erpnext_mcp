@@ -94,10 +94,10 @@ from ..args import as_bool, as_date, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
 from . import dispatch, files, i9, mobile
+from . import employee as employee_tool
 from . import housing as housing_tool
 from . import shifts as shift_tool
 from . import w4 as w4_tool
-from . import employee as employee_tool
 from .housing import EMPLOYEE, hr_installed
 
 #: The paperwork this tool knows how to file, and what each is called on the

@@ -1437,9 +1437,7 @@ def _report_window(args: dict) -> tuple[str, str, bool]:
 	if not to_date:
 		to_date = today
 	if str(to_date) < str(from_date):
-		raise ToolError(
-			f"date_to ({to_date}) is before date_from ({from_date}). Nothing was reported."
-		)
+		raise ToolError(f"date_to ({to_date}) is before date_from ({from_date}). Nothing was reported.")
 	return str(from_date), str(to_date), defaulted
 
 
