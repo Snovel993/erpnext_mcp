@@ -1,0 +1,217 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-18 12:00:00.000000",
+ "description": "One handset's APNs (or FCM) device token, and whether it is still worth sending to. The row exists so a break horn called by a foreman reaches the crew's phones and not only the phone it was called on: log_shift_break looks up every active token belonging to an employee on that shift and pushes the tone to all of them. A token is a routing address, not a credential — it identifies where to deliver, and Apple rotates it whenever the app is reinstalled or restored to another device, which is why the device is the identity here and the token is the mutable field.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "user",
+  "employee",
+  "employee_name",
+  "identity_col",
+  "platform",
+  "device_id",
+  "device_key",
+  "is_active",
+  "token_section",
+  "token",
+  "token_col",
+  "app_version",
+  "device_model",
+  "activity_section",
+  "registered_at",
+  "activity_col",
+  "last_used_at",
+  "last_error",
+  "notes_section",
+  "notes"
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-18 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Mobile Push Token",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "user,platform,device_id",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "user",
+ "track_changes": 1,
+ "fields": [
+  {
+   "default": "MPT-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "MPT-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "description": "The Frappe User whose login registered this handset. WHO IS SENT TO IS DECIDED BY employee AND NOT BY THIS — a crew break is addressed to the people on the shift, and a shift names Employees. This is here because the mobile surface knows the caller by their login and has to have something to write, and because it is the field an operator searches when somebody says 'my phone stopped buzzing'.",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Employee this handset belongs to, resolved from the caller's own login at registration. THIS IS THE FIELD A CREW PUSH JOINS ON. A token with no employee is deliverable in principle and unreachable in practice: nothing on this surface addresses a push to a User, because nothing that decides who should hear a break horn — a shift crew, a task assignment, a heat event — names one.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "Denormalised for the list view, so an operator scanning the register reads names rather than EMP-0001.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "ios",
+   "description": "ios or android. Lower case, because it is what the handset sends and what the payload builder switches on, and a Select that stored 'iOS' from one client and 'ios' from another would make the device key two different keys for one phone.",
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Platform",
+   "options": "ios\nandroid",
+   "reqd": 1
+  },
+  {
+   "description": "The handset's own stable identifier — `identifierForVendor` on iOS. THE DEVICE IS THE IDENTITY AND THE TOKEN IS NOT: Apple issues a new device token when the app is reinstalled, when the phone is restored from a backup, and periodically for no reason the client is told. Keying on the token would leave one phone with six rows and five of them dead, and every crew push would be five wasted requests and one delivery.",
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Device ID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "platform::device_id, written by the controller and never by a caller. THIS IS THE COMPOSITE UNIQUE KEY, spelled as one column because a Frappe DocType cannot declare a unique index over two fields. The upsert in register_push_token finds a row by this and updates it; the unique index is what makes that safe when two launches of the app race each other.",
+   "fieldname": "device_key",
+   "fieldtype": "Data",
+   "label": "Device Key",
+   "read_only": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "description": "Whether this token is still worth sending to. unregister_push_token clears it on logout; a send that comes back Unregistered or BadDeviceToken from Apple clears it too. NOTHING DELETES A ROW. A device that stopped receiving is a fact worth being able to see when somebody reports that the horn does not reach them, and a deleted row answers no question at all.",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "token_section",
+   "fieldtype": "Section Break",
+   "label": "Device Token"
+  },
+  {
+   "description": "The APNs device token as the handset reported it — hex for Apple, an FCM registration string for Android. A ROUTING ADDRESS, NOT A SECRET: it authorises nobody to do anything, it is worthless without this farm's own signing key, and Apple's own guidance is that a provider stores it in the clear. It is not a Password field for that reason, and because a field the operator cannot read is a field nobody can debug a silent handset with.",
+   "fieldname": "token",
+   "fieldtype": "Data",
+   "label": "Device Token",
+   "length": 512
+  },
+  {
+   "fieldname": "token_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The app build that registered, if it said. Useful for exactly one question, which is whether the phones that stopped playing the tone are all on one version.",
+   "fieldname": "app_version",
+   "fieldtype": "Data",
+   "label": "App Version"
+  },
+  {
+   "description": "The handset model, if it said.",
+   "fieldname": "device_model",
+   "fieldtype": "Data",
+   "label": "Device Model"
+  },
+  {
+   "fieldname": "activity_section",
+   "fieldtype": "Section Break",
+   "label": "Activity"
+  },
+  {
+   "description": "When this device first registered. Not touched by a re-registration — that moves last_used_at, and the pair together says 'enrolled in April, still checking in' rather than losing the first date every time the app is launched.",
+   "fieldname": "registered_at",
+   "fieldtype": "Datetime",
+   "label": "Registered At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "activity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The last time this handset re-presented its token, which the app does on every login and launch. A row whose last_used_at is weeks old is a phone that has not opened the app, and it is the first thing to look at when a worker says the break horn never reaches them.",
+   "fieldname": "last_used_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Used At",
+   "read_only": 1
+  },
+  {
+   "description": "What Apple said the last time a send to this device failed — BadDeviceToken, Unregistered, TopicDisallowed. Kept because the three mean very different things: the first two are this row's problem and deactivate it, and the third is the site's configuration and would deactivate every row on the farm if it were treated the same way.",
+   "fieldname": "last_error",
+   "fieldtype": "Data",
+   "label": "Last Send Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ]
+}

@@ -69,6 +69,7 @@ import itertools
 import frappe
 
 from .. import breaks as breaks_mod
+from ..services import push as push_service
 from .. import compat, geo, shifts, timezones
 from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
@@ -1448,6 +1449,41 @@ BREAK_KINDS = {
 VALID_APPLIES_TO = ("Crew", "Individual")
 
 
+def _push_break(shift_name: str, break_kind: str, phase: str, duration_minutes=None, event: str = "") -> dict:
+	"""Ring the crew's phones for a break that covers the crew. Never raises.
+
+	WHY THIS IS HERE AND NOT IN THE HANDSET. `BreakAlarm` plays the tone the
+	moment a foreman calls a break, over an audio session that rings through the
+	silent switch — on exactly one phone, the one the break was called on. Every
+	other worker on the shift found out when somebody shouted. The push is how
+	the other twenty phones hear it, and the app plays the delivered tone through
+	the same code path as the local one.
+
+	INDIVIDUAL BREAKS ARE NOT PUSHED. A break that covers one named worker is not
+	news to the other nineteen, and a tone that rings through a silent switch is
+	not a thing to send to somebody it is not about. The caller decides; this
+	function is only called when `applies_to` is Crew.
+
+	A FAILURE HERE IS NEVER A FAILURE OF THE BREAK LOG. The break record is the
+	compliance evidence under OAR 437-004-1131 and the push is a convenience on
+	top of it; a site with no APNs key, no network, or no enrolled handsets must
+	log the break exactly as it did before. So the report is returned for the
+	caller to put on its answer, and nothing in it is ever raised.
+	"""
+	try:
+		payload = push_service.break_payload(
+			break_kind=break_kind,
+			phase=phase,
+			duration_minutes=duration_minutes,
+			shift=shift_name,
+			event=event,
+		)
+		return push_service.send_push_to_shift_crew(shift_name, payload)
+	except Exception as error:  # pragma: no cover - send_push_to_shift_crew is itself wrapped
+		return {"shift": shift_name, "sent": 0, "failed": 0, "skipped": 0, "reason": f"error: {error}"}
+
+
+
 def log_shift_break(args: dict) -> ToolResult:
 	"""Start a break on a shift — rest, meal or cool-down.
 
@@ -1490,7 +1526,7 @@ def log_shift_break(args: dict) -> ToolResult:
 	event_type = BREAK_KINDS[break_kind]["event_type"]
 
 	doc = frappe.get_doc(DOCTYPE, row["name"])
-	doc.append(
+	appended = doc.append(
 		"compliance_events",
 		{
 			"event_type": event_type,
@@ -1517,6 +1553,19 @@ def log_shift_break(args: dict) -> ToolResult:
 		if bk:
 			break_tally[bk] = break_tally.get(bk, 0) + 1
 
+	# The break horn. Only for a break that covers the crew — an Individual
+	# break is not news to the other nineteen phones. See `_push_break`.
+	# The row's OWN docname, taken from the object `append` handed back rather
+	# than found again by matching on datetime and kind. Two crew breaks logged
+	# in the same second — a foreman double-tapping — are indistinguishable by
+	# those two fields, and the handset uses this name to end the break.
+	logged_event = str(getattr(appended, "name", "") or "")
+	push_report = (
+		_push_break(row["name"], break_kind, "start", duration, logged_event)
+		if applies_to == "Crew"
+		else {"reason": "individual_break", "sent": 0, "failed": 0, "skipped": 0}
+	)
+
 	return ToolResult(
 		data={
 			**described,
@@ -1527,8 +1576,10 @@ def log_shift_break(args: dict) -> ToolResult:
 				"duration_minutes": duration,
 				"applies_to": applies_to,
 				"covers_workers": covers,
+				"event": logged_event,
 			},
 			"breaks_today": break_tally,
+			"push": push_report,
 		},
 		summary=f"logged {break_kind} on {row['name']} at {when} ({applies_to})",
 		docstatus_delta="0 → 0 (amended)",
@@ -1592,6 +1643,23 @@ def end_shift_break(args: dict) -> ToolResult:
 		if bk:
 			break_tally[bk] = break_tally.get(bk, 0) + 1
 
+	# The end-of-break bell, on the same rule as the start: the crew's phones for
+	# a crew break, and nobody's for an individual one. The app schedules its own
+	# local `UNNotificationRequest` for the foreman's handset, so the foreman may
+	# hear it twice — which is the right way round, since the alternative is
+	# nineteen workers hearing it never.
+	push_report = (
+		_push_break(
+			row["name"],
+			str(target.get("break_kind") or "Break"),
+			"end",
+			target.duration_minutes,
+			event_name,
+		)
+		if str(target.get("applies_to") or "Crew") == "Crew"
+		else {"reason": "individual_break", "sent": 0, "failed": 0, "skipped": 0}
+	)
+
 	return ToolResult(
 		data={
 			**described,
@@ -1605,6 +1673,7 @@ def end_shift_break(args: dict) -> ToolResult:
 				"duration_source": "Observed",
 			},
 			"breaks_today": break_tally,
+			"push": push_report,
 		},
 		summary=f"ended {target.get('break_kind')} on {row['name']} at {ended_at}",
 		docstatus_delta="0 → 0 (amended)",

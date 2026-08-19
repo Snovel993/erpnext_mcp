@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 744 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 746 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 371 read tools are **on** by default and can be switched off individually. A
+All 372 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16857,3 +16857,117 @@ this reason.
 
 `reason` is required and has a length floor, because that row is the audit trail
 for destroying somebody's credential and issuing another.
+
+## The break horn reaches the crew (v0.99.0)
+
+`BreakAlarm` on the handset plays a tone the instant a foreman calls a break, over
+an `AVAudioSession` in `.playback` — so it **rings through the silent switch**,
+deliberately, because a break horn that respects a muted phone does not work on
+most of a crew's phones. That is exactly one phone: the one the break was called
+on. Every other worker on the shift learned about the break when somebody
+shouted.
+
+Two mobile routes and two tools close that.
+
+| | |
+|---|---|
+| `POST /farmops/api/mobile/register_push_token` | The handset enrols its APNs device token. Called on **every** login and launch. |
+| `POST /farmops/api/mobile/unregister_push_token` | Logout retires it. A soft delete. |
+| `list_push_tokens` | The register, with this bench's own APNs state beside it. Read. |
+| `send_test_push` | One notification to one worker's handsets. Mutating, ships **off**. |
+
+### The device is the identity; the token is not
+
+Apple issues a new device token when the app is reinstalled, when a phone is
+restored from a backup, when it is migrated to new hardware, and periodically for
+no reason the client is told. A register keyed on the **token** accumulates one
+live row and five dead ones per handset, and every crew push becomes five wasted
+requests and one delivery — with no way to tell from the register which was
+which.
+
+So a **Mobile Push Token** is keyed on `platform::device_id`, unique, and the
+token is a mutable field on the row that key finds. `register_push_token` is an
+upsert: same device, same row, whatever token it is presenting today.
+
+### Neither route takes a subject from the body
+
+A phone enrols **itself**. `user` and `employee` are resolved from the caller's
+own login and are not arguments, so `routes.bind` has nothing to drop and no body
+can point a registration at a colleague — which would be a way to have another
+worker's break horns, heat alerts and dispatch pings delivered to a handset of
+your choosing. The same shape the three direct-deposit routes have, for the same
+reason.
+
+`unregister_push_token` does not take a `token` either, and that absence is
+load-bearing: a logout that had to present the current token would fail exactly
+when it matters most, and a phone whose token Apple rotated between login and
+logout would go on receiving another shift's break horns forever.
+
+### A crew break pushes; an individual break does not
+
+`log_shift_break` and `end_shift_break` push to every worker still on the shift
+when `applies_to` is `Crew`. A break covering one named worker is not news to the
+other nineteen, and a tone that rings through a silent switch is not a thing to
+send to somebody it is not about. A worker who has clocked out is excluded: their
+phone is elsewhere.
+
+The payload names the sound, and the two are deliberately unlike each other and
+unlike any system sound — a rising double blast and a descending triple pip, both
+already bundled in the app:
+
+```json
+{"aps": {"alert": {"title": "Break time", "body": "Paid Rest starting now — 10 minutes."},
+         "sound": "break_start.caf",
+         "interruption-level": "time-sensitive",
+         "category": "FARM_BREAK"},
+ "break_kind": "Paid Rest", "phase": "start", "shift": "SHIFT-2026-0001", "event": "…"}
+```
+
+`interruption-level: time-sensitive` is the point of the payload. A break horn is
+worthless if Focus or a Scheduled Summary holds it until lunchtime.
+
+### It degrades to nothing, and that is the design
+
+The p8 signing key is an operator artefact that does not exist on this bench yet.
+Until it does, **every break is logged exactly as before and no push is
+attempted** — the break record is the compliance evidence under OAR 437-004-1131,
+and a convenience on top of it must never be able to cost it. `log_shift_break`
+answers with a `push` block saying which of those happened:
+
+```json
+{"shift": "SHIFT-2026-0001", "crew": 8, "tokens": 2, "sent": 0,
+ "failed": 0, "skipped": 2, "reason": "not_configured"}
+```
+
+`crew` and `tokens` are separate numbers on purpose: eight workers with two
+tokens is six people who never enrolled a phone, which is a different
+conversation from a push that failed.
+
+Configure it in the site's `site_config.json` — not on a Settings doctype, which
+any Desk role can read and a dozen Frappe debug paths dump in full:
+
+```json
+{"apns_key": "/home/frappe/keys/AuthKey_ABC1234567.p8",
+ "apns_key_id": "ABC1234567",
+ "apns_team_id": "TEAM123456",
+ "apns_topic": "farm.fafo.scanclock",
+ "apns_environment": "production"}
+```
+
+All four are required together. A push missing any one of them is rejected by
+Apple with a 403 that says nothing useful, which is a worse failure than not
+sending. `apns_key` takes either the PEM text or a path to it.
+
+### Apple's word retires a token, and nothing else does
+
+`Unregistered` and `BadDeviceToken` deactivate the row on the spot — the app was
+deleted, or the string is not a token for this topic and environment.
+`TopicDisallowed`, `TooManyRequests` and the 5xxs deliberately **do not**: those
+say something about this farm's configuration or about Apple, and treating them
+alike would unsubscribe a whole crew over one wrong line in `site_config.json`.
+
+Nothing is ever deleted. `is_active` retires a row, and `last_error` says why —
+"this phone stopped receiving, on this date, for this reason" is the fact
+somebody needs when a worker reports that the horn never reaches them.
+
+`SERVER_CHANGES.md` item 16.

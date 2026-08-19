@@ -1075,9 +1075,9 @@ class Catalogue(SeededTestCase):
 		nothing but their name and a correction is the only edit there is — and a
 		rename repoints every Employee already on it.
 		"""
-		self.assertEqual(len(registry.TOOLS), 744)
-		self.assertEqual(len(registry.READ_TOOLS), 371)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 373)
+		self.assertEqual(len(registry.TOOLS), 746)
+		self.assertEqual(len(registry.READ_TOOLS), 372)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 374)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

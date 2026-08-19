@@ -3,6 +3,94 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.99.0 — 2026-08-18 — the break horn reaches the crew, not just the foreman
+
+Wave 4 of `fafo_ios/SERVER_CHANGES.md`, item 16. `BreakAlarm` on the handset has
+played a tone the instant a foreman calls a break since it shipped — over an
+`AVAudioSession` in `.playback`, so it rings through the silent switch,
+deliberately, because a break horn that respects a muted phone does not work on
+most of a crew's phones. That is exactly one phone. Every other worker on the
+shift learned about the break when somebody shouted.
+
+**New doctype Mobile Push Token.** One handset's APNs device token, keyed on
+`platform::device_id` and unique on it. THE DEVICE IS THE IDENTITY AND THE TOKEN
+IS NOT: Apple issues a new device token when the app is reinstalled, when a phone
+is restored from a backup, and periodically for no reason the client is told, and
+iOS calls `register_push_token` on every launch. A register keyed on the token
+would hold one live row and five dead ones per handset by August, and every crew
+push would be five wasted requests and one delivery — with nothing in the
+register to say which was which. `device_key` is a single column because a Frappe
+DocType cannot declare a unique index over two, and the controller writes it so a
+caller cannot spell the joiner differently and get a second row for one phone.
+
+**Two mobile routes, neither of which takes a subject from the body.** A phone
+enrols itself: `user` and `employee` are resolved from the caller's own login and
+are not arguments, so `routes.bind` has nothing to drop and no body can point a
+registration at a colleague and have their break horns, heat alerts and dispatch
+pings delivered to a handset of its choosing. The same property the three
+direct-deposit routes have, and asserted the same way — by inspecting the
+signature, which is the only form of that claim a later edit cannot quietly
+falsify. `unregister_push_token` does not accept a `token` either, and that
+absence is load-bearing rather than tidy: a logout that had to present the
+current token would fail exactly when it matters most, and a phone whose token
+Apple rotated between login and logout would go on receiving another shift's
+break horns forever.
+
+**A crew break pushes; an individual break does not.** `log_shift_break` and
+`end_shift_break` now push to every worker still on the shift when `applies_to`
+is Crew, with `sound: break_start.caf` / `break_end.caf` and
+`interruption-level: time-sensitive` — the level that gets past Focus and a
+Scheduled Summary, which a break horn is worthless without. A break covering one
+named worker is not news to the other nineteen. A worker who has clocked out is
+excluded: their phone is elsewhere.
+
+**IT DEGRADES TO NOTHING, AND THAT IS THE DESIGN.** The p8 signing key is an
+operator artefact that does not exist on this bench yet, and the break record is
+the compliance evidence under OAR 437-004-1131. Until the key is configured every
+break is logged exactly as it was before and no push is attempted — a named skip
+with the four missing `site_config.json` keys in the Error Log, not an exception,
+not a hang, and not a silent zero. `httpx` and `cryptography` are imported
+defensively for the same reason: APNs is HTTP/2-only and `requests` speaks
+HTTP/1.1, and this app does not add a dependency to ship a feature the site
+cannot use yet. Nothing in the send path raises; the answer carries a `push`
+report instead, with `crew` and `tokens` as separate numbers because eight
+workers with two tokens is six people who never enrolled a phone, which is a
+different conversation from a push that failed.
+
+**Apple's word retires a token and nothing else does.** `Unregistered` and
+`BadDeviceToken` deactivate the row on the spot. `TopicDisallowed` and the 5xxs
+deliberately do not — those say something about this farm's configuration or
+about Apple, and treating them alike would unsubscribe a whole crew over one
+wrong line in `site_config.json`. Nothing is ever deleted: `is_active` retires a
+row and `last_error` says why, because "this phone stopped receiving, on this
+date, for this reason" is the fact somebody needs when a worker reports that the
+horn never reaches them.
+
+**The signature is 64 raw bytes and not DER.** `cryptography` signs ES256 to DER,
+and handing Apple the DER blob produces a perfectly well-formed JWT it rejects
+with `InvalidProviderToken` — every push failing, with nothing on this side to
+show for it. The provider token is signed for real in the suite rather than
+stubbed, and `len(signature) == 64` is the only place that difference is visible
+without an Apple developer account.
+
+| | |
+|---|---|
+| Doctype | **Mobile Push Token** — user, employee, device_id, token, platform, is_active, registered_at, last_used_at, plus the derived `device_key` and Apple's own `last_error` |
+| Mobile | `register_push_token`, `unregister_push_token` |
+| Tools | `list_push_tokens` (read, on), `send_test_push` (mutating, **off**) |
+| Trigger | `log_shift_break` and `end_shift_break`, crew breaks only |
+| Module | `erpnext_mcp/services/push.py` — config, payloads, crew lookup, dispatch |
+
+`bench migrate` creates the doctype; nothing already stored moves and no patch
+ships. A site that never configures APNs behaves in every respect as it did
+before this release.
+
+68 new tests, and each of the ten guards above was proved by removing it and
+watching exactly its own test go red. Full suite green (10,961) in an isolated
+HEAD+this-change tree. THE LIVE HALF IS OUTSTANDING AND BELONGS TO A DEPLOY:
+there is no bench on the machine this was written on, so no push has left
+anything — `bench migrate`, restart the farmops sidecar, put the p8 key in
+`site_config.json`, then `send_test_push` at a handset that has logged in once.
 ## 0.98.0 — 2026-08-18 — the screens the app already built, and the doors behind them
 
 Wave 2 of `fafo_ios/SERVER_CHANGES.md`, items 2, 3, 5, 11, 12 and 14 — the

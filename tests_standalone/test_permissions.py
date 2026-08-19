@@ -333,6 +333,23 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 		# another's analysis. And the register's whole design rests on commodity,
 		# variety, market, package and date being the identity, which a company
 		# column would break by making that key non-unique.
+		# THE v0.99.0 ADDITION IS A HANDSET, WHICH IS NOT AN ENTITY'S. A Mobile
+		# Push Token is where a notification is DELIVERED — one phone, one APNs
+		# device token, keyed on `platform::device_id` and unique on it. A worker
+		# on this site may be employed by two entities and carries one phone
+		# through both, so a company column would mean two rows for one handset:
+		# either the unique constraint refuses the second, or the register grows
+		# exactly the duplicate-per-phone problem the whole doctype is shaped to
+		# prevent, and every crew push becomes one delivery and one wasted
+		# request.
+		#
+		# The entity narrowing already exists on the layer where it belongs, and
+		# it is the Market argument again: nothing addresses a push to a token
+		# directly. `send_push_to_shift_crew` starts from a FARM SHIFT, which
+		# links to Company and is scoped by Frappe exactly as before, and reaches
+		# only the Employees rostered on it. `list_push_tokens` is Foreman-and-
+		# above in its own body. A token is a routing address and holds no wage,
+		# no hour, no location and no fact about the business.
 		self.assertEqual(
 			sorted(unscoped),
 			[
@@ -351,6 +368,7 @@ class TheRuleIsNarrowerThanTheBanItReplaced(PermissionsTestCase):
 				"MCP Action Log",
 				"Market",
 				"Merchant Alias",
+				"Mobile Push Token",
 				"Staged File Chunk",
 				"Staged File Upload Session",
 				"State Tax Table",
