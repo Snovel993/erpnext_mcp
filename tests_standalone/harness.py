@@ -1731,6 +1731,10 @@ APP_DOCTYPES = {
 	# which is the shape that works on a bench.
 	"Bin Seal": "bin_seal",
 	"Bin Seal Contributor": "bin_seal_contributor",
+	# v0.105.0 — the in-app feedback bubble's register. `entry_uuid` is unique
+	# because the handset drains a backlog in one pass and drains it again from
+	# the start if that pass is interrupted; see `tools/app_feedback.py`.
+	"App Feedback": "app_feedback",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

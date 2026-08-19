@@ -59,8 +59,10 @@ later". So the mapping below is deliberate and narrow:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import os
 import traceback
 
 import frappe
@@ -94,6 +96,11 @@ UNAUTHORIZED = (
 )
 
 _MAX_BODY = auth.MAX_BODY_BYTES
+
+#: The content types `_multipart` reads. `multipart/mixed` is not one of them:
+#: only the form encoding names its parts, and a part with no name has no key to
+#: land on.
+_MULTIPART = frozenset({"multipart/form-data"})
 
 
 # ── the answer shapes ───────────────────────────────────────────────────────
@@ -190,6 +197,52 @@ def _message_for(exc: Exception, anticipated: int) -> str:
 
 
 # ── the request ─────────────────────────────────────────────────────────────
+def _multipart(request: Request) -> dict:
+	"""A `multipart/form-data` body, flattened to the same dict a JSON one makes.
+
+	WHY THIS EXISTS AND WHY IT IS A TRANSLATION RATHER THAN A SECOND PATH. Every
+	method behind this service takes scalars and base64 strings, because that is
+	what a JSON body carries and this transport has been JSON-only since v0.18.0.
+	A client that would rather post a file part than base64 it — a curl, a web
+	form, anything that is not the iOS build — should not need a second version
+	of the method it is calling, and the methods must not each grow a branch on
+	how the bytes arrived. So a file part is base64'd HERE and lands on exactly
+	the key its own part is named, which is the shape every handler already
+	takes: a part named `screenshot` becomes `screenshot`, alongside
+	`screenshot_filename` and `screenshot_content_type` from the part's own
+	headers.
+
+	NOTHING ABOUT THE SURFACE WIDENS. `routes.bind` still reduces whatever comes
+	out of here to the keys the method declares, so a form part naming an
+	argument no signature has is dropped exactly as a JSON key would be.
+
+	The same promise as `_body`: never raises, and `{}` for anything unreadable.
+	"""
+	fields = {}
+	try:
+		for key in request.form:
+			values = request.form.getlist(key)
+			# A repeated part is a list, the way a JSON array would be — `roles`
+			# arrives that way from a form and as an array from JSON.
+			fields[key] = values[0] if len(values) == 1 else values
+		for key in request.files:
+			part = request.files[key]
+			content = part.read()
+			if not content:
+				continue
+			fields[key] = base64.b64encode(content).decode("ascii")
+			if part.filename:
+				# The BASENAME only. A part naming itself `../../etc/passwd` is
+				# `api/files.py`'s fourth refusal, and it is cheaper to make the
+				# name harmless here than to trust every handler to.
+				fields[f"{key}_filename"] = os.path.basename(str(part.filename))
+			if part.mimetype:
+				fields[f"{key}_content_type"] = str(part.mimetype)
+	except Exception:  # pragma: no cover - a truncated or hostile multipart body
+		return {}
+	return fields
+
+
 def _body(request: Request) -> dict:
 	"""The request body as a dict, or `{}`. NEVER raises, never reads a huge one.
 
@@ -197,10 +250,17 @@ def _body(request: Request) -> dict:
 	have defaults for everything except what their own validation requires, and
 	an unauthenticated caller sending nonsense should meet the 401 rather than a
 	parser error that confirms the path exists.
+
+	`multipart/form-data` IS THE ONE OTHER SHAPE READ, and it is read into the
+	same dict rather than handed to anybody differently — see `_multipart`. The
+	promise at the top of this file is about what leaves here, and both doors
+	still leave as JSON.
 	"""
 	try:
 		if request.content_length and int(request.content_length) > _MAX_BODY:
 			return {}
+		if (request.mimetype or "") in _MULTIPART:
+			return _multipart(request)
 		raw = request.get_data(cache=False, as_text=True) or ""
 	except Exception:  # pragma: no cover - a truncated or hostile body
 		return {}

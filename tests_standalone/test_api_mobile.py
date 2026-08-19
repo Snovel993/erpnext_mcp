@@ -291,6 +291,17 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"set_employee_contact_fields",
 		"list_attachments",
 		"get_attachment_content",
+		# v0.105.0 — `SERVER_CHANGES.md` item 24. HERE RATHER THAN IN
+		# `PENDING_IOS_INTEGRATION` because `MobileAPI.swift` already names it:
+		# `submitAppFeedback = path("submit_app_feedback")`, and `FeedbackAPI`
+		# has been posting to it and parking every note on a 404 since the
+		# bubble shipped. This is the release that answers.
+		#
+		# `user` IS ABSENT FROM ITS SIGNATURE and the app sends one on every
+		# call, which is the property to check if this ever grows an argument.
+		# The login on a filed note is resolved from the caller, not reported by
+		# a handset that several people share.
+		"submit_app_feedback",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 

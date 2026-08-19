@@ -881,6 +881,22 @@ ROUTES = (
 	# receiving another shift's break horns forever.
 	Route("/mobile", mobile_api.register_push_token),
 	Route("/mobile", mobile_api.unregister_push_token),
+	# v0.105.0. SERVER_CHANGES #24 — the in-app feedback bubble's one call, and
+	# the route whose absence has been parking every note the farm has written.
+	# A 404 does not FAIL a note on this client, it parks it: retried every six
+	# hours forever and never counted against the give-up bound. So publishing
+	# this path does not start collecting feedback, it collects the backlog —
+	# which is why `entry_uuid` is unique on the doctype and a resend answers
+	# success with the record already held.
+	#
+	# `user` IS ABSENT FROM ITS SIGNATURE and the app sends one on every call.
+	# `bind` drops it and `guard.endpoint` injects the authenticated caller, so
+	# the login on a filed note is the one that was proved rather than the one a
+	# shared handset reported. `screenshot_filename` and `screenshot_content_type`
+	# are absent for a different reason: the extension is sniffed off the first
+	# bytes and the stored filename is composed from the docname, so there is
+	# nowhere for a caller-supplied name to land.
+	Route("/mobile", mobile_api.submit_app_feedback),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

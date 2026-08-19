@@ -1,0 +1,318 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-19 14:00:00.000000",
+ "description": "One note a worker wrote from inside the handset app: what they were looking at, what they said, who they were, and when they pressed Send. The bubble is on every screen and the form auto-captures the rest, so what a reader gets is a complaint with its context already attached rather than 'the app is broken'. entry_uuid is the dedup key and is unique: the phone queues every note locally and drains the backlog in one pass the first time the route answers, so a worker's considered complaint must not be able to arrive three times. timestamp is when Send was pressed and received_at is when it landed, which on a farm with no signal in the blocks may be weeks apart — the feed is sorted on the first, because that is the recency a reader means.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "entry_uuid",
+  "screen_name",
+  "screen_label",
+  "feedback_section",
+  "feedback_text",
+  "feedback_col",
+  "language",
+  "was_dictated",
+  "identity_section",
+  "employee",
+  "employee_name",
+  "role",
+  "designation",
+  "identity_col",
+  "user",
+  "claimed_employee",
+  "claimed_employee_name",
+  "company",
+  "timing_section",
+  "timestamp",
+  "timing_col",
+  "received_at",
+  "device_section",
+  "app_version",
+  "app_build",
+  "device_model",
+  "device_col",
+  "os_version",
+  "device_id",
+  "screenshot_section",
+  "has_screenshot",
+  "screenshot_omitted",
+  "screenshot"
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-19 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "App Feedback",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Farm Manager",
+   "share": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "screen_name,role,employee_name,feedback_text",
+ "sort_field": "timestamp",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "screen_name",
+ "track_changes": 1,
+ "fields": [
+  {
+   "default": "AFB-.YYYY.-.#####",
+   "description": "The series a note is named from, EXPANDED BY THE CONTROLLER rather than by Frappe's naming_series hook — the same split Bucket Log Entry and Farm Shift keep, and here the reason is sharper than on either. Frappe expands `.YYYY.` from the date of the INSERT, and this is the one register where the insert and the event routinely differ by weeks: a phone with no signal in the blocks holds a note until it finds the yard's wifi. The year is the SUBMISSION's, so a note written on 31 December and drained on 2 January is filed under the season it was written in. The field is here so the Desk shows what the shape is meant to be.",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "AFB-.YYYY.-.#####",
+   "read_only": 1
+  },
+  {
+   "description": "The handset's own UUID for this note. THE DEDUP KEY, and unique for that reason rather than as tidiness. Nothing could drain until this route existed, so the first successful drain replays a backlog that may be weeks deep in one pass — and twice if it is interrupted. submit_app_feedback answers with the record it already holds instead of writing a second one; the unique index is what makes that safe when two drains race each other.",
+   "fieldname": "entry_uuid",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Entry UUID",
+   "reqd": 1,
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "description": "Which screen the bubble was tapped on, as a stable ASCII key — my_tasks, harvest_day, bucket_capture. NEVER TRANSLATED, which is what makes it a filter: a feed grouped by what the app calls the screen answers 'which part of this is people struggling with', and a feed grouped by a Spanish label and an English label for one screen answers nothing.",
+   "fieldname": "screen_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Screen",
+   "search_index": 1
+  },
+  {
+   "description": "The English name of that screen, for a reader. Display only — nothing filters or groups on it, because it is the half that moves when somebody retitles a tab.",
+   "fieldname": "screen_label",
+   "fieldtype": "Data",
+   "label": "Screen Label"
+  },
+  {
+   "fieldname": "feedback_section",
+   "fieldtype": "Section Break",
+   "label": "What They Said"
+  },
+  {
+   "description": "The note. THE ONLY THING THE WORKER TYPED — everything else on this record was captured for them, which is the whole design of the bubble: somebody in gloves standing in a row should be able to say the thing and put the phone away.",
+   "fieldname": "feedback_text",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Feedback",
+   "reqd": 1
+  },
+  {
+   "fieldname": "feedback_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "en",
+   "description": "What the person was reading when they wrote it. Not a guess from the text: the app knows which language it was rendering, and a note in English written on a Spanish interface is a different fact from one written on an English one.",
+   "fieldname": "language",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Language",
+   "options": "en\nes"
+  },
+  {
+   "description": "Whether the microphone produced any of it. THE MEASUREMENT THAT SAYS WHETHER THE GLOVES-ON PATH IS USED — dictation was built for a crew that cannot type in the field, and this column is the only way to find out whether that was right.",
+   "fieldname": "was_dictated",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Dictated"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Who"
+  },
+  {
+   "description": "Who wrote it, RESOLVED FROM THE AUTHENTICATED CALLER and never from the request body. A shared handset is normal here, so the app sends its own idea of who is holding the phone; that idea is a claim and it is kept in claimed_employee, while this column is the one a join, a filter or a follow-up conversation can rely on. Empty where the caller has no Employee record yet — the note is still filed, because a login without an Employee row is exactly the kind of person whose feedback is worth reading.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "Denormalised from employee so the feed reads as names rather than HR-EMP-00007.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "description": "The role the person was acting as in the app when they wrote it. THE APP'S CLAIM, KEPT AS ONE, and it is stored anyway because it is half of what the owner filters by: 'every complaint a foreman filed about dispatch' is a question the server cannot reconstruct after the fact, since one login can hold several roles and the app knows which hat was on. It authorises nothing — no gate on this site reads this column.",
+   "fieldname": "role",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Role",
+   "search_index": 1
+  },
+  {
+   "description": "The job title the handset reported, if it sent one. A claim, like role, and kept for the same reason: it is what somebody reading the feed needs to know whether a complaint about the crew board came from the person who runs it.",
+   "fieldname": "designation",
+   "fieldtype": "Data",
+   "label": "Designation"
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The login this note actually arrived under, written from the authenticated session. The one identity on this record that was proved rather than reported.",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The Employee docname the handset named, stored ONLY when it disagrees with the resolved employee — which is what a shared handset looks like from here. Data rather than a Link on purpose: a claim that a link validated would refuse the note over somebody else's typo, and the point of keeping it is to be able to see that the two differed.",
+   "fieldname": "claimed_employee",
+   "fieldtype": "Data",
+   "label": "Claimed Employee"
+  },
+  {
+   "description": "The name that went with claimed_employee, on the same terms.",
+   "fieldname": "claimed_employee_name",
+   "fieldtype": "Data",
+   "label": "Claimed Employee Name"
+  },
+  {
+   "description": "Which operation the note belongs to, resolved against the caller's own entities. Optional: a note is never refused for failing to name a company, because a complaint that cannot be filed is the one outcome this whole route exists to end.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "When"
+  },
+  {
+   "description": "When the person pressed Send. NOT WHEN THE NOTE ARRIVED, which may be weeks later on a farm whose blocks have no signal. The list sorts on this because it is the recency a reader means: the newest complaint is the one most recently made, not the one most recently synced.",
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Submitted At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "timing_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "When this site received it. The distance between this and timestamp is how long the note sat in a pocket, which is worth being able to see when somebody asks why nobody acted on it.",
+   "fieldname": "received_at",
+   "fieldtype": "Datetime",
+   "label": "Received At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "device_section",
+   "fieldtype": "Section Break",
+   "label": "Where From"
+  },
+  {
+   "description": "The app build the note was written on. A filter column, because the commonest useful question about a pile of feedback is whether the complaints stop at a version.",
+   "fieldname": "app_version",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "App Version"
+  },
+  {
+   "fieldname": "app_build",
+   "fieldtype": "Data",
+   "label": "App Build"
+  },
+  {
+   "description": "The utsname machine identifier — iPhone17,2 — and not UIDevice.model's bare 'iPhone'. The distinction is the whole value of the column: 'only on the old handsets' is an answer, 'only on iPhones' is not.",
+   "fieldname": "device_model",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Device Model"
+  },
+  {
+   "fieldname": "device_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "os_version",
+   "fieldtype": "Data",
+   "label": "OS Version"
+  },
+  {
+   "description": "The handset's own stable identifier, the same one the push register keys on. It is what makes 'this one phone produces every complaint about the scanner' a question somebody can ask.",
+   "fieldname": "device_id",
+   "fieldtype": "Data",
+   "label": "Device ID",
+   "search_index": 1
+  },
+  {
+   "fieldname": "screenshot_section",
+   "fieldtype": "Section Break",
+   "label": "Screenshot"
+  },
+  {
+   "default": "0",
+   "description": "Whether a screenshot came with the note. Kept in step with the screenshot field by the controller and never set by a caller, so it is a filter a reader can trust — 'show me the ones with a picture' should not depend on a client having remembered to tick a box.",
+   "fieldname": "has_screenshot",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Has Screenshot",
+   "read_only": 1
+  },
+  {
+   "description": "Why there is no picture on a note that was written with one. The handset drops a capture that came out over its own inline ceiling and sends the reason instead of the bytes, because the note matters more than the screenshot and refusing the whole submission over an oversized JPEG would park the complaint forever. Empty on a note that never had one — 'the worker did not take a screenshot' and 'the screenshot did not fit' are different facts, and only the second one is somebody's bug.",
+   "fieldname": "screenshot_omitted",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Screenshot Omitted",
+   "read_only": 1
+  },
+  {
+   "description": "The optional capture, stored as a PRIVATE File. Private is not a choice a caller gets to make: a screenshot of the app is a screenshot of whatever roster, wage or task list was on the screen at the time, and a public File is readable by anybody who can guess the URL.",
+   "fieldname": "screenshot",
+   "fieldtype": "Attach Image",
+   "label": "Screenshot",
+   "read_only": 1
+  }
+ ]
+}

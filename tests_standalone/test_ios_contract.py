@@ -889,6 +889,29 @@ class ShiftRegisterModel(Codable):
 	NESTED = (("shifts", OpenShiftRowModel, True, 71),)
 
 
+class FeedbackReceiptModel(Codable):
+	"""`FeedbackAPI.Receipt` — the answer `submit_app_feedback` hands the handset.
+
+	THE ONLY MIRROR IN THIS FILE WITH NOTHING STRICT IN IT, and the absence is
+	the contract rather than a gap in it. `FeedbackAPI.docname(in:)` reads the
+	reply with `JSONSerialization` and answers nil for any shape it does not
+	recognise, and its own comment says why: the note has already been filed by
+	the time that runs, so throwing because the envelope was `{"ok": true}`
+	rather than `{"name": …}` would put it back in the queue and file it twice.
+	A mirror that asserted a required key here would be asserting a promise the
+	app deliberately does not make.
+
+	What IS asserted is the one thing the app does read: `name`, if present, is a
+	String. It tries `name`, `docname`, `feedback` and `app_feedback` in that
+	order and takes the first non-empty string, so a docname emitted as an int —
+	or as a nested object — is not a crash, it is a receipt with no name in it,
+	which is a silent miss and therefore checked.
+	"""
+
+	SWIFT = "FeedbackAPI.swift"
+	LENIENT = (("name", str, 113),)
+
+
 class UndecodedResponseModel(Codable):
 	"""A method `MobileAPI.swift` names and no Swift struct decodes yet.
 
@@ -4100,6 +4123,66 @@ class EveryMobileMethodDecodes(ContractTestCase):
 		self.assertEqual(self.wire("list_shifts", mine="false")["mine"], False)
 		self.assertEqual(self.wire("list_shifts", mine="true")["mine"], True)
 
+	# ── v0.105.0. The feedback bubble drains ────────────────────────────────
+	def test_56_submit_app_feedback(self):
+		"""THE ANSWER THE HANDSET READS IS A DOCNAME OR NOTHING.
+
+		`FeedbackAPI.submit` calls `client.callVoid` and then reads a name out of
+		whatever came back, best-effort. `name` is the first key it looks for, so
+		emitting the docname there is what turns a receipt into one that can be
+		reconciled against the queue — but a reply it cannot read is explicitly
+		NOT an error, because the note is filed by the time that code runs.
+		"""
+		row = self.wire(
+			"submit_app_feedback",
+			entry_uuid="B1B2C3D4-0000-4444-8888-999999999999",
+			screen="my_tasks",
+			comment="The task list scrolls back to the top every time I open one.",
+			submitted_at="2026-08-03 05:55:00",
+			app_version="1.9.0",
+		)
+		FeedbackReceiptModel.decode(row, "submit_app_feedback")
+
+		self.assertTrue(row["filed"])
+		self.assertTrue(row["created"])
+		self.assertTrue(str(row["name"]).startswith("AFB-2026-"))
+
+	def test_56_a_replayed_note_answers_the_same_receipt(self):
+		"""THE CASE THAT HAPPENS MOST. The queue drains a backlog in one burst
+		and drains it again from the start if the burst is interrupted, so the
+		second send is the ordinary one — and it has to be a success carrying
+		the SAME docname, or the phone files a second copy of one complaint."""
+		body = {
+			"entry_uuid": "C1C2C3C4-0000-4444-8888-999999999999",
+			"screen": "harvest_day",
+			"comment": "The bucket count resets when I lock the phone.",
+			"submitted_at": "2026-08-03 06:10:00",
+		}
+		first = self.wire("submit_app_feedback", **body)
+		second = self.wire("submit_app_feedback", **body)
+
+		FeedbackReceiptModel.decode(second, "submit_app_feedback")
+		self.assertEqual(second["name"], first["name"])
+		self.assertTrue(second["filed"])
+		self.assertTrue(second["duplicate"])
+		self.assertFalse(second["created"])
+
+	def test_56_the_two_timestamps_reach_the_phone_as_strings_it_can_parse(self):
+		"""`submitted_at` is when Send was pressed and `received_at` is when it
+		landed — weeks apart on a farm with no signal in the blocks, which is
+		exactly why both are on the receipt rather than one."""
+		row = self.wire(
+			"submit_app_feedback",
+			entry_uuid="D1D2D3D4-0000-4444-8888-999999999999",
+			screen="bucket_capture",
+			comment="The shutter fires before the bucket is in frame.",
+			submitted_at="2026-08-03 06:20:00",
+		)
+		for key in ("submitted_at", "received_at"):
+			with self.subTest(key=key):
+				self.assertIsInstance(row[key], str)
+				self.assertTrue(row[key])
+
 
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
@@ -4287,6 +4370,11 @@ class TheContractIsComplete(ContractTestCase):
 		# other shift method takes a docname and there was no way to find one
 		# again, so an open shift became permanently un-closeable from the app.
 		"list_shifts": "test_55",
+		# v0.105.0 — the in-app feedback bubble. `FeedbackAPI.swift` names it and
+		# reads the reply best-effort, so the mirror has nothing strict in it —
+		# see `FeedbackReceiptModel` for why that is the contract rather than a
+		# gap.
+		"submit_app_feedback": "test_56",
 	}
 
 	def _published(self, module):
@@ -4357,6 +4445,7 @@ class TheContractIsComplete(ContractTestCase):
 			FinalizedFileModel,
 			VoidResponseModel,
 			UndecodedResponseModel,
+			FeedbackReceiptModel,
 			AttachedDocumentModel,
 			SignedI9Model,
 		)

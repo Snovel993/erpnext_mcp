@@ -584,6 +584,11 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# worker's name.
 		"/mobile/register_push_token",
 		"/mobile/unregister_push_token",
+		# v0.105.0. SERVER_CHANGES #24 — the in-app feedback bubble. The route
+		# whose absence parked every note the farm wrote, since a 404 on this
+		# client is a park rather than a failure. `user` is absent from its
+		# signature, so no body can file a note under a colleague's login.
+		"/mobile/submit_app_feedback",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

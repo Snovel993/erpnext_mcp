@@ -17258,3 +17258,85 @@ Nothing is ever deleted. `is_active` retires a row, and `last_error` says why �
 somebody needs when a worker reports that the horn never reaches them.
 
 `SERVER_CHANGES.md` item 16.
+
+## The in-app feedback bubble drains (v0.105.0)
+
+A bubble on every screen of the handset app, a form that captures the screen, the
+person, the role, the time, the build and the model **for** the worker, dictation
+in English and Spanish for a crew working in gloves, and an optional screenshot.
+All of it shipped on the phone first. None of it had anywhere to go: there was no
+`App Feedback` doctype and no route to file one, so every note the farm has
+written since is sitting in a queue on somebody's handset.
+
+| | |
+|---|---|
+| `POST /farmops/api/mobile/submit_app_feedback` | One note from the bubble. **Deduplicated on `entry_uuid`.** |
+
+There is no MCP tool. The owner's half of the feature is a **list view** on the
+doctype — sorted by when Send was pressed, filterable by screen and by role —
+which is what `SERVER_CHANGES.md` item 24 asks for and what a Desk list already
+does against the columns this writes.
+
+### Publishing this route collects a backlog, not a note
+
+A 404 on this client **parks** a note rather than failing it: it is retried every
+six hours, forever, and the attempts are not counted against the give-up bound.
+So the first call that answers 200 does not receive one note. It receives weeks
+of them in one burst — and receives them **again from the start** if that burst
+is interrupted before the phone records the acknowledgements.
+
+That is why the route takes `UPLOAD_LIMIT` rather than `WRITE_LIMIT`, the same as
+`sync_bucket_entries` and for the same reason, and why `entry_uuid` is `unique`
+on the doctype. A resend is answered with **success and the record already
+held** — never a refusal. The app treats any non-2xx as "not filed" and would
+queue it again, so a 409 on a duplicate is indistinguishable, from the handset,
+from never having built this at all. One worker's considered complaint filed
+three times is how a feed becomes noise nobody reads.
+
+### The login on a note is the one that was proved
+
+A shared handset is normal on a farm, so the app sends its own idea of who is
+holding the phone. `user` is not on the signature — `routes.bind` drops the body's
+copy and `guard.endpoint` injects the authenticated caller — and `employee`,
+`employee_name` and `user` on the record are all resolved from that caller.
+
+What the handset claimed is kept in `claimed_employee` / `claimed_employee_name`,
+and **only where it disagrees**: two identical columns on every row would hide the
+disagreement, which is the only reason the claim is worth storing.
+
+`role` and `designation` are stored as sent and checked against nothing. They are
+half of what the owner filters by and the server cannot reconstruct them — one
+login holds several roles and only the app knows which hat was on — and nothing
+on this site authorises anything off those columns.
+
+### A bad screenshot never costs the note
+
+Not base64, not an image, over the 1 MB ceiling, or a `File` insert that threw:
+all four record a reason in `screenshot_omitted` and file the note anyway. A 400
+would be a note re-queued and re-sent forever by a handset that will never encode
+that JPEG any smaller. The picture is context; the sentence somebody wrote is the
+thing. A note too long for the column is shortened and marked, for the same
+reason — the controller's cap is a real refusal only on the Desk path, where
+whoever hit it can do something about it.
+
+The app reasons the same way at its own end: it drops a capture over its inline
+ceiling and sends `screenshot_omitted: "too_large"` instead of holding the note
+back, and that reason is stored rather than discarded. "The worker took no
+screenshot" and "the screenshot did not fit" are different facts and only the
+second one is somebody's bug.
+
+Captures are stored as **private** `File` rows. A screenshot of the app is a
+screenshot of whatever roster, wage or task list was on the screen at the time.
+The extension is read off the first bytes and the stored filename is composed
+from the docname, so `screenshot_filename` and `screenshot_content_type` are not
+on the signature — there is nowhere for a caller-supplied name to land.
+
+### Both doors reach the same method
+
+`farmops_api/app.py` now reads `multipart/form-data` as well as JSON. A file part
+is base64'd in the **transport** and lands on the key its own part is named, so a
+part called `screenshot` arrives as `screenshot` and no handler branches on how
+the bytes got there. Nothing about the surface widens: `routes.bind` still reduces
+whatever comes out of it to the keys the method declares.
+
+`SERVER_CHANGES.md` item 24.

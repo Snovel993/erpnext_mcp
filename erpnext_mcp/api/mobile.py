@@ -105,6 +105,7 @@ from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as a
 from ..errors import ToolError
 from ..tools import accidents as accident_tools
 from ..tools import ach as ach_tools
+from ..tools import app_feedback as feedback_tools
 from ..tools import (
 	asset_tags,
 	badges,
@@ -12749,4 +12750,138 @@ def unregister_push_token(user: str, device_id=None, platform=None) -> dict:
 		"deactivated": bool(answer.get("deactivated")),
 		"found": bool(answer.get("found")),
 		"device": {"platform": answer.get("platform"), "device_id": answer.get("device_id")},
+	}
+
+
+# ── 152. submit_app_feedback ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("submit_app_feedback", mutating=True, limit=guard.UPLOAD_LIMIT)
+def submit_app_feedback(
+	user: str,
+	entry_uuid=None,
+	client_reference=None,
+	screen=None,
+	screen_name=None,
+	screen_label=None,
+	comment=None,
+	feedback_text=None,
+	was_dictated=None,
+	language=None,
+	employee=None,
+	employee_name=None,
+	role=None,
+	roles=None,
+	designation=None,
+	company=None,
+	submitted_at=None,
+	timestamp=None,
+	app_version=None,
+	app_build=None,
+	device_model=None,
+	os_version=None,
+	device_id=None,
+	screenshot=None,
+	screenshot_omitted=None,
+) -> dict:
+	"""The in-app feedback bubble's one call. Deduplicated on `entry_uuid`.
+
+	`UPLOAD_LIMIT` RATHER THAN `WRITE_LIMIT`, and for the reason
+	`sync_bucket_entries` takes it. This route has never existed, so the iOS half
+	has been parking every note against a 404 since the bubble shipped — a park
+	rather than a failure, retried every six hours forever. The first call that
+	answers 200 therefore drains a backlog that may be weeks deep in one burst,
+	and ten calls a minute would refuse most of it and send the phone away to try
+	again in six hours. The deduplication below is what makes that burst safe
+	rather than the rate limit.
+
+	`user` IS ABSENT FROM THIS SIGNATURE and the app sends one anyway. `guard`
+	injects the authenticated caller there and `routes.bind` drops the body's
+	copy, so the login on the record is the one that was proved. `employee` IS
+	declared and is NOT what gets stored as the author: a shared handset is
+	normal here, so the app's claim is kept beside the resolved caller rather
+	than instead of it — `tools/app_feedback.py` says which column each lands in.
+
+	`screenshot_filename` AND `screenshot_content_type` ARE NOT DECLARED, so
+	`bind` drops both. The extension is read off the first bytes and the filename
+	is composed from the docname, which is `api/files.py`'s fourth refusal and
+	`signatures._sniff`'s whole argument: a caller-supplied name has nowhere to
+	land here, and a file called `.jpg` that is not one is worse than no file.
+
+	A COMPANY THIS CALLER CANNOT REACH FALLS BACK RATHER THAN REFUSING. Every
+	other write on this surface refuses it, and this one must not: a 403 is a
+	note re-queued and re-sent by a handset that will keep sending the same
+	company forever, and `company` here is a filter column on a feedback feed
+	rather than a fact anything is posted against. The note is filed under the
+	caller's own entity and the complaint survives.
+	"""
+	allowed = guard.require_scope(user)
+
+	try:
+		scoped = _company(user, company, allowed)
+	except Exception:  # a handset naming an entity this login cannot reach
+		scoped = allowed[0] if allowed else ""
+
+	# A login with no Employee record still files a note. `_employee` would
+	# refuse the call, and somebody whose record has not been linked yet is
+	# exactly the person whose feedback about being onboarded is worth reading.
+	person = None
+	try:
+		person = _employee(user)
+	except Exception:
+		person = None
+
+	# `roles` is the array the app sends when it sends anything; `role` is the
+	# hat that was actually on. The array is a fallback rather than a second
+	# column — the feed filters on one value, and a client that sent only the
+	# set should still land in that filter rather than under a blank.
+	active_role = str(role or "").strip()
+	if not active_role and roles:
+		listed = roles if isinstance(roles, list) else json.loads(roles or "[]")
+		active_role = ", ".join(str(item).strip() for item in listed if str(item or "").strip())
+
+	answer = feedback_tools.submit_app_feedback(
+		{
+			"entry_uuid": entry_uuid,
+			"client_reference": client_reference,
+			"screen": screen,
+			"screen_name": screen_name,
+			"screen_label": screen_label,
+			"comment": comment,
+			"feedback_text": feedback_text,
+			"was_dictated": was_dictated,
+			"language": language,
+			"caller_user": user,
+			"caller_employee": person,
+			"employee": employee,
+			"employee_name": employee_name,
+			"role": active_role,
+			"designation": designation,
+			"company": scoped,
+			"submitted_at": submitted_at,
+			"timestamp": timestamp,
+			"app_version": app_version,
+			"app_build": app_build,
+			"device_model": device_model,
+			"os_version": os_version,
+			"device_id": device_id,
+			"screenshot": screenshot,
+			"screenshot_omitted": screenshot_omitted,
+		}
+	).data
+	row = answer.get("app_feedback") or {}
+	# THE ANSWER IS THE SAME SHAPE WHETHER THIS WROTE ANYTHING OR NOT, because
+	# `FeedbackAPI` treats any 2xx as filed and reads a docname out of the reply
+	# best-effort. A duplicate that answered differently would be a second code
+	# path on the handset for the case that happens most — the interrupted drain.
+	return {
+		"filed": True,
+		"created": bool(answer.get("created")),
+		"duplicate": bool(answer.get("duplicate")),
+		"name": row.get("name"),
+		"entry_uuid": row.get("entry_uuid"),
+		"screen": row.get("screen_name"),
+		"submitted_at": row.get("timestamp"),
+		"received_at": row.get("received_at"),
+		"screenshot_stored": bool(answer.get("screenshot_stored")),
+		"screenshot_omitted": answer.get("screenshot_omitted"),
 	}

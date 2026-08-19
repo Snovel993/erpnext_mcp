@@ -3,6 +3,56 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.105.0 — 2026-08-19 — the feedback queue on every phone finally drains
+
+`fafo_ios/SERVER_CHANGES.md` item 24. The handset half of the in-app feedback
+loop shipped complete — a bubble on every screen, a form that captures the
+screen, the person, the role, the time, the build and the model **for** the
+worker, dictation in English and Spanish for a crew working in gloves, and an
+optional screenshot — and it has been posting to a 404 ever since. There was no
+`App Feedback` doctype and no route to file one.
+
+**Publishing this route collects a backlog, not a note.** A 404 on this client
+does not fail a note, it **parks** it: retried every six hours, forever, and the
+attempts are not counted against the give-up bound. So the first call that
+answers 200 receives weeks of notes in one burst — and receives them again from
+the start if that burst is interrupted before the phone records the
+acknowledgements. `entry_uuid` is `unique` on the doctype, a resend is answered
+with **success and the record already held** rather than a refusal (the app
+treats any non-2xx as "not filed" and would queue it again), and the route takes
+`UPLOAD_LIMIT` for the reason `sync_bucket_entries` does.
+
+**The login on a note is the one that was proved.** A shared handset is normal
+here, so the app sends its own idea of who is holding the phone. `user` is not on
+the signature — `bind` drops the body's copy and `guard.endpoint` injects the
+authenticated caller — and `employee`, `employee_name` and `user` are resolved
+from that caller. The claim is kept in `claimed_employee`, and only where it
+disagrees: two identical columns on every row would hide the disagreement that is
+the only reason to store it.
+
+**A refusal is a note parked forever, so there are only two.** No `entry_uuid`
+and no `comment`. A screenshot that is not base64, is not an image, is over the
+1 MB ceiling, or whose `File` insert threw records a reason in
+`screenshot_omitted` and the note is filed anyway; a note longer than the column
+is shortened and marked; a company this login cannot reach falls back to the
+caller's own entity rather than 403-ing. The picture is context — the sentence
+somebody wrote is the thing.
+
+**Both doors reach the same method.** `farmops_api/app.py` now reads
+`multipart/form-data` as well as JSON, as a translation rather than a second
+path: a file part is base64'd in the transport and lands on the key its own part
+is named, so no handler branches on how the bytes arrived. Nothing widens —
+`routes.bind` still reduces the result to the keys the method declares.
+
+**The owner's half is a list view**, which is what item 19 asks for: sorted by
+when Send was pressed rather than when the note landed (weeks apart on a farm
+whose blocks have no signal), filterable by screen and by role, and readable but
+not writable by Farm Manager — a note is what a worker said, and a feed the
+reader can edit is not evidence of anything.
+
+No MCP tool was added. `submit_app_feedback` is reached only from the mobile
+surface for the reason `register_push_token` is.
+
 ## 0.104.0 — 2026-08-19 — the whole Company Details section, on the card
 
 Tim, expanding the badge brief: the Employee form's **Company Details** section
