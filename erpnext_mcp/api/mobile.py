@@ -313,9 +313,9 @@ def _last_completed(history) -> dict:
 def _evidence(raw) -> list:
 	"""The app's evidence list, translated to what `complete_farm_task` takes.
 
-	The phone knows `{"file_token", "file_name", "sha256", "kind"}` because that
-	is what `finalize_staged_file` handed it; the tool wants
-	`{"file", "evidence_type"}`. `file_token` IS the File docname — see
+	The phone knows `{"file_token", "file_name", "sha256", "kind", "phase"}`
+	because that is what `finalize_staged_file` handed it plus the one label the
+	camera screen collected; the tool wants `{"file", "evidence_type", "phase"}`. `file_token` IS the File docname — see
 	`api/files.finalize_staged_file`, which is the only thing that mints one — so
 	this is a rename rather than a lookup, and `normalise_evidence` still refuses
 	any docname that is not a real File on this site.
@@ -354,6 +354,24 @@ def _evidence(raw) -> list:
 			row["file_url"] = url
 		if entry.get("file_name"):
 			row["caption"] = str(entry["file_name"])[:140]
+		# v0.96.0. WHETHER THIS FRAME IS THE BEFORE ONE. `Farm Task Evidence`
+		# gained a `phase` column in this release; until it did, the handset
+		# wrote the answer into the filename (`FT-…_photo_before_….jpg`) because
+		# an unrecognised fifth key risked a strict validator refusing the whole
+		# completion — and a completion is the one submission on this surface a
+		# worker cannot redo, because the cabin has been cleaned and the crew has
+		# gone home.
+		#
+		# AN UNRECOGNISED PHASE IS DROPPED RATHER THAN RAISED ON, which is the
+		# posture this whole normaliser already takes — an unknown `kind` becomes
+		# Photo two lines up rather than failing the call. The trade is the same
+		# one and it is decided the same way: losing a label is recoverable from
+		# the filename, and losing the photographs is not. A caller who wants the
+		# strict refusal has it on the MCP tool, where `normalise_evidence`
+		# checks the value against the doctype's own list.
+		phase = str(entry.get("phase") or "").strip().lower()
+		if phase in ("before", "after"):
+			row["phase"] = phase
 		out.append(row)
 	return out
 

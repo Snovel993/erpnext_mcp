@@ -9604,7 +9604,10 @@ TOOLS = {
 			"evidence_files": _field(
 				{"type": "array", "items": {"type": ["string", "object"]}},
 				"File docnames from commit_staged_file, file URLs, or objects like "
-				'{"file": "...", "evidence_type": "Photo", "caption": "north wall"}. Max 40.',
+				'{"file": "...", "evidence_type": "Photo", "caption": "north wall", '
+				'"phase": "before"}. Max 40. `phase` is `before`, `after`, or omitted — '
+				"omitted is the ordinary case, because most completions have no before "
+				"frame and a required one would refuse the submission a worker cannot redo.",
 			),
 			"signature_file": _field(_STRING, "The signature capture's file URL or File docname."),
 			"completion_narrative": _field(_STRING, "What the worker did, in their words."),
@@ -18208,7 +18211,10 @@ TOOLS = {
 			"evidence": _field(
 				{"type": "array", "items": {"type": ["string", "object"]}},
 				"File docnames from commit_staged_file, file URLs, or objects like "
-				'{"file": "...", "evidence_type": "Photo", "caption": "north wall"}. Max 40.',
+				'{"file": "...", "evidence_type": "Photo", "caption": "north wall", '
+				'"phase": "before"}. Max 40. `phase` is `before`, `after`, or omitted — '
+				"omitted is the ordinary case, because most completions have no before "
+				"frame and a required one would refuse the submission a worker cannot redo.",
 			),
 			"evidence_files": _field(
 				{"type": "array", "items": {"type": ["string", "object"]}}, "Alias for evidence."

@@ -12,6 +12,7 @@
   "evidence_col",
   "file_url",
   "captured_on",
+  "phase",
   "detail_section",
   "caption"
  ],
@@ -50,6 +51,13 @@
    "fieldname": "captured_on",
    "fieldtype": "Datetime",
    "label": "Captured"
+  },
+  {
+   "description": "Whether this frame was taken BEFORE the work started or AFTER it finished. Blank is the ordinary case and stays legal forever — most completions have no before frame and never will, and a required phase would refuse the completion a worker cannot go back and re-photograph. v0.96.0. THE PAIR IS THE EVIDENCE, NOT EITHER HALF: a photograph of a repaired valve proves a valve is fine, and the leak beside it proves somebody fixed a leak. Every dispute this app is asked to settle — piece rate, a cabin's condition at check-in, whether a block was sprayed — turns on the state of the thing before the crew arrived, and that frame stops being available the moment the work starts. LOWER CASE, DELIBERATELY: the handset ships `EvidencePhase` as a Swift String enum whose raw values are `before` and `after`, so these are the two strings that round-trip without a translation table on either end. Until this column existed the phase travelled in the filename (`FT-…_photo_before_….jpg`), which an auditor can read and nothing can query.",
+   "fieldname": "phase",
+   "fieldtype": "Select",
+   "label": "Phase",
+   "options": "\nbefore\nafter"
   },
   {
    "fieldname": "detail_section",

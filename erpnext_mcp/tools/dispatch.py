@@ -2912,7 +2912,18 @@ def _assignment_evidence(assignment: str) -> list:
 	rows = frappe.db.get_all(
 		inspections.EVIDENCE_CHILD,
 		filters={"parent": assignment, "parenttype": FARM_TASK_ASSIGNMENT},
-		fields=["evidence_type", "file", "file_url", "caption", "captured_on", "idx"],
+		fields=[
+			"evidence_type",
+			"file",
+			"file_url",
+			"caption",
+			"captured_on",
+			# v0.96.0. Read explicitly, like every other column here: the row is
+			# no use to a reader who has to guess which frame is the before one
+			# off a filename, which is the whole reason the column was added.
+			*compat.existing_fields(inspections.EVIDENCE_CHILD, ("phase",)),
+			"idx",
+		],
 		order_by="idx asc",
 		limit=inspections.EVIDENCE_CAP * 2,
 	)
@@ -2923,6 +2934,10 @@ def _assignment_evidence(assignment: str) -> list:
 			"file_url": row.get("file_url"),
 			"caption": row.get("caption"),
 			"captured_on": str(row.get("captured_on") or "") or None,
+			# `None` rather than absent, so a client reading a list of frames
+			# gets the same keys on every one of them and an untagged photograph
+			# is visibly untagged rather than missing a field.
+			"phase": row.get("phase") or None,
 		}
 		for row in rows or []
 	]

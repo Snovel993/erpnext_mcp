@@ -236,8 +236,8 @@ def normalise_evidence(raw, label: str = "evidence_files") -> list:
 
 	Three shapes are accepted because three are what a caller genuinely has: a
 	File docname (what `commit_staged_file` hands back), a file URL (what an
-	older attachment flow has), and a full object with a type and a caption
-	(what a mobile app that took the photograph knows).
+	older attachment flow has), and a full object with a type, a caption and —
+	since v0.96.0 — a `phase` (what a mobile app that took the photograph knows).
 
 	A FILE DOCNAME THAT DOES NOT EXIST IS REFUSED. Evidence pointing at nothing
 	is worse than no evidence: it satisfies a contract, files a row, and produces
@@ -300,15 +300,31 @@ def normalise_evidence(raw, label: str = "evidence_files") -> list:
 			evidence_type = evidence_type[:1].upper() + evidence_type[1:]
 		if not evidence_type:
 			evidence_type = "Photo"
-		out.append(
-			{
-				"evidence_type": as_choice(EVIDENCE_CHILD, "evidence_type", evidence_type, "evidence_type"),
-				"file": file_name or None,
-				"file_url": file_url or None,
-				"caption": str(entry.get("caption") or "").strip() or None,
-				"captured_on": str(entry.get("captured_on") or "").strip() or None,
-			}
-		)
+		# v0.96.0: `phase` is before-or-after, and UNSET IS THE ORDINARY CASE.
+		# Most completions have no before frame and never will — the crew is
+		# gone and the cabin is clean — so a phase that defaulted to anything, or
+		# that was required, would refuse the one submission a worker cannot
+		# redo. It is emitted ONLY when the caller sent one, which is what keeps
+		# the row identical to a pre-v0.96.0 row for every existing caller and
+		# for the other child tables this normaliser feeds.
+		#
+		# LOWER-CASED BEFORE THE VALIDATOR, the mirror of what `kind` gets above:
+		# the handset's `EvidencePhase` is a Swift String enum whose raw values
+		# are `before` and `after`, so those are the stored spellings, and an MCP
+		# caller who writes "Before" is meeting the same tolerance rather than a
+		# refusal. Anything else falls through to `as_choice`, which refuses with
+		# the doctype's own list.
+		row = {
+			"evidence_type": as_choice(EVIDENCE_CHILD, "evidence_type", evidence_type, "evidence_type"),
+			"file": file_name or None,
+			"file_url": file_url or None,
+			"caption": str(entry.get("caption") or "").strip() or None,
+			"captured_on": str(entry.get("captured_on") or "").strip() or None,
+		}
+		phase = str(entry.get("phase") or "").strip().lower()
+		if phase:
+			row["phase"] = as_choice(EVIDENCE_CHILD, "phase", phase, f"{label}[{index}].phase")
+		out.append(row)
 	return out
 
 
