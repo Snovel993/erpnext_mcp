@@ -3,6 +3,93 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.98.0 — 2026-08-18 — the screens the app already built, and the doors behind them
+
+Wave 2 of `fafo_ios/SERVER_CHANGES.md`, items 2, 3, 5, 11, 12 and 14 — the
+"Core Mobile Surface": the features the handset has shipped code for and been
+running on local fallbacks instead.
+
+**Five of the six were transport gaps, not features.** The tool existed, the
+rules existed, the doctype existed, and nothing a phone could reach reached
+them. `create_field` and its three siblings have been MCP tools since v0.12.0;
+`add_task_note` has been mounted since v0.79.0 under a name with `_via_mobile`
+welded onto the end of it; `Farm Incident Record` has carried a worker's
+grievance direction since v0.94.0 with no argument on this surface able to set
+it. What shipped here is mostly nine routes and a handful of argument spellings,
+which is why the diff is small for a wave this size — and why every test in
+`test_wave2_mobile_surface.py` is written against the ROUTE and the ARGUMENT
+rather than against the tool, since a test calling `farm.create_field` directly
+would have passed on every day that method was a 404 in an orchard.
+
+| # | What shipped |
+|---|---|
+| 11 | `list_farm_locations` — all four registers (Field, Irrigation Zone, Parcel, Housing Unit) in one call — plus `create_farm_location` and the four per-register names the app already builds requests for. Five doors, **one write**, one gate |
+| 12 | `add_task_note` under the name the app asks for, taking `note` / `language` / `audio_file_token`; and `create_dispute`, so a grievance is a Worker Report rather than a step on the complainant's own discipline chain |
+| 2 | `Farm Task Template` joins `ATTACHMENT_PARENTS`, un-gated — a procedure is not a fact about a person |
+| 3 | `sop_document_en` and `sop_document_es` on Farm Task Template, **read through the task's `template` link and deliberately not snapshotted onto it** |
+| 5 | The Select taxonomy published on `get_current_user_context`, and `affected_asset` / `affected_block` / `observed_at` / `reported_by` landing in columns instead of a prose blob |
+| 14 | `get_break_schedule` — every break a shift owes and the **clock time** each falls due, computed once so a crew's phones count down together |
+
+**The role §11 asked for is Farm Manager.** `LocationRegistryAPI` gates its "Add
+a place" button on `{Farm Owner, Property Owner, Farm Manager, System Manager}`,
+transcribed as a guess, and asks the server for the real name. Two of those four
+are not roles this app has ever created. `roles.py` grants **Farm Manager**
+`FULL` on `GROUND` and `CAMP` — read, write and create on all four registers —
+so that is the answer, and `guard.LOCATION_ROLES` is a strict subset of
+`DISPATCH_ROLES`: the only gate on this surface narrower than dispatch. A
+dispatched task is undone by rejecting it; a register entry is routed through by
+every task, spray record and acre of cost allocation the farm will ever file,
+and a duplicate "Block 7" created at a tailgate is one the reports will never
+merge. **`System Manager` is deliberately absent** — it cannot reach this
+surface at all, and listing it would advertise a permission seven gates upstream
+have already refused.
+
+**One new column in the whole wave, and it is `observed_at`.** Everything else
+in item 5 landed in a column that already existed: `affected_asset` is `asset`,
+`affected_block` fills the `location_doctype`/`location` pair, `reported_by` is
+`reported_by`. `observed_at` needed its own because `reported_at` is the filing
+stamp that `dispatch._field_report_count` counts the five-per-hour anti-spam
+limit on — a caller who could set that backwards could file a hundred reports
+dated an hour ago and the rule would count none of them. So one is settable and
+the other never is, and there is a test that fails if a future edit folds them
+together.
+
+**A bug this wave uncovered, already shipped, and silent.** `shifts.FIELDS`
+never listed `break_policy`, and three readers built their row from that tuple
+and then asked it for exactly that key — `_break_summary`,
+`_compute_shift_production` and `get_shift_crew_timeline`. The lookup returned
+None on every shift ever written: the break reconciliation was skipped, and
+`get_shift_crew_timeline` reported `"break_policy": null` for shifts that named
+one. Nothing failed. A block of entitlement figures was simply absent, which is
+the quietest way for a compliance number to go missing. `work_state` joins it
+for the schedule's state fallback.
+
+**And one found by writing the tests.** The new location writes scope-checked
+their parent through `guard.require_scoped_doc`, which reads a column called
+`company` — and all four of these registers call theirs `owning_entity`. The
+lookup returned None, the guard was skipped, and a Farm Manager on one entity
+could have filed a block under another entity's parcel. `_scoped_location` is
+the hand-made check that actually reads the column, the same one
+`_attachment_parent` already makes for `Housing Unit`.
+
+**The break schedule answers with instants, not durations.** That is the whole
+of item 14. `BreakSchedule` on the handset computes its countdown from the
+shift's start against the farm's policy when `get_break_policy` answers and
+against the state statutory minimum when it does not — honest, printed under the
+bar every time, and not synchronised: seven phones each work it out from their
+own idea of when the shift began. Breaks are placed at the middle of each equal
+work period, which is what OAR 839-020-0050(1) and WAC 296-126-092 both
+describe, so an eight-hour day starting at six gets rests at eight and twelve
+with the meal at ten. The policy is read off the SHIFT first and the state
+second, and the answer says which — a policy amended in October must not change
+what August's crew was owed.
+
+**Nothing new on the MCP surface.** No tool was added, no `allow_*` switch, no
+catalogue count moved. Wave 2 is a mobile-transport release; the computation
+lives in `erpnext_mcp/breaks.py` (pure, no frappe) and `erpnext_mcp/locations.py`
+(new, pure) so both are testable without a bench and neither drags a doctype
+behind it.
+
 ## 0.97.0 — 2026-08-18 — the survey answered from the records, not from February
 
 Wave 5 of `fafo_ios/SERVER_CHANGES.md`, items 18 to 22. Five schema additions

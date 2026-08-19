@@ -524,6 +524,39 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# is the one whose ABSENT arguments matter — `employee` and `company`
 		# are on the tool and not on the wrapper, so `bind` drops them and a
 		# handset cannot move an order made against one person to another.
+		# v0.98.0 — Wave 2 of `fafo_ios/SERVER_CHANGES.md`, nine routes.
+		#
+		# `add_task_note` (item 12) is the same write as
+		# `add_task_note_via_mobile` above under the name the app asks for; the
+		# older spelling keeps its route, as `collect_signature` did when
+		# `submit_form_signature` arrived. `create_dispute` is item 12's other
+		# half — a worker's grievance filed as a Worker Report rather than as a
+		# step on their own discipline chain — and `discipline_type` is
+		# deliberately absent from its signature, so `bind` drops it and a
+		# complaint cannot be given a warning level by the body that raises it.
+		#
+		# `get_break_schedule` (item 14) is the schedule and not the policy: the
+		# instants this shift's breaks fall due, computed once so a crew's phones
+		# count down together. It declares `farm_shift` as well as `shift`.
+		#
+		# The six location routes are item 11, the largest gap on the document.
+		# The read is open on enrolment — `report_field_task` is open to every
+		# worker and takes a location — and all five writes carry
+		# `guard.require_location_role` (Farm Manager, a strict subset of
+		# `DISPATCH_ROLES`) inside one shared implementation. `create_parcel`'s
+		# ABSENT arguments are the ones that matter: `title_holder`,
+		# `appraised_value`, `appraiser` and `appraisal_document` are on the tool
+		# and not on the wrapper, so `bind` drops them and a handset cannot put a
+		# number on a piece of ground that reaches a financial statement.
+		"/mobile/add_task_note",
+		"/mobile/create_dispute",
+		"/mobile/get_break_schedule",
+		"/mobile/list_farm_locations",
+		"/mobile/create_farm_location",
+		"/mobile/create_field",
+		"/mobile/create_irrigation_zone",
+		"/mobile/create_parcel",
+		"/mobile/create_housing_unit",
 		"/mobile/list_payroll_deductions",
 		"/mobile/get_payroll_deduction",
 		"/mobile/list_employee_deductions",

@@ -436,3 +436,214 @@ def next_break_due(
         }
 
     return {"due": None, "schedule": ent["schedule"]}
+
+
+# ── 7. schedule ─────────────────────────────────────────────────────────────
+
+#: The `break_kind` each schedule table on a Labor Break Policy owes, and the
+#: order a crew takes them in when two fall at the same minute.
+#:
+#: THEY ARE `log_shift_break`'s OWN VOCABULARY, not a fifth set of words for the
+#: same thing. A countdown ends with a foreman tapping the button, and what that
+#: button posts is `log_shift_break(break_kind=...)` — so a schedule that named
+#: its rows "rest" and "meal" would have made the handset carry a translation
+#: table between what it was counting down to and what it then had to log. The
+#: string this hands back is the string that goes straight back up.
+REST_KIND = "Paid Rest"
+MEAL_KIND = "Unpaid Meal"
+HEAT_KIND = "Cool-Down"
+
+
+def _placements(start: _dt.datetime, hours: float, periods: int) -> list:
+    """When `periods` breaks fall across `hours` of work, as datetimes.
+
+    THE MIDPOINT OF EACH EQUAL SEGMENT, which is the placement the regulation
+    describes rather than a spacing somebody chose. OAR 839-020-0050(1) says a
+    rest period is to be taken "in the middle of each work period of four hours
+    or major part thereof", and WAC 296-126-092 uses the same construction. Two
+    rest periods over an eight-hour shift therefore fall at the two-hour and the
+    six-hour mark — the middle of the first four and the middle of the second —
+    which is also where an orchard has always taken them.
+
+    THE ARITHMETIC IS THE WHOLE REASON THIS IS COMPUTED ON THE SERVER. Every
+    phone on a crew doing this for itself gets the same answer only while the
+    handsets agree about the shift's start time to the second, and they do not:
+    `BreakSchedule` reads the start out of whatever the app last synced, and the
+    v0.96.0 join-time bug existed precisely because a phone and a server
+    disagreed about a second. One computation, one set of instants, seven phones
+    counting down to the same minute.
+    """
+    if periods <= 0 or hours <= 0:
+        return []
+    segment = hours / periods
+    return [start + _dt.timedelta(hours=segment * (index + 0.5)) for index in range(periods)]
+
+
+def _band_for(hours: float, rows: list[dict]) -> dict:
+    """The entitlement band that applies, and its minutes and paid flag."""
+    return _best_band(hours, rows) or {}
+
+
+def _taken_counts(events: list[dict]) -> dict:
+    """How many breaks of each kind have already been logged on this shift."""
+    counts = {REST_KIND: 0, MEAL_KIND: 0, HEAT_KIND: 0}
+    for event in events or []:
+        kind = event.get("break_kind") or ""
+        if kind in HEAT_RELIEF_KINDS:
+            # THE THREE HEAT KINDS ARE ONE COUNTER, exactly as they are
+            # everywhere else in this module. A crew that has just come out of
+            # the shade has had its relief for that hour whichever of the three
+            # words the foreman tapped — see `HEAT_RELIEF_KINDS`.
+            counts[HEAT_KIND] += 1
+        elif kind in counts:
+            counts[kind] += 1
+    return counts
+
+
+def schedule(
+    start: Any,
+    policy: dict,
+    hours: float = 8.0,
+    events: list[dict] | None = None,
+    now: Any = None,
+    heat_index: float | None = None,
+) -> list[dict]:
+    """Every break this shift owes, and the clock time each one falls due.
+
+    WHY THE SERVER COMPUTES THIS AND NOT THE HANDSET. A break countdown is only
+    useful if a crew takes its break together, and a schedule each phone works
+    out for itself drifts by whatever the phones disagree about — the shift's
+    start time, the device clock, and which policy the app managed to fetch
+    before it lost signal. `SERVER_CHANGES.md` §14 puts it as the requirement:
+    every phone on the crew has to count down to the same second. This returns
+    instants, not durations, so a phone that fetched the schedule an hour late
+    still shows the same 10:05 as the one that fetched it at the tailgate.
+
+    `hours` IS THE PLANNED LENGTH OF THE SHIFT AND NOT THE HOURS WORKED SO FAR,
+    and the difference decides what is on the list at all. Entitlement bands are
+    keyed on the length of the shift — six hours owes a meal, four does not — so
+    computing against elapsed time would mean the meal period APPEARS on the
+    schedule four hours in, which is three hours after the crew needed to know
+    it was coming. A shift already closed is measured end-to-end instead; see
+    the caller.
+
+    THE STATUS IS ADVISORY AND THE INSTANT IS THE FACT. `due_at` is fixed the
+    moment the shift starts and never moves; `status` and `minutes_until` are
+    computed against `now` and are what the countdown bar reads. A break already
+    logged is `taken`, in order — the second rest of the day matches the second
+    row — because the events carry a kind and not a row number, and pairing them
+    by position is what lets a crew that took its first break early still see
+    the right time for its second.
+
+    `policy_source` TRAVELS ON EVERY ROW rather than once at the top, because a
+    heat cool-down and a rest period can come off different tables of the same
+    record, and a future policy that carried only half a schedule would leave
+    the app unable to say which half it was showing. The handset PRINTS this —
+    a countdown that looks authoritative but is really the app's own reading of
+    OAR 839-020-0050 is the kind of thing somebody quotes in a wage claim.
+    """
+    begins = _parse_dt(start)
+    if begins is None:
+        return []
+    span = max(float(hours or 0), 0.0)
+    if span <= 0:
+        return []
+
+    source = str(policy.get("policy") or "").strip() or None
+    taken = _taken_counts(events or [])
+    now_dt = _parse_dt(now)
+    rows: list[dict] = []
+
+    for kind, key, counter in (
+        (REST_KIND, "rest_schedule", REST_KIND),
+        (MEAL_KIND, "meal_schedule", MEAL_KIND),
+    ):
+        band = _band_for(span, _schedule_rows(policy, key))
+        periods = int(_as_float(band.get("periods_owed")))
+        minutes = int(_as_float(band.get("minutes_each")))
+        for index, due in enumerate(_placements(begins, span, periods)):
+            rows.append(
+                {
+                    "break_type": kind,
+                    "sequence": index + 1,
+                    "due_at": due.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration_minutes": minutes,
+                    "is_paid": _checked(band.get("paid")),
+                    "policy_source": source,
+                    "taken": index < taken[counter],
+                }
+            )
+
+    # THE HEAT ROWS ARE A CADENCE, NOT A BAND, which is why they are computed
+    # separately rather than folded into the loop above. A rest period is owed
+    # per shift length; a cool-down is owed every `every_hours` for as long as
+    # the heat index stays in its band — OAR 437-004-1131 and WAC 296-307-097
+    # both write it that way. They appear only when somebody has told this
+    # function what the heat index IS: a schedule that invented cool-downs for a
+    # 60°F morning would train a crew to ignore the ones that matter.
+    if heat_index is not None:
+        band = None
+        for row in _schedule_rows(policy, "heat_schedule"):
+            low = _as_float(row.get("heat_index_from"))
+            high = _as_float(row.get("heat_index_to"))
+            if low <= heat_index <= high or (low <= heat_index and high < heat_index):
+                if band is None or _as_float(row.get("minutes_each")) > _as_float(
+                    band.get("minutes_each")
+                ):
+                    band = row
+        if band:
+            every = _as_float(band.get("every_hours"), 1.0)
+            if every > 0:
+                minutes = int(_as_float(band.get("minutes_each")))
+                periods = int(span // every)
+                for index in range(periods):
+                    rows.append(
+                        {
+                            "break_type": HEAT_KIND,
+                            "sequence": index + 1,
+                            "due_at": (
+                                begins + _dt.timedelta(hours=every * (index + 1))
+                            ).strftime("%Y-%m-%d %H:%M:%S"),
+                            "duration_minutes": minutes,
+                            # Every heat kind is paid: it is relief from the work,
+                            # not time off it. `BREAK_KINDS` in `tools/shifts.py`
+                            # marks all three the same way.
+                            "is_paid": True,
+                            "policy_source": source,
+                            "taken": index < taken[HEAT_KIND],
+                            "concurrent_with_rest": _checked(band.get("concurrent_with_rest")),
+                            "heat_index": heat_index,
+                        }
+                    )
+
+    rows.sort(key=lambda row: (row["due_at"], row["break_type"], row["sequence"]))
+    for row in rows:
+        row["status"], row["minutes_until"] = _status_of(row, now_dt)
+    return rows
+
+
+#: How late a break may be before the coach calls it overdue rather than due.
+#: Five minutes, because a crew walking out of a block takes about that long and
+#: a bar that turned red the second the clock passed would be red every time.
+DUE_GRACE_MINUTES = 5
+
+
+def _status_of(row: dict, now: _dt.datetime | None) -> tuple:
+    """`(status, minutes_until)` for one scheduled break.
+
+    `taken` WINS OVER EVERY CLOCK COMPARISON, which is what stops a break the
+    crew has already had from going red behind them. `minutes_until` is None for
+    a break already taken and for a caller who named no `now` — a signed number
+    would read as a countdown to something that has happened.
+    """
+    if row.get("taken"):
+        return "taken", None
+    due = _parse_dt(row.get("due_at"))
+    if now is None or due is None:
+        return "scheduled", None
+    minutes = round((due - now).total_seconds() / 60)
+    if minutes > 0:
+        return "upcoming", minutes
+    if minutes >= -DUE_GRACE_MINUTES:
+        return "due", minutes
+    return "overdue", minutes

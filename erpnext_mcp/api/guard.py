@@ -125,6 +125,38 @@ FARM_OPS_ROLES = frozenset(
 #: operator's own account, grant or no grant.
 DISPATCH_ROLES = frozenset({"Foreman", "Farm Manager"})
 
+#: The roles that may ADD A PLACE to one of the four location registers. A
+#: STRICT SUBSET of `DISPATCH_ROLES` — the only gate on this surface narrower
+#: than dispatch — because the two acts are not the same size of permanent.
+#:
+#: WHY IT IS HARDER THAN DISPATCH. A dispatched task is undone by rejecting it.
+#: A register entry is permanent in the way that matters: every task, every spray
+#: record and every acre of cost allocation is routed through the docname, and a
+#: duplicate "Block 7" created at a tailgate is a second block the farm's own
+#: reports will never merge. `LocationRegistryAPI` says the same thing on the
+#: handset and calls its own check a courtesy — "a client-side gate is a sign on
+#: a door with no lock" — and this is the lock.
+#:
+#: `Farm Owner` AND `Property Owner` DO NOT EXIST AND THIS IS THE ANSWER TO THE
+#: QUESTION §11 ASKED. The iOS `ownerRoles` set is `{Farm Owner, Property Owner,
+#: Farm Manager, System Manager}`, transcribed as a guess with "tell us the real
+#: role and we will match it" next to it. Two of those four are not roles this
+#: app has ever created — `roles.ROLE_SPECS` names seven and neither is among
+#: them — and the one that genuinely holds create on all four registers is
+#: FARM MANAGER: `roles.py` grants it `FULL` on `GROUND` (Parcel, Field,
+#: Irrigation Zone) and on `CAMP` (Housing Unit), which is read, write and
+#: create. So the real answer is one name, and the app's set is a superset of it
+#: that will behave identically for everybody who actually holds a credential.
+#:
+#: `System Manager` IS DELIBERATELY ABSENT AND ITS ABSENCE COSTS NOTHING. It
+#: cannot reach this surface at all: `FARM_OPS_ROLES` above does not list it and
+#: the enrolment gate refuses an operator's own account, grant or no grant —
+#: `test_farmops_api` asserts that Administrator holds every role on the site and
+#: still cannot call any of this. Listing it here would advertise a permission
+#: that seven gates upstream have already refused, which is the failure mode
+#: `roles.py` calls "a grant the catalogue then advertises as truth".
+LOCATION_ROLES = frozenset({"Farm Manager"})
+
 #: Calls per minute for a read. Generous — a phone refreshing three screens on a
 #: pull-to-refresh is three calls, and a worker who does that twice a minute is
 #: using the app, not abusing it.
@@ -289,6 +321,32 @@ def require_dispatch_role(user: str, action: str) -> None:
 		"Farm Ops credential and none of those roles, so it may work its own tasks — list_my_tasks, "
 		"list_available_tasks, claim_task, start_task, complete_task_via_mobile, reject_task and "
 		"report_field_task are all open to it. Nothing was read and nothing was changed."
+	)
+
+
+def require_location_role(user: str, action: str) -> None:
+	"""Farm Manager, or nothing doing. The gate on adding a place to a register.
+
+	THE NINTH GATE, and the same shape as `require_dispatch_role` above: not in
+	`endpoint`, because it is not true of the surface — it is true of five
+	methods on it — and WORDED, because this caller has already proved a named
+	login, a field role and an Active grant, so telling them which role adds a
+	block leaks nothing and is the one thing they need in order to stop tapping.
+
+	IT NAMES THE ALTERNATIVE, which the dispatch gate does too and which matters
+	more here: the answer to "I cannot add this block" is not "give me the role",
+	it is "the office adds it and you pick it from the list five minutes later".
+	A refusal that does not say so reads as the feature being broken.
+	"""
+	if roles_held(user) & LOCATION_ROLES:
+		return
+	raise frappe.PermissionError(
+		f"{action} is restricted to {' and '.join(sorted(LOCATION_ROLES))}. A register entry is "
+		"permanent in a way a task is not — every task, spray record and acre of cost allocation "
+		"is routed through the docname, and a duplicate block created at a tailgate is one the "
+		"farm's own reports will never merge. This account may READ the registers: "
+		"list_farm_locations is open to everybody enrolled. Ask the office to add the place and "
+		"it will be in that list. Nothing was created."
 	)
 
 

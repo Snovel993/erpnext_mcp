@@ -407,6 +407,26 @@ FIELDS = (
 	"foreman_notes",
 	"supervisor_review_signature",
 	"supervisor_review_on",
+	# v0.98.0. TWO COLUMNS THREE READERS ALREADY ASKED THIS TUPLE FOR AND NEVER
+	# GOT. `_break_summary` right below, `_compute_shift_production` and
+	# `get_shift_crew_timeline` all do `row.get("break_policy")` on a row built
+	# from this list — so the lookup returned None on every shift ever, the
+	# reconciliation was skipped, and `get_shift_crew_timeline` reported
+	# `"break_policy": null` for shifts that named one. Nothing failed; a whole
+	# block of entitlement figures was simply absent, which is the quietest way
+	# for a compliance number to be missing.
+	#
+	# `work_state` JOINS IT because `get_break_schedule` falls back to the
+	# enabled policy for the shift's state where the shift itself names none,
+	# and that fallback has to read the state off the shift rather than off the
+	# request — a phone that could name the state could ask for California's
+	# rules on an Oregon crew.
+	#
+	# BOTH SHIP ON THIS APP'S OWN `farm_shift.json`, so `existing_fields` finds
+	# them on any site the app is installed on; the one caller that passes this
+	# tuple to Frappe unfiltered (`open_shifts_for`) is safe for the same reason.
+	"work_state",
+	"break_policy",
 )
 
 #: v0.64.0 added `pay_type` and `pay_rate`, which have been on the doctype since

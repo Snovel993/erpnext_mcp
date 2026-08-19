@@ -61,7 +61,7 @@ import json
 
 import frappe
 
-from .. import alerts, compat, completions, minors, records, sessions, training_sessions
+from .. import alerts, compat, completions, datetimes, minors, records, sessions, training_sessions
 from ..args import as_bool, as_choice, as_int, as_limit, as_str, as_visit_id, resolve_company
 from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	AVAILABLE,
@@ -795,6 +795,12 @@ def _describe_task(row: dict) -> dict:
 		out["reported_by"] = row["reported_by"]
 	if row.get("reported_at"):
 		out["reported_at"] = str(row["reported_at"])
+	# v0.98.0, item 5. WHEN IT WAS SEEN, where that is not when it was filed.
+	# Present only where somebody said so, on the same rule as every key around
+	# it — a task nobody gave an observation time for reports none rather than
+	# echoing `reported_at` and inventing a precision that was never claimed.
+	if row.get("observed_at"):
+		out["observed_at"] = str(row["observed_at"])
 	if row.get("report_photo"):
 		out["report_photo"] = row["report_photo"]
 	# v0.64.0. Reported only when there is one, so the payload of a task raised
@@ -1007,6 +1013,83 @@ def _set_task_state(task: str, state: str, **fields) -> None:
 
 
 # ── 1. create_farm_task ─────────────────────────────────────────────────────
+#: The block register a bare `affected_block` is resolved against. `Field` is
+#: what a farm calls a block; the other three registers are named explicitly by
+#: the caller through `location_doctype` and are not guessed at from this key.
+AFFECTED_BLOCK_DOCTYPE = "Field"
+
+
+def _structured_report(args: dict, doc, location_doctype: str, location: str) -> tuple:
+	"""The four facts an ad-hoc task used to carry as prose. v0.98.0, item 5.
+
+	`SERVER_CHANGES.md` §5: everything below the first line of a handset's
+	`description` is composed by the app and stored by the server as one blob, so
+	the affected asset, the affected block, the time it was seen and the person
+	who saw it were greppable and not queryable. Each of these four lands in a
+	COLUMN THAT ALREADY EXISTS — `asset`, the `location_doctype`/`location` pair,
+	`observed_at` (new in v0.98.0, and the only new one) and `reported_by` — so
+	nothing is stored twice and every report already written keeps its shape.
+
+	Returns the `(location_doctype, location)` pair the caller should use, which
+	may have been filled in from `affected_block`.
+
+	`affected_block` ONLY FILLS A LOCATION THAT IS OTHERWISE EMPTY. A body that
+	names both a location pair and a block is a body saying two things about one
+	column, and the explicit pair wins because it carries its own register — but
+	it is refused rather than silently preferred where the two disagree, since a
+	task routed to the wrong ground is a crew sent to the wrong ground.
+
+	`reported_by` IS NOT SET HERE FOR A FIELD REPORT. That caller's reporter is
+	the authenticated worker and is resolved before this runs; letting a body
+	name somebody else would put a stranger's name on a report they never made.
+	"""
+	block = as_str(args, "affected_block")
+	if block:
+		if location and location != block:
+			raise ToolError(
+				f"affected_block is {block!r} and location is {location!r}, which are two "
+				"answers to where this work is. Send one. Nothing was created."
+			)
+		if not location:
+			if not frappe.db.exists(AFFECTED_BLOCK_DOCTYPE, block):
+				raise ToolError(
+					f"no {AFFECTED_BLOCK_DOCTYPE} called {block!r} on this site. affected_block is "
+					f"resolved against the {AFFECTED_BLOCK_DOCTYPE} register; for a parcel, a zone "
+					"or a cabin send location_doctype and location instead. Nothing was created."
+				)
+			location_doctype, location = AFFECTED_BLOCK_DOCTYPE, block
+
+	asset_name = as_str(args, "affected_asset") or as_str(args, "asset")
+	if asset_name and compat.has_field(FARM_TASK, "asset"):
+		from .asset_tags import asset_row
+
+		doc.asset = asset_row(asset_name)["name"]
+
+	seen = as_str(args, "observed_at")
+	if seen and compat.has_field(FARM_TASK, "observed_at"):
+		# NEVER `reported_at`, which is the filing stamp `_field_report_count`
+		# counts the five-per-hour limit on. A caller who could move that column
+		# backwards could file a hundred reports dated an hour ago and the
+		# anti-spam rule would count none of them.
+		#
+		# THROUGH `as_mariadb_datetime` BECAUSE THE SENDER IS AN IPHONE.
+		# `ISO8601DateFormatter` writes `2026-08-18T07:12:00Z`, and a Frappe
+		# Datetime column answers that with `Incorrect datetime value` at the
+		# insert — the same wall the whole bucket capture queue hit in v0.59.1,
+		# and the reason that conversion is its own module. Unreadable is refused
+		# HERE, by name, rather than left to surface as a framework error from
+		# `doc.insert()` with a task half built behind it.
+		stamp = datetimes.as_mariadb_datetime(seen)
+		if not stamp:
+			raise ToolError(
+				f"observed_at {seen!r} is not a timestamp this can read. Send ISO 8601 — "
+				"'2026-08-18T07:12:00Z' or '2026-08-18 07:12:00'. Nothing was created."
+			)
+		doc.observed_at = stamp
+
+	return location_doctype, location
+
+
 def create_farm_task(args: dict) -> ToolResult:
 	"""Raise one piece of work, with the evidence closing it requires stated up front."""
 	_require()
@@ -1095,6 +1178,23 @@ def create_farm_task(args: dict) -> ToolResult:
 		parse_json_object(args.get("creates_record_data"), "creates_record_data")
 	)
 	doc.notes = _with_override_note(as_str(args, "notes"), phi_override)
+	# v0.98.0, item 5. The four structured facts, into the four columns that hold
+	# them. `_structured_report` may fill the location pair in from
+	# `affected_block`, which is why its answer is assigned back — a task raised
+	# with only a block name still gets routed to ground somebody is stood on.
+	#
+	# `reported_by` IS ACCEPTED HERE AND NOT ON A FIELD REPORT, and the two are
+	# different questions. This door is a FOREMAN raising work about something
+	# somebody else told them, so recording who saw it is the whole point; there
+	# the reporter is the authenticated worker and a body naming anybody else
+	# would be putting a stranger's name on their own report.
+	location_doctype, location = _structured_report(args, doc, location_doctype, location)
+	doc.location_doctype = location_doctype or None
+	doc.location = location or None
+	observer = _worker(args, "reported_by", required=False)
+	if observer:
+		doc.reported_by = observer
+		doc.reported_at = frappe.utils.now()
 	# v0.79.0. A step of a longer piece of work — see the multi-day block below.
 	parent_doctype, parent = _parent_argument(args, "created")
 	if parent:
@@ -4627,7 +4727,10 @@ def report_field_task(args: dict) -> ToolResult:
 			raise ToolError(f"no {location_doctype} called {location!r} on this site. Nothing was created.")
 
 	# ── asset ─────────────────────────────────────────────────────────────
-	asset_name = as_str(args, "asset")
+	# v0.98.0, item 5: `affected_asset` is the handset's spelling of `asset`.
+	# One column, two words for it, because the app composes its New Task form
+	# from `FarmTaskTypeGuide` and calls the field what a person calls it.
+	asset_name = as_str(args, "affected_asset") or as_str(args, "asset")
 	asset_doc = None
 	if asset_name:
 		from .asset_tags import ASSET_TYPE_SKILL_MAP, asset_row
@@ -4658,10 +4761,26 @@ def report_field_task(args: dict) -> ToolResult:
 	doc.state = AVAILABLE
 	doc.notes = description
 	doc.evidence_required = json.dumps({"photos": True, "findings_text": True})
+	# `reported_by` AND `reported_at` ARE THE SERVER'S, NOT THE BODY'S. The
+	# reporter is the authenticated worker — `_worker(args, "reported_by")` above
+	# resolves them, and the wrapper does not declare the argument — and the
+	# stamp is now, because it is the column `_field_report_count` counts the
+	# five-per-hour limit on. A caller who could set either could file somebody
+	# else's report, or a hundred of their own dated an hour ago. `observed_at`
+	# is the settable one, and it is a different fact: see `_structured_report`.
 	doc.reported_by = worker
 	doc.reported_at = frappe.utils.now()
 	doc.report_photo = photo
-	if asset_doc and compat.has_field(FARM_TASK, "asset"):
+	# v0.98.0, item 5. THE ESTIMATE A FIELD REPORT COULD NOT CARRY. Every task
+	# raised from a template arrives with a duration and an ad-hoc report arrived
+	# with none, so it sorted last against templated work on a board that orders
+	# by what it costs — a broken valve behind a fortnight of habitability walks.
+	# Zero when nobody said, which is what the column has always held.
+	doc.estimated_duration_minutes = as_int(args, "estimated_duration_minutes") or 0
+	location_doctype, location = _structured_report(args, doc, location_doctype, location)
+	doc.location_doctype = location_doctype or None
+	doc.location = location or None
+	if asset_doc and not doc.get("asset") and compat.has_field(FARM_TASK, "asset"):
 		doc.asset = asset_doc["name"]
 	doc.insert(ignore_permissions=True)
 

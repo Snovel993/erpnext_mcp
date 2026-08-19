@@ -250,6 +250,15 @@ ROUTES = (
 	Route("/mobile", mobile_api.log_shift_break),
 	Route("/mobile", mobile_api.end_shift_break),
 	Route("/mobile", mobile_api.get_break_policy),
+	# v0.98.0, item 14. THE SCHEDULE, WHICH IS NOT THE POLICY. `get_break_policy`
+	# above answers what the RULES are — the bands, the citations, whether a
+	# human approved them. This answers what THIS shift owes and at what o'clock,
+	# and the difference is the whole feature: a countdown each handset computes
+	# for itself drifts by whatever the phones disagree about, so seven phones in
+	# an orchard sound off at seven different moments. One computation, seven
+	# readers, one instant. It takes `farm_shift` as well as `shift` — item 1 of
+	# v0.96.0, applied before it could bite a second route.
+	Route("/mobile", mobile_api.get_break_schedule),
 	# v0.59.0. The foreman's day: clock somebody out, see production, read the
 	# shift. `clock_out_worker` is the mobile name for `remove_worker_from_shift`.
 	Route("/mobile", mobile_api.clock_out_worker),
@@ -448,6 +457,45 @@ ROUTES = (
 	Route("/mobile", mobile_api.create_farm_task),
 	Route("/mobile", mobile_api.list_farm_task_templates),
 	Route("/mobile", mobile_api.create_task_from_template),
+	# v0.98.0, item 11. THE FOUR REGISTERS A TASK CAN BE ROUTED TO, and the
+	# largest gap on `SERVER_CHANGES.md`: the handset's "Where is it" picker
+	# showed only "No location", because this table listed no place and created
+	# none. Ten spellings were probed on 2026-08-18 and all ten 404'd. Every tool
+	# behind these six has existed for releases and was reachable only from a
+	# Desk, which is the one place a foreman standing in a block is not.
+	#
+	# THE READ IS OPEN ON ENROLMENT AND THE WRITES ARE NARROWER THAN DISPATCH.
+	# `report_field_task` is open to every enrolled worker and takes a location,
+	# so a picker gated on the dispatch role would leave the one call a field
+	# worker makes about a place unable to name one. The creates carry
+	# `guard.require_location_role` — Farm Manager, a strict subset of
+	# `DISPATCH_ROLES` — because a register entry is permanent in a way a task is
+	# not: every task, spray record and acre of cost allocation routes through
+	# the docname, and a duplicate block created at a tailgate is one the farm's
+	# own reports will never merge. `LocationRegistryAPI` asked which role is
+	# real; `guard.LOCATION_ROLES` is the answer and says why the two names the
+	# app guessed do not exist.
+	#
+	# FIVE WRITE ROUTES AND ONE WRITE. `create_farm_location` is the polymorphic
+	# door the plan named and the four below it are the names the app already
+	# prints in its own refusal — all five run `_create_one_location`, so there
+	# is one gate and one argument map, and a rename cannot open a fifth way in.
+	# IT IS NOT THE DISPATCHER THIS FILE REFUSES: nothing takes a method name
+	# from a caller. `doctype` is matched against a closed four-entry table in
+	# `api/mobile.py`, exactly as `attach_file_to_document` matches its allowlist
+	# of parents.
+	#
+	# `set_field_boundary`, `set_zone_boundary`, `set_parcel_boundary`,
+	# `convey_parcel`, `link_parcel_to_asset` and the three `update_*` tools are
+	# DELIBERATELY ABSENT. Drawing a boundary, moving a title and repointing an
+	# asset are desk acts with a document open, and a method with no route 404s
+	# — which is the whole design of this table.
+	Route("/mobile", mobile_api.list_farm_locations),
+	Route("/mobile", mobile_api.create_farm_location),
+	Route("/mobile", mobile_api.create_field),
+	Route("/mobile", mobile_api.create_irrigation_zone),
+	Route("/mobile", mobile_api.create_parcel),
+	Route("/mobile", mobile_api.create_housing_unit),
 	# Sprint 8 (v0.78.0): field asset registration, three routes. The iOS
 	# screens are built and the flow they perform — photograph the plate,
 	# register the asset, print the tag, file the photograph — stopped at step
@@ -487,6 +535,16 @@ ROUTES = (
 	# on-device and posts the words; the recording travels the chunked upload
 	# path and is linked here.
 	Route("/mobile", mobile_api.add_task_note_via_mobile),
+	# v0.98.0, item 12. THE SAME WRITE UNDER THE NAME THE APP ASKS FOR. `Route`
+	# builds every path off the wrapper's own name, so the method above published
+	# `/mobile/add_task_note_via_mobile` and the handset — asking for the MCP
+	# tool's name, which is what any reader would predict — got a 404, then six
+	# more for `add_narrative`, `append_note`, `create_task_note`, `add_note`,
+	# `create_narrative_note` and `log_task_note`. `list_task_notes` IS published
+	# plainly, so a record's narrative could be read and never written: every
+	# field note a foreman typed is still in `LocalNarrativeStore` on one phone.
+	# The older spelling keeps its route.
+	Route("/mobile", mobile_api.add_task_note),
 	Route("/mobile", mobile_api.attach_audio_note),
 	Route("/mobile", mobile_api.list_task_notes),
 	# THE FIVE DISCIPLINE ROUTES CARRY AN HR GATE IN THEIR OWN BODIES, not the
@@ -496,6 +554,17 @@ ROUTES = (
 	# is deliberately absent — ageing a step out of a chain is a policy decision
 	# made at a desk with the handbook open, and a method with no route 404s.
 	Route("/mobile", mobile_api.create_discipline_record),
+	# v0.98.0, item 12. A WORKER'S GRIEVANCE, WHICH IS NOT A WARNING. The
+	# register has carried both directions since v0.94.0 and neither the name nor
+	# the argument was reachable from a handset, so the app filed a complaint
+	# through `create_discipline_record` at the lowest step with `DISPUTE RAISED
+	# BY …` typed into the description — which produces a step on a progressive-
+	# discipline chain, in the file of the person who complained. It carries the
+	# same shift-role gate as the create above it, and the argument is stronger:
+	# the person who needs to raise a complaint is whoever has one, and a server
+	# that refuses their credential receives no complaints and concludes there
+	# are none. READING the register is still HR_ROLES.
+	Route("/mobile", mobile_api.create_dispute),
 	Route("/mobile", mobile_api.acknowledge_discipline_record),
 	Route("/mobile", mobile_api.get_discipline_record),
 	Route("/mobile", mobile_api.list_discipline_history),

@@ -356,7 +356,15 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: scope: server-side sidecar first, the phone reads it and draws a button
 	#: after. Listed here rather than in `MOBILE` so this file keeps claiming
 	#: only what `MobileAPI.swift` actually names.
+	#: v0.98.0 adds `create_farm_location` on the same footing, and it is the one
+	#: Wave 2 method the Swift does not name. `LocationRegistryAPI.route(for:)`
+	#: returns the four per-register names and the app builds those requests; the
+	#: polymorphic door is the one the implementation plan asked for and is
+	#: published so a client that would rather send `doctype` than choose a path
+	#: has one. Listed here rather than in `MOBILE` so this file keeps claiming
+	#: only what the compiled Swift actually names.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
+		"create_farm_location",
 		"universal_scan",
 		"classify_receipt",
 		"create_expense_receipt",
@@ -704,6 +712,34 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# crew; the second would let a handset pass a typed record off as a
 		# scanned one, and the register has to tell those apart.
 		"seal_bin",
+		# v0.98.0 — Wave 2 of `fafo_ios/SERVER_CHANGES.md`. Every one of these
+		# eight is NAMED IN THE COMPILED SWIFT, which is what earns a place in
+		# this set rather than in `PENDING_IOS_INTEGRATION` below.
+		#
+		# `add_task_note` is `TaskNotesAPI`'s call and was seven 404s: the write
+		# has been mounted since v0.79.0 under `add_task_note_via_mobile`,
+		# because `Route` builds the path off the wrapper's own name.
+		#
+		# `create_dispute` is item 12's other half. The app has been filing a
+		# worker's grievance as a discipline record with `DISPUTE RAISED BY …`
+		# in the description, which puts a complaint on the complainant's own
+		# progressive-discipline chain.
+		#
+		# `get_break_schedule` is what `BreakSchedule` computes locally today,
+		# from the state statutory minimum whenever `get_break_policy` did not
+		# answer — honest, and not synchronised across a crew.
+		#
+		# The five location methods are item 11. `LocationRegistryAPI.route(for:)`
+		# NAMES the four creates in its own refusal text, and the type's doc
+		# comment lists `list_farm_locations` among the ten paths it probed.
+		"add_task_note",
+		"create_dispute",
+		"get_break_schedule",
+		"list_farm_locations",
+		"create_field",
+		"create_irrigation_zone",
+		"create_parcel",
+		"create_housing_unit",
 	}
 
 	def _whitelisted(self, module):
