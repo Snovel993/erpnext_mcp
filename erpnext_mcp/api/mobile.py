@@ -4599,7 +4599,7 @@ def get_break_policy(user: str, company=None, work_state=None) -> dict:
 # ── 41b. get_break_schedule ───────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("get_break_schedule", limit=guard.READ_LIMIT)
-def get_break_schedule(user: str, shift=None, farm_shift=None, planned_hours=None) -> dict:
+def get_break_schedule(user: str, shift=None, farm_shift=None, planned_hours=None, employee=None) -> dict:
 	"""Every break this shift owes, and the clock time each one falls due.
 
 	v0.98.0, ITEM 14. THE WHOLE VALUE IS THAT ONE MACHINE DOES THE ARITHMETIC.
@@ -4632,6 +4632,20 @@ def get_break_schedule(user: str, shift=None, farm_shift=None, planned_hours=Non
 	hours after the crew needed to know it was coming. A closed shift is measured
 	end to end and this argument does not enter into it.
 
+	`employee` NAMES WHOSE SCHEDULE IT IS, and it is what makes the purple
+	"Minor's schedule" badge true rather than decorative. A worker under
+	eighteen is owed a rest every two hours and a meal every four (OAR
+	839-021-0072), so their countdown is a DIFFERENT SET OF INSTANTS from the
+	crew's — and the whole argument for computing this on the server is that
+	seven phones count to the same second, which fails immediately if one of the
+	seven is a minor whose schedule the server does not know about. Omitted, the
+	answer is the crew's and `schedule_band` says `adult`.
+
+	IT IS RUN THROUGH `_employee_argument` LIKE EVERY OTHER PERSON-NAMING KEY on
+	this surface. A break schedule is not sensitive; being able to name anybody
+	on the site is, and the same gate everywhere is cheaper than a judgement per
+	endpoint about which reads deserve one.
+
 	THE ROLE GATE IS THE SHIFT ROLE, INSIDE THE TOOL, and the scope is the
 	caller's own entities: a break schedule names no worker, but it names a
 	shift, and which crews are working today is not a fact for an account that
@@ -4646,6 +4660,8 @@ def get_break_schedule(user: str, shift=None, farm_shift=None, planned_hours=Non
 		# Unparsed: `as_float` inside the tool is what refuses "eight" in a
 		# sentence, where a `float()` here would answer the same body with a 500.
 		inner["planned_hours"] = planned_hours
+	if employee is not None:
+		inner["employee"] = _employee_argument(employee, allowed)
 	return shifts.get_break_schedule(inner).data
 
 

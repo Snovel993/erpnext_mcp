@@ -46,6 +46,7 @@ from erpnext_mcp import minors, roles, shifts
 from erpnext_mcp.alerts import rules as shipped_rules
 from erpnext_mcp.api import rectify
 from erpnext_mcp.tools import binseals
+from erpnext_mcp.tools import shifts as shift_tools
 
 from .fixtures import MAIN, V12TestCase, install_hrms
 from .harness import ROLES, STORE
@@ -665,6 +666,92 @@ class TheWeeklyCeilingRaisesAnAlert(Wave3TestCase):
 		self.assertFalse(built["can_rectify_mobile"])
 		self.assertIn("clears BY ITSELF when the workweek turns", built["explanation"])
 		self.assertIn("minor_hours_approaching", rectify._BUILDERS)
+
+
+# ── 4b. item 15 meets item 14: the countdown a minor actually reads ─────────
+class TheCountdownKnowsWhoItIsFor(Wave3TestCase):
+	"""`get_break_schedule` shipped in v0.98.0 computing ONE schedule for a crew.
+
+	The whole argument for computing it on the server is that seven phones count
+	down to the same second — and that fails immediately if one of the seven is a
+	fifteen-year-old whose schedule the server does not know about. iOS has had
+	`BreakSchedule.compute(..., isMinor:)` all along; what it had no way to do was
+	ASK for it.
+	"""
+
+	def schedule_for(self, employee: str = "", **overrides):
+		"""The computation, one layer under the handset endpoint.
+
+		`get_break_schedule` is not an MCP tool — v0.98.0 mounted it on the
+		mobile surface alone — and standing up that surface's authenticated user
+		is `test_wave2_mobile_surface`'s furniture rather than this file's. What
+		is new here is the BAND SELECTION, which lives in `_break_schedule_for`;
+		the wrapper's own job is `_employee_argument` and a pass-through, and
+		`test_the_handset_can_ask` pins that it declares the argument at all.
+		"""
+		policy = self.a_policy(**overrides)
+		# NO CREW ON IT. Two calls in one test would otherwise be two open shifts
+		# carrying one person, which `start_shift` refuses on its own account —
+		# and rightly: `end_shift` writes one Attendance row per crew row.
+		name = self.a_shift(start_datetime=self.at(6), crew_employees=[])["name"]
+		frappe.db.set_value("Farm Shift", name, "break_policy", policy)
+		row = dict(
+			frappe.db.get_value(
+				"Farm Shift",
+				name,
+				list(shifts.FIELDS) + ["break_policy", "work_state"],
+				as_dict=True,
+			)
+		)
+		return shift_tools._break_schedule_for(row, planned_hours=8, employee=employee)
+
+	def test_a_minor_gets_more_breaks_at_different_instants(self):
+		crew = self.schedule_for()
+		minor = self.schedule_for(employee=YOUNGER)
+		self.assertGreater(minor["count"], crew["count"])
+		self.assertEqual(minor["schedule_band"], "minor")
+		self.assertEqual(crew["schedule_band"], "adult")
+		self.assertNotEqual(
+			[row["due_at"] for row in minor["breaks"]],
+			[row["due_at"] for row in crew["breaks"]],
+		)
+
+	def test_the_answer_says_whose_schedule_it_is(self):
+		"""The badge reads this. A badge that claimed a band the server did not
+		use would be worse than no badge."""
+		data = self.schedule_for(employee=YOUNGER)
+		self.assertEqual(data["employee"], YOUNGER)
+		self.assertTrue(data["is_minor"])
+		self.assertEqual(data["minor_band"], minors.BAND_UNDER_16)
+		self.assertTrue(all(row["schedule_band"] == "minor" for row in data["breaks"]))
+
+	def test_the_negative_control_naming_an_adult_changes_nothing(self):
+		frappe.db.set_value("Employee", WORKER, "date_of_birth", _years_ago(41))
+		crew = self.schedule_for()
+		adult = self.schedule_for(employee=WORKER)
+		self.assertEqual(
+			[row["due_at"] for row in adult["breaks"]],
+			[row["due_at"] for row in crew["breaks"]],
+		)
+		self.assertFalse(adult["is_minor"])
+
+	def test_a_policy_with_no_minor_rows_counts_the_adult_way_and_says_so(self):
+		"""The gap sentence is the TOOL's, so this one goes through the tool."""
+		policy = self.a_policy(with_minor_rows=False)
+		name = self.a_shift(start_datetime=self.at(6), crew_employees=[])["name"]
+		frappe.db.set_value("Farm Shift", name, "break_policy", policy)
+		data = shift_tools.get_break_schedule(
+			{"shift": name, "planned_hours": 8, "employee": YOUNGER}
+		).data
+		self.assertEqual(data["schedule_band"], "adult")
+		self.assertTrue(data["is_minor"])
+		self.assertIn("ADULT one", data["minor_gap"])
+
+	def test_the_handset_can_ask_and_cannot_ask_about_a_stranger(self):
+		from erpnext_mcp.farmops_api import routes as farmops_routes
+
+		route = farmops_routes.BY_PATH["/mobile/get_break_schedule"]
+		self.assertIn("employee", farmops_routes.accepted_arguments(route.handler))
 
 
 # ── 5. item 17: a heat break carries the heat ───────────────────────────────

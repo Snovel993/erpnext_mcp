@@ -1944,7 +1944,7 @@ def get_break_policy(args: dict) -> ToolResult:
 PLANNED_SHIFT_HOURS = 8.0
 
 
-def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
+def _break_schedule_for(row: dict, planned_hours=None, now: str = "", employee: str = "") -> dict:
 	"""The timed break schedule for one shift. The computation, without the gates.
 
 	Split from `get_break_schedule` below so the resolution, the role check and
@@ -1961,6 +1961,15 @@ def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
 	`get_break_policy` reads it, and the answer SAYS which of the two happened.
 	An app that cannot tell "this is your farm's policy" from "this is the
 	state's default" cannot print the sentence `BreakSchedule` prints.
+
+	`employee` NAMES WHOSE SCHEDULE THIS IS, and it is optional because most of
+	the time it is the crew's. A worker under eighteen is owed a rest every two
+	hours and a meal every four (OAR 839-021-0072), so their countdown is a
+	different set of instants from the crew's — and `BreakSchedule.compute(...,
+	isMinor:)` on the handset has computed exactly that locally since before
+	this endpoint existed. Naming them switches the tables and puts `is_minor`
+	on the answer, which is what the purple badge reads. Named nobody, the
+	answer is the adult schedule and says so.
 	"""
 	policy = _break_policy_dict(row)
 	resolved_from = "shift" if row.get("break_policy") and policy else ""
@@ -1994,6 +2003,13 @@ def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
 		heat_index = max(measured)
 
 	events = [dict(entry) for entry in shifts.events_of(str(row.get("name") or "")) if entry.get("break_kind")]
+	# WHOSE SCHEDULE, ANSWERED AS OF THE SHIFT'S OWN DAY. Same one query
+	# `shifts.describe` runs over the whole crew, for one person here.
+	described = (
+		shifts.minor_flags([employee], start)[employee]
+		if employee
+		else {"is_minor": None, "minor_band": None, "minor_limits": None}
+	)
 	rows = breaks_mod.schedule(
 		start,
 		policy,
@@ -2001,6 +2017,7 @@ def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
 		events=events,
 		now=now or frappe.utils.now(),
 		heat_index=heat_index,
+		is_minor=described.get("is_minor"),
 	)
 
 	owed = [entry for entry in rows if not entry["taken"]]
@@ -2017,6 +2034,12 @@ def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
 		"policy_approved": bool(policy.get("approved")) if policy else False,
 		"regulation_citations": policy.get("regulation_citations") if policy else None,
 		"heat_index": heat_index,
+		"employee": employee or None,
+		"is_minor": described.get("is_minor"),
+		"minor_band": described.get("minor_band"),
+		"schedule_band": (
+			"minor" if any(entry.get("schedule_band") == "minor" for entry in rows) else "adult"
+		),
 		"breaks": rows,
 		"count": len(rows),
 		"outstanding": len(owed),
@@ -2097,12 +2120,28 @@ def get_break_schedule(args: dict) -> ToolResult:
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
-	data = _break_schedule_for(row, planned_hours=args.get("planned_hours"), now=as_str(args, "now"))
+	person = as_str(args, "employee")
+	if person:
+		person = employee_tool.resolve_employee(person)
+	data = _break_schedule_for(
+		row,
+		planned_hours=args.get("planned_hours"),
+		now=as_str(args, "now"),
+		employee=person,
+	)
+	if data.get("is_minor") and data["schedule_band"] == "adult":
+		data["minor_gap"] = (
+			f"{person} is under eighteen and {data.get('policy') or 'this policy'} carries no "
+			"minor rest or meal schedule, so this countdown is the ADULT one — which owes fewer "
+			f"periods. {minors.MINOR_SCHEDULE_CITATION} is what it should be; get_break_policy "
+			"hands back the rows to add."
+		)
 	return ToolResult(
 		data=data,
 		summary=(
 			f"{data['shift']}: {data['count']} break(s) scheduled, {data['outstanding']} outstanding"
 			+ (f", next at {data['next_due']}" if data["next_due"] else "")
+			+ (" (minor's schedule)" if data["schedule_band"] == "minor" else "")
 		),
 	)
 

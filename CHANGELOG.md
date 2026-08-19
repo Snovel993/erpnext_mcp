@@ -3,6 +3,126 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.99.0 — 2026-08-18 — the afternoon, and the people who were in it
+
+Wave 3 of `fafo_ios/SERVER_CHANGES.md`, items 4, 15, 17 and 23 — "Compliance &
+Safety + Bin Sealing". Four items, and unlike wave 1 they are not four instances
+of one failure. Three of them are places where the server KNEW something and
+threw it away at the moment it mattered; the fourth is a register that did not
+exist at all.
+
+```
+  the server knew                 and lost it at                what it costs
+  ────────────────────────────────────────────────────────────────────────────
+  date_of_birth on Employee   →   every roster call         →   a 15-year-old on
+                                                                a ten-hour day
+  the shift's weather peak    →   the break row             →   "was relief in
+                                                                time" unanswerable
+  eleven people, one course   →   eleven Farm Tasks         →   no attendance
+                                                                sheet, no cohort
+  who filled this bin         →   the trailer leaving       →   a residue trace
+                                                                that stops
+```
+
+### 15 — minors
+
+`is_minor` is **derived from `date_of_birth` on every read and stored nowhere**.
+A ticked column is correct on the day somebody ticks it and wrong every day
+afterwards, in the direction that permits more work. It is **three-valued**: null
+means no date of birth is on file, which is not the same as an adult, and a
+boolean column could not have said so.
+
+**Two bands, because the law has two.** Under-16 is 8 hours a day, 40 a week,
+07:00 to 19:00 (ORS 653.315 / OAR 839-021-0220; 29 CFR 570.35). 16-17 is 10 and
+60 with no clock (OAR 839-021-0104). Treating "minor" as one category would
+either forbid lawful work for the older band or permit unlawful work for the
+younger.
+
+`add_worker_to_shift` **refuses** past a ceiling and `start_shift` **reports** —
+the same arithmetic, and the asymmetry is the argument: the first is about one
+named person and the shift goes on existing without them; the second would
+destroy the record of an afternoon for a crew standing in the block. Hours are
+counted off the **crew rows**, not Attendance, because Attendance is written when
+a shift CLOSES and the day being asked about is the one still running.
+
+`assign_farm_task` refuses `Spray` for both bands (40 CFR §170.309(c) — the WPS
+minimum age of 18 for handlers, an age bar and not a training gap) and `Repair`
+for under-16 alone (29 CFR §570.71(a)). It is a short list on purpose: a list
+that also carried "probably unwise" is a list a foreman learns to override.
+
+`Labor Break Policy` gains a minor rest and meal schedule (OAR 839-021-0072 — a
+rest every two hours, a meal every four). A policy with no minor rows falls back
+to the **adult** table, which owes FEWER periods and therefore shows as a
+shortfall rather than a silent exemption; `get_break_policy` hands back the rows
+to add, marked unapproved, and never writes them into a policy somebody signed.
+`get_break_schedule` — wave 2's, landed hours earlier — takes an `employee` and
+computes the minor's own instants, which is what makes the purple badge true.
+
+New rule `minor_hours_approaching` fires within four hours of the weekly ceiling
+and Critical past it, because the moment a rostering decision can still be made
+is before the week ends.
+
+### 17 — a heat break carries the heat
+
+Cool-Down, Water Break and Shade Break now carry the shift's **peak** temperature
+and heat index, the **threshold-crossing timestamp**, the provenance of the
+reading, and a derived `heat_obligation` flag. The event-instant snapshot the
+controller has written since v0.19.4 stays exactly as it was and answers a
+different question: it is what the foreman was standing in, and this is what the
+break was called about. A cool-down at 16:10 after a 97 °F afternoon sits on a
+row whose snapshot reads 88 — and -1131 attaches its obligations at the crossing.
+
+### 4 — one afternoon, not eleven cards
+
+A `group_training` flag on Training Type (and on Farm Task Template). Two or more
+people lapsing on one ticked curriculum become **one Training Session** with all
+of them as attendees, `Scheduled`, nobody marked present; one person does not,
+and an unticked curriculum does not. Idempotent through `source_alerts` on the
+session, the same mechanism `Inspection Session` uses.
+
+### 23 — bin sealing
+
+New `Bin Seal` register with a `Bin Seal Contributor` child table, the
+`farmops/api/mobile/seal_bin` endpoint, and four tools — `seal_bin`,
+`get_bin_seal`, `list_bin_seals` and **`trace_bin`**, which takes the tag a
+packing house actually holds and answers with the people whose buckets are in it.
+
+`bin_tag` is **not unique and is not made so**: tags are reused between seasons
+and between growers, so a constraint would refuse the second TRUE record rather
+than the first false one. `trace_bin` answers with every seal carrying the tag
+and says how many. What IS unique is `client_event_id`, the handset's identifier
+for one sealing action — a retry gets its own seal back rather than doubling a
+count at the pack line and a piece rate on somebody's cheque.
+
+The checker's tally and the badge scans are **never reconciled**. A bucket tipped
+by somebody whose badge did not scan is in the bin and not in the rows, and that
+is the fact a piece-rate dispute turns on; `unattributed_buckets` names the
+difference instead of hiding it.
+
+### Two live bugs found by writing the tests
+
+`get_shift` resolved its docname on `("name", "name", "farm_shift")` — `shift`
+was never consulted, though the registry advertises it as an alias and
+`api/mobile.get_shift` passes exactly that key. **Every call a handset made to
+the shift read answered "farm_shift is required".** Same failure v0.96.0 fixed on
+`end_shift`, at a different door; `SHIFT_KEYS` now names the spellings once.
+
+`start_shift` set `minors_on_crew` to a list over the count `shifts.describe` had
+already put there — one key, two types, depending on which line ran last. It is
+`minor_crew_findings` now.
+
+### Migration
+
+Four doctype JSONs change and every change is additive, plus two new doctypes, so
+this is a `bench migrate` and nothing else. No patch ships and none is needed.
+
+Four new tools means four new `allow_*` switches: the three reads ship ON, the
+write ships OFF, and no operator's stored value is stranded because none of the
+names existed before.
+
+The live half is outstanding and belongs to a deploy: there is no bench on the
+machine this was written on, so nothing here was called over HTTP.
+
 ## 0.98.0 — 2026-08-18 — the screens the app already built, and the doors behind them
 
 Wave 2 of `fafo_ios/SERVER_CHANGES.md`, items 2, 3, 5, 11, 12 and 14 — the

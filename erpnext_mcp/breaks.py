@@ -507,6 +507,7 @@ def schedule(
     events: list[dict] | None = None,
     now: Any = None,
     heat_index: float | None = None,
+    is_minor=False,
 ) -> list[dict]:
     """Every break this shift owes, and the clock time each one falls due.
 
@@ -535,6 +536,15 @@ def schedule(
     by position is what lets a crew that took its first break early still see
     the right time for its second.
 
+    `is_minor` PICKS THE TABLE AND NOTHING ELSE ABOUT THIS FUNCTION CHANGES.
+    OAR 839-021-0072 owes a worker under eighteen a rest every two hours and a
+    meal every four, against four and six for an adult — so a minor's countdown
+    is the same arithmetic over different bands, and `_schedule_key` falls back
+    to the adult table where a policy carries no minor rows. `schedule_band` is
+    on every row for the same reason `policy_source` is: the handset prints
+    "Minor's schedule" beside the countdown, and a badge that claimed a band the
+    server did not use would be worse than no badge.
+
     `policy_source` TRAVELS ON EVERY ROW rather than once at the top, because a
     heat cool-down and a rest period can come off different tables of the same
     record, and a future policy that carried only half a schedule would leave
@@ -558,7 +568,9 @@ def schedule(
         (REST_KIND, "rest_schedule", REST_KIND),
         (MEAL_KIND, "meal_schedule", MEAL_KIND),
     ):
-        band = _band_for(span, _schedule_rows(policy, key))
+        banded = _schedule_rows(policy, _schedule_key(key, is_minor)) or _schedule_rows(policy, key)
+        used_minor = bool(is_minor and _schedule_rows(policy, _schedule_key(key, is_minor)))
+        band = _band_for(span, banded)
         periods = int(_as_float(band.get("periods_owed")))
         minutes = int(_as_float(band.get("minutes_each")))
         for index, due in enumerate(_placements(begins, span, periods)):
@@ -570,6 +582,7 @@ def schedule(
                     "duration_minutes": minutes,
                     "is_paid": _checked(band.get("paid")),
                     "policy_source": source,
+                    "schedule_band": "minor" if used_minor else "adult",
                     "taken": index < taken[counter],
                 }
             )
@@ -610,6 +623,12 @@ def schedule(
                             # marks all three the same way.
                             "is_paid": True,
                             "policy_source": source,
+                            # A HEAT CADENCE IS NOT AGE-BANDED. -1131 and
+                            # WAC 296-307-097 write it about the conditions and
+                            # about everybody standing in them, so the cool-down
+                            # rows say `adult` for a minor too rather than
+                            # implying a minor table that does not exist.
+                            "schedule_band": "adult",
                             "taken": index < taken[HEAT_KIND],
                             "concurrent_with_rest": _checked(band.get("concurrent_with_rest")),
                             "heat_index": heat_index,
