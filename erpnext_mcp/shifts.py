@@ -189,6 +189,39 @@ def is_open(row: dict) -> bool:
 	return not str(row.get("end_datetime") or "").strip()
 
 
+def to_the_second(value) -> str:
+	"""One timestamp as a string, with any sub-second part cut off.
+
+	v0.96.0, AND IT IS A COMPARISON FIX RATHER THAN A STORAGE ONE — nothing that
+	calls this rewrites a column. Every ordering check on a shift compares two
+	timestamps as STRINGS, which is right for two values of the same width and
+	wrong the moment the widths differ: `"2026-08-18 17:01:04"` sorts before
+	`"2026-08-18 17:01:04.560880"` because it is a PREFIX of it, so the same
+	instant reads as earlier than itself.
+
+	That is not hypothetical. The handset formats every timestamp it sends as
+	`yyyy-MM-dd HH:mm:ss` and Frappe stores `start_datetime` with microseconds,
+	so a foreman who started a shift and immediately scanned their own badge onto
+	it was told they had joined 0.56 of a second before the shift began — and the
+	same rounding sits under the close, which refuses an `end_datetime` that
+	precedes the start.
+
+	TRUNCATION RATHER THAN A TOLERANCE WINDOW, deliberately. Every one of these
+	guards exists to catch a transposition — a departure typed as an arrival, a
+	date a day out — which is hours or days wrong, never fractions of a second.
+	A window would be a number somebody has to defend; a shared resolution is
+	just the two clocks agreeing on what a second is.
+
+	A value with no sub-second part, and anything that is not a timestamp at all,
+	comes back unchanged — so an unparseable column compares exactly as before.
+	"""
+	text = str(value or "").strip()
+	if not text:
+		return text
+	head, dot, _tail = text.partition(".")
+	return head if dot else text
+
+
 #: Most crew rows one cross-shift check will walk for a single employee. A
 #: picker's whole season is a few hundred rows and the query is filtered to one
 #: employee, so this is a runaway guard rather than a real ceiling.

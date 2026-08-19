@@ -131,7 +131,7 @@ class FarmShift(Document):
 			self.company = row.get("company")
 
 	def _check_the_period(self) -> None:
-		if self.end_datetime and str(self.end_datetime) < str(self.start_datetime):
+		if self.end_datetime and shifts.to_the_second(self.end_datetime) < shifts.to_the_second(self.start_datetime):
 			frappe.throw(
 				_(
 					"This shift ends at {0} and starts at {1} — it would have finished before it "
@@ -166,7 +166,7 @@ class FarmShift(Document):
 				row.employee_name = (
 					frappe.db.get_value("Employee", row.employee, "employee_name") or row.employee
 				)
-			if str(row.joined_at) < str(self.start_datetime):
+			if shifts.to_the_second(row.joined_at) < shifts.to_the_second(self.start_datetime):
 				frappe.throw(
 					_(
 						"{0} is recorded as joining at {1}, before the shift started at {2}. A crew "
@@ -175,7 +175,7 @@ class FarmShift(Document):
 					title=_("Joined Before the Shift"),
 				)
 			if row.get("left_at"):
-				if str(row.left_at) < str(row.joined_at):
+				if shifts.to_the_second(row.left_at) < shifts.to_the_second(row.joined_at):
 					frappe.throw(
 						_(
 							"{0} is recorded as leaving at {1} and joining at {2} — a negative span, "
@@ -183,7 +183,7 @@ class FarmShift(Document):
 						).format(row.employee_name or row.employee, row.left_at, row.joined_at),
 						title=_("Left Before Joining"),
 					)
-				if self.end_datetime and str(row.left_at) > str(self.end_datetime):
+				if self.end_datetime and shifts.to_the_second(row.left_at) > shifts.to_the_second(self.end_datetime):
 					frappe.throw(
 						_(
 							"{0} is recorded as leaving at {1}, after the shift itself ended at {2}. "

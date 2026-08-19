@@ -689,7 +689,7 @@ def log_shift_event(args: dict) -> ToolResult:
 			"better on the record than off it. But it is dated by its own timestamp and the close "
 			"is dated by its, and an inspector reading the two will see the order they happened in."
 		)
-	elif str(when) < str(row.get("start_datetime") or ""):
+	elif shifts.to_the_second(when) < shifts.to_the_second(row.get("start_datetime") or ""):
 		data["timing_note"] = (
 			f"This event is timestamped {when} and the shift started at {row.get('start_datetime')}"
 			" — before the shift began. Kept as given, because a clock five minutes out is not a "
@@ -768,7 +768,7 @@ def cancel_shift(args: dict) -> ToolResult:
 		)
 
 	when = _when(args, "cancelled_at")
-	if str(when) < str(row.get("start_datetime") or ""):
+	if shifts.to_the_second(when) < shifts.to_the_second(row.get("start_datetime") or ""):
 		raise ToolError(
 			f"this call cancels the shift at {when} and it started at "
 			f"{row.get('start_datetime')} — it would have been called off before it was formed. "
@@ -859,7 +859,7 @@ def end_shift(args: dict) -> ToolResult:
 		)
 
 	end = _when(args, "end_datetime")
-	if str(end) < str(row.get("start_datetime") or ""):
+	if shifts.to_the_second(end) < shifts.to_the_second(row.get("start_datetime") or ""):
 		raise ToolError(
 			f"this call ends the shift at {end} and it started at {row.get('start_datetime')} — it "
 			"would have finished before it began, and every crew member's Attendance row would "
@@ -867,7 +867,12 @@ def end_shift(args: dict) -> ToolResult:
 		)
 
 	crew_before = shifts.crew_of(row["name"])
-	late = [entry for entry in crew_before if entry.get("left_at") and str(entry["left_at"]) > str(end)]
+	late = [
+		entry
+		for entry in crew_before
+		if entry.get("left_at")
+		and shifts.to_the_second(entry["left_at"]) > shifts.to_the_second(end)
+	]
 	if late:
 		names = ", ".join(str(entry.get("employee_name") or entry.get("employee")) for entry in late)
 		raise ToolError(
