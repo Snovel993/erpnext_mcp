@@ -38,6 +38,12 @@ from frappe.model.document import Document
 from erpnext_mcp import geo
 from erpnext_mcp.abbr import parcel_abbr, suffixed
 
+#: The one `organic_status` value that means the certificate is in hand. Named
+#: rather than spelled out at the two places that compare against it, because a
+#: block whose status is checked with a typo is a block that reports itself
+#: conventional and looks fine.
+CERTIFIED_ORGANIC = "Certified Organic"
+
 
 class Field(Document):
 	def autoname(self):
@@ -76,8 +82,26 @@ class Field(Document):
 			frappe.throw(_("Planting Density cannot be negative."))
 
 		self._check_parcel_acreage(parcel)
+		self._derive_organic_certified()
 		self._check_boundary()
 		self._check_ndvi()
+
+	def _derive_organic_certified(self) -> None:
+		"""Rewrite the organic flag from the status, every save, without exception.
+
+		THE SAME RULE AS THE BOUNDARY, for the same reason. `organic_certified` is
+		read-only in the Desk and recomputed here, so it cannot drift from the
+		status it comes from — a farm that ticks the box and leaves the status on
+		Transitional has two answers to "are these acres certified" and the survey
+		line sums the wrong one.
+
+		Nothing else is refused. An agency named on a Conventional block is a
+		contradiction worth reporting and not worth blocking: a block mid-application
+		genuinely has a certifier and no certificate, and a controller that threw
+		would make the honest record the unsaveable one. `list_fields` and
+		`create_field` say so in their warnings instead.
+		"""
+		self.organic_certified = 1 if self.organic_status == CERTIFIED_ORGANIC else 0
 
 	def _check_parcel_acreage(self, parcel: dict) -> None:
 		"""Refuse blocks that between them are bigger than the ground they are on.

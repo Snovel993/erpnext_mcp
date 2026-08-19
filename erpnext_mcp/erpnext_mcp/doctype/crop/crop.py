@@ -71,6 +71,7 @@ class Crop(Document):
 		self.scientific_name = str(self.scientific_name or "").strip()
 
 		self._check_counts()
+		self._check_share()
 		self._check_harvest_window()
 		self._check_varieties()
 		self._check_water_requirements()
@@ -86,6 +87,30 @@ class Crop(Document):
 				continue
 			if int(value) < 0:
 				frappe.throw(_("{0} cannot be negative.").format(label))
+
+	def _check_share(self) -> None:
+		"""A share of a whole runs 0 to 100, and anything else is a unit mistake.
+
+		The error this catches is 0.35 typed for thirty-five percent, which stores
+		without complaint and reads as a third of one percent — a survey line off by
+		two orders of magnitude that looks entirely plausible on the page. The
+		refusal names both readings rather than just the bound, because the number
+		that was meant is usually the one nobody typed.
+		"""
+		value = self.get("pct_direct_marketed")
+		if value in (None, ""):
+			return
+		share = float(value)
+		if 0 <= share <= 100:
+			return
+		frappe.throw(
+			_(
+				"Direct-Marketed % is {0}. A share of a crop runs from 0 to 100 — {0} is "
+				"either a fraction that wants multiplying by a hundred or a decimal point "
+				"in the wrong place."
+			).format(share),
+			title=_("Share Out of Range"),
+		)
 
 	def _check_harvest_window(self) -> None:
 		"""Both ends of the window or neither.

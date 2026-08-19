@@ -54,7 +54,7 @@ cannot check, and the numbers here are the ones that multiply into settlements.
 import frappe
 
 from .. import ag_uom, compat
-from ..args import as_bool, as_choice, as_int, as_limit, as_str
+from ..args import as_bool, as_choice, as_float, as_int, as_limit, as_str
 from ..errors import ToolError
 from ..result import ToolResult
 
@@ -87,6 +87,7 @@ _CROP_FIELDS = (
 	"harvest_window_end",
 	"default_phi_days",
 	"is_organic_certified",
+	"pct_direct_marketed",
 	"notes",
 )
 
@@ -262,8 +263,47 @@ def _describe_crop(row: dict) -> dict:
 		"harvest_months": _months_in_window(row.get("harvest_window_start"), row.get("harvest_window_end")),
 		"default_phi_days": int(phi) if phi not in (None, "") else None,
 		"is_organic_certified": compat.checked(row.get("is_organic_certified")),
+		"pct_direct_marketed": _share_or_none(row.get("pct_direct_marketed")),
+		"pct_direct_marketed_source": (
+			"typed on the Crop record — an assertion, not a figure computed from invoices"
+			if _share_or_none(row.get("pct_direct_marketed")) is not None
+			else None
+		),
 		"notes": row.get("notes") or None,
 	}
+
+
+def _share_or_none(value):
+	"""A stored percentage, or None where nobody has estimated one.
+
+	NOT `float(value or 0)`. Zero percent direct-marketed is a real answer from a
+	grower who ships everything to a packer, and "nobody has worked it out" is a
+	different one. Collapsing them would let a survey report a farm that has never
+	been asked as a farm that sells nothing direct.
+	"""
+	if value in (None, ""):
+		return None
+	return round(float(value), 2)
+
+
+def _share(args: dict, key: str):
+	"""A 0-to-100 percentage argument, or None when it was not passed.
+
+	Bounded here as well as in the controller because the two catch it at
+	different moments: a tool call gets a sentence naming the argument, and a
+	Desk save gets the controller's. The error being caught in both is 0.35 meant
+	as thirty-five percent, which is plausible enough on the page to survive a
+	review.
+	"""
+	if key not in args or args.get(key) in (None, ""):
+		return None
+	share = as_float(args.get(key), key)
+	if not 0 <= share <= 100:
+		raise ToolError(
+			f"{key} is {share}. A share runs from 0 to 100 — {share} is either a fraction "
+			"that wants multiplying by a hundred or a decimal point in the wrong place."
+		)
+	return share
 
 
 def _describe_market(row: dict) -> dict:
@@ -340,6 +380,7 @@ def list_crops(args: dict) -> ToolResult:
 	without_phi = [crop["name"] for crop in crops if crop["default_phi_days"] is None]
 	without_window = [crop["name"] for crop in crops if not crop["harvest_months"]]
 	without_varieties = [crop["name"] for crop in crops if not crop["variety_count"]]
+	without_direct_share = [crop["name"] for crop in crops if crop["pct_direct_marketed"] is None]
 
 	return ToolResult(
 		data={
@@ -349,6 +390,7 @@ def list_crops(args: dict) -> ToolResult:
 			"without_phi_recorded": without_phi,
 			"without_harvest_window": without_window,
 			"without_varieties": without_varieties,
+			"without_direct_marketed_share": without_direct_share,
 			"crops": crops,
 			"phi_note": PHI_BLANK_NOTE,
 			"limit": limit,
@@ -492,6 +534,9 @@ def create_crop(args: dict) -> ToolResult:
 	organic = as_bool(args, "is_organic_certified")
 	if organic is not None:
 		doc.is_organic_certified = 1 if organic else 0
+	direct = _share(args, "pct_direct_marketed")
+	if direct is not None:
+		doc.pct_direct_marketed = direct
 
 	for row in _variety_rows(args.get("varieties")):
 		doc.append("varieties", row)
@@ -625,6 +670,9 @@ def update_crop(args: dict) -> ToolResult:
 			_stage(changes, doc, key, as_int(args, key) or 0)
 	if "is_organic_certified" in args:
 		_stage(changes, doc, "is_organic_certified", 1 if as_bool(args, "is_organic_certified") else 0)
+	if "pct_direct_marketed" in args:
+		direct = _share(args, "pct_direct_marketed")
+		_stage(changes, doc, "pct_direct_marketed", "" if direct is None else direct)
 
 	#: Child tables are REPLACED WHOLESALE when passed, never merged. A merge
 	#: needs a stable row key, these rows have none a caller can see, and a
@@ -648,7 +696,7 @@ def update_crop(args: dict) -> ToolResult:
 		raise ToolError(
 			"nothing to change. Pass at least one of: scientific_name, crop_type, growth_cycle, "
 			"days_to_harvest, harvest_window_start, harvest_window_end, default_phi_days, "
-			"is_organic_certified, varieties, water_requirements, notes."
+			"is_organic_certified, pct_direct_marketed, varieties, water_requirements, notes."
 		)
 
 	doc.save(ignore_permissions=True)

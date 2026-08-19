@@ -34,12 +34,13 @@
    "search_index": 1
   },
   {
+   "description": "What kind of document this is. The first six are legal instruments and amend through Supersedes. Succession Plan, Family History, Acreage History and EFU Enterprise are the narrative categories a grower association survey asks for: they exist so a report can QUERY for them instead of reading everything filed under Other. A family history is revised rather than superseded by a later instrument, so the chain still works on it but Operative reads oddly unless somebody keeps it tidy.",
    "fieldname": "category",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Category",
-   "options": "Operating Agreement\nTrust Document\nAdvisory Agreement\nBoard Resolution\nPrior Statement\nAmendment\nLease\nTax Filing\nAudit Packet\nOther",
+   "options": "Operating Agreement\nTrust Document\nAdvisory Agreement\nBoard Resolution\nPrior Statement\nAmendment\nLease\nTax Filing\nAudit Packet\nSuccession Plan\nFamily History\nAcreage History\nEFU Enterprise\nOther",
    "reqd": 1,
    "search_index": 1
   },

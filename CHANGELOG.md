@@ -3,6 +3,68 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.97.0 — 2026-08-18 — the survey answered from the records, not from February
+
+Wave 5 of `fafo_ios/SERVER_CHANGES.md`, items 18 to 22. Five schema additions
+with no iOS half and one purpose: generating the Columbia Gorge Fruit Growers
+annual membership survey from the farm's own records rather than from somebody's
+recollection in February.
+
+**Two of the five looked already done, and both were wrong in the same
+direction** — a column existed, at the wrong granularity or on the wrong record,
+answering a question that sounded like the one being asked.
+`Crop.is_organic_certified` says whether Gala is organic; it cannot say how many
+acres are certified, because one Crop record covers twenty blocks of which eight
+are. `Parcel.county` says where the business owns ground; the survey asks where
+it *operates*, which includes leased blocks and is measured in acres. Both are
+correct about their own subject and neither can be aggregated into an answer
+about a different one. There is a negative control in the test suite for each.
+
+| # | What shipped |
+|---|---|
+| 18 | `organic_status` (Select — Conventional / Transitional / Certified Organic), `organic_cert_agency` and `transition_start_date` on **Field**, with `organic_certified` DERIVED from the status on every save and refused as an argument |
+| 19 | `sales_channel` (Direct / Wholesale / Packer / Processor) as a Custom Field on **Customer**, and `pct_direct_marketed` on **Crop** as a typed fallback that reports itself as typed |
+| 20 | `pest_management_providers` — a **child table** on Company, not a Link: this farm runs pome fruit and cherries, and one Link holds whichever consultant was typed last |
+| 21 | County on a block, **derived from its parcel and stored nowhere**: `list_fields` reads it through, rolls acreage up by county, and takes a county filter |
+| 22 | Four Governance Document categories — `Succession Plan`, `Family History`, `Acreage History`, `EFU Enterprise` — because a generator cannot query `Other` |
+
+A **Select rather than a checkbox** on the organic status, because the three
+years of transition are the part a buyer and an inspector both ask about and a
+checkbox records only the end state. `organic_certified` is rewritten from the
+status in the controller and read-only in the Desk, under the same rule the
+boundary's derived columns are: a derived figure a person can edit independently
+is a figure that will disagree with what it came from.
+
+**Blank is not an answer, and every one of these columns says so.** A block with
+no organic status is not conventional; a customer with no channel is not
+wholesale; a company with no consultant recorded has not said it has none. Each
+register reports the unanswered set beside the answered one — `list_fields`
+returns `without_organic_status`, `list_customers` returns
+`without_sales_channel`, `list_crops` returns `without_direct_marketed_share` —
+because a survey line computed over a half-classified register is a number
+somebody signs.
+
+Three organic contradictions are **warned about rather than refused**: an agency
+on a Conventional block, Transitional with no start date, Certified Organic with
+no agency. Each is a state some block is genuinely in — a block mid-application
+really does have a certifier and no certificate — and a controller that threw
+would make the honest record the unsaveable one.
+
+`update_company` writes the consultants table **wholesale and validates the whole
+list before writing any of it**: an unknown Supplier, an unknown Crop, an
+unrecognised key or the same consultant named twice for one commodity refuses the
+lot. A half-written table leaves a company with some of its advisers and no way
+to tell which half went.
+
+**What an operator does about it.** Run `bench --site <site> migrate`, which adds
+the two Custom Fields and migrates three doctypes. Nothing is backfilled: whether
+a block is certified, whether a buyer is a farm stand or a packer, and who
+advises the farm on pest management are facts only the farm has, and a migration
+that guessed would produce a survey that looks computed and is invented. Then set
+`organic_status` on each block, classify the customer register, record the
+consultants, and file Part 3 under the four new categories — each register names
+what is still missing.
+
 ## 0.96.0 — 2026-08-18 — seven places the phone and the farm disagreed about a word
 
 Wave 1 of `fafo_ios/SERVER_CHANGES.md`. Seven items with almost nothing in

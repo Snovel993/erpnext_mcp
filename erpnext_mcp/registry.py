@@ -4163,13 +4163,22 @@ TOOLS = {
 	),
 	"list_customers": _tool(
 		masters.list_customers,
-		"Customers by group, territory, disabled flag and a name search, with "
-		"their type, tax identifiers and default price list. NOTE on `company`: "
-		"an ERPNext Customer is SITE-WIDE and has no company column, so the "
-		"argument is validated and reported back as not applied. Read-only.",
+		"Customers by group, territory, sales channel, disabled flag and a name "
+		"search, with their type, tax identifiers and default price list. NOTE on "
+		"`company`: an ERPNext Customer is SITE-WIDE and has no company column, so "
+		"the argument is validated and reported back as not applied. Read-only.\n\n"
+		"`by_sales_channel` AND `without_sales_channel` ARE THE PAIR TO READ. The "
+		"direct-marketed share of a crop is only as complete as this "
+		"classification, so the count of customers nobody has classified is "
+		"reported beside the counts that have been — a blank channel is NOT "
+		"not-direct. On a site where the column has not been installed, "
+		"`sales_channel_installed` is false and no customer is claimed either way.",
 		{
 			"customer_group": _field(_STRING, "Customer Group docname. Refused if unknown."),
 			"territory": _field(_STRING, "Territory docname. Refused if unknown."),
+			"sales_channel": _field(
+				_STRING, "Direct, Wholesale, Packer or Processor. Omit for all."
+			),
 			"disabled": _field(_BOOLEAN, "true for disabled customers only."),
 			"company": _COMPANY,
 			"search": _field(_STRING, "Substring of customer_name, case-insensitive."),
@@ -4181,9 +4190,10 @@ TOOLS = {
 	),
 	"get_customer": _tool(
 		masters.get_customer,
-		"One Customer in full: group, territory, type, tax identifiers, credit "
-		"limit, its per-company receivable-account overrides and the Addresses "
-		"linked to it. Accepts a docname or a customer_name. Read-only.",
+		"One Customer in full: group, territory, sales channel, type, tax "
+		"identifiers, credit limit, its per-company receivable-account overrides "
+		"and the Addresses linked to it. Accepts a docname or a customer_name. "
+		"Read-only.",
 		{
 			"name": _field(_STRING, "The Customer docname, or its customer_name."),
 			"customer": _field(_STRING, "Alias for name."),
@@ -4212,6 +4222,14 @@ TOOLS = {
 			"tax_category": _field(_STRING, "Tax Category docname."),
 			"default_currency": _field(_STRING, "Currency this customer is billed in."),
 			"default_price_list": _field(_STRING, "Selling Price List to default their rates from."),
+			"sales_channel": _field(
+				_STRING,
+				"How this buyer takes the fruit: Direct (farm stand, farmers' market, u-pick, "
+				"direct-to-retail), Wholesale, Packer or Processor. It is what makes the "
+				"direct-marketed share of a crop computable from invoices instead of asserted. "
+				"Leave it out rather than guessing — blank means unclassified, which is NOT "
+				"the same as not-direct.",
+			),
 		},
 		required=("customer_name",),
 		mutating=True,
@@ -4221,10 +4239,15 @@ TOOLS = {
 	),
 	"update_customer": _tool(
 		masters.update_customer,
-		"MUTATING (default OFF). Change one Customer's group, territory, type, "
-		"disabled flag, tax identifiers or default price list in place. Never "
-		"renames it. Returns a `changed` map of before/after, and refuses when "
-		"nothing sent differs from what is stored.",
+		"MUTATING (default OFF). Change one Customer's group, territory, sales "
+		"channel, type, disabled flag, tax identifiers or default price list in "
+		"place. Never renames it. Returns a `changed` map of before/after, and "
+		"refuses when nothing sent differs from what is stored.\n\n"
+		"THIS IS WHERE AN EXISTING CUSTOMER REGISTER GETS CLASSIFIED. Nothing "
+		"backfilled `sales_channel` and nothing will: whether a buyer is a farm "
+		"stand or a packer is a fact only the farm has, and a migration that "
+		"guessed would produce a direct-marketed percentage that looks computed "
+		"and is invented. `list_customers` names everybody still missing one.",
 		{
 			"name": _field(_STRING, "The Customer docname, or its customer_name."),
 			"customer": _field(_STRING, "Alias for name."),
@@ -4237,6 +4260,11 @@ TOOLS = {
 			"tax_category": _field(_STRING, "Tax Category docname."),
 			"default_currency": _field(_STRING, "Currency this customer is billed in."),
 			"default_price_list": _field(_STRING, "Selling Price List to default their rates from."),
+			"sales_channel": _field(
+				_STRING,
+				"Direct, Wholesale, Packer or Processor. Empty string clears it back to "
+				"unclassified.",
+			),
 		},
 		required=("name",),
 		mutating=True,
@@ -4511,7 +4539,9 @@ TOOLS = {
 			"category": _field(
 				_STRING,
 				"Operating Agreement, Trust Document, Advisory Agreement, Board "
-				"Resolution, Prior Statement, Amendment or Other. Omit for all.",
+				"Resolution, Prior Statement, Amendment, Lease, Tax Filing, Audit Packet, "
+				"Succession Plan, Family History, Acreage History, EFU Enterprise or "
+				"Other. Omit for all.",
 			),
 			"include_superseded": _field(
 				_BOOLEAN,
@@ -4896,7 +4926,10 @@ TOOLS = {
 			"category": _field(
 				_STRING,
 				"Operating Agreement, Trust Document, Advisory Agreement, Board "
-				"Resolution, Prior Statement, Amendment or Other.",
+				"Resolution, Prior Statement, Amendment, Lease, Tax Filing, Audit Packet, "
+				"Succession Plan, Family History, Acreage History, EFU Enterprise or "
+				"Other. The last four are the narrative categories: filing one of those "
+				"under Other means no report can find it again.",
 			),
 			"title": _field(
 				_STRING,
@@ -6155,10 +6188,18 @@ TOOLS = {
 		"file and its last four; the fiscal year period and how many years exist; the "
 		"cost center and account counts; and the GL entry count with the first and "
 		"last posting dates. Also reports whether this app's custom Party Types "
-		"(Family, Contact) are registered. Read-only.\n\n"
+		"(Family, Contact) are registered, and who advises each entity on pest "
+		"management. Read-only.\n\n"
 		"THE GL COUNTS ARE THE POINT ON A MULTI-COMPANY SITE. A company with no "
 		"postings can still have its currency changed; one with postings cannot, and "
-		"this is where you find out which you are looking at.",
+		"this is where you find out which you are looking at.\n\n"
+		"`pest_management_providers` IS A TABLE BECAUSE ONE CONSULTANT IS THE "
+		"EXCEPTION. A farm running pome fruit and stone fruit commonly retains a "
+		"different adviser for each, so each row names a provider and the commodity "
+		"it covers; a row with NO commodity covers the whole operation and says so "
+		"rather than reading as an unanswered question. Where the column has not been "
+		"installed, `pest_management_providers_installed` is false and no company is "
+		"claimed to have none.",
 		{"limit": _field(_INTEGER, "Maximum companies returned. Default 100, hard maximum 500.")},
 		title="List companies",
 	),
@@ -6212,9 +6253,16 @@ TOOLS = {
 	),
 	"update_company": _tool(
 		company.update_company,
-		"MUTATING (default OFF). Change a company's country, tax id, notes, logo — and its "
+		"MUTATING (default OFF). Change a company's country, tax id, notes, logo, pest "
+		"management consultants — and its "
 		"default currency, but ONLY while it has no posted GL entries. Every change "
 		"is echoed as before → after, with the tax id redacted to its last four.\n\n"
+		"THE CONSULTANTS TABLE IS REPLACED WHOLESALE when passed and left alone when "
+		"omitted; an empty list is how it is genuinely cleared. The WHOLE list is "
+		"validated before any of it is written — an unknown Supplier, an unknown "
+		"Crop, an unrecognised key or the same consultant named twice for one "
+		"commodity refuses the lot, because a half-written table leaves a company "
+		"with some of its advisers and no way to tell which half went.\n\n"
 		"REFUSES THREE THINGS AND SAYS WHY. The abbreviation and the company name, "
 		"because both are baked into thousands of docnames and changing either is a "
 		"migration rather than an edit. The currency once anything is posted, because "
@@ -6233,6 +6281,15 @@ TOOLS = {
 				"URL of a file already on this site — '/files/…', '/private/files/…' or a full "
 				"http(s) URL. Upload with attach_file_to_document first and pass the file_url it "
 				"returns; a path on your own machine is refused. Empty string clears it.",
+			),
+			"pest_management_providers": _field(
+				{"type": "array", "items": _OBJECT},
+				"Who advises this entity on pest management. Each entry is an object with "
+				"`provider` (a Supplier docname) and optionally `commodity` (a Crop docname — "
+				"omit it for a consultant covering the whole operation), `service_type` "
+				"(scouting, written recommendations, full programme) and `license_number` "
+				"(ORS 634 licenses pesticide consultants in Oregon). Replaces the whole "
+				"table; pass [] to clear it.",
 			),
 			"default_currency": _field(
 				_STRING, "New ISO code. Refused outright once anything has been posted."
@@ -6447,16 +6504,43 @@ TOOLS = {
 		"the Field, and — where farm_precision_ag is installed — the newest Spray Log "
 		"against it. The later of the two is reported as `last_spray_date` with "
 		"`last_spray_source` naming where it came from, and both raw values are "
-		"returned so they can be compared rather than believed.",
+		"returned so they can be compared rather than believed.\n\n"
+		"ORGANIC ACRES ARE SUMMED FROM THE BLOCK, NOT FROM THE CROP. "
+		"`organic_certified_acreage` and `organic_transitional_acreage` come from "
+		"each block's own `organic_status`, because certification attaches to ground: "
+		"a farm running one variety on eight certified blocks and twelve conventional "
+		"ones has ONE Crop record and one boolean, and 'total acres certified' cannot "
+		"be got out of it. `acreage_by_organic_status` breaks it out, and "
+		"`without_organic_status` names the blocks nobody has answered for — a blank "
+		"is not counted as conventional.\n\n"
+		"COUNTY IS READ THROUGH THE PARCEL AND IS NEVER STORED ON A BLOCK. Every row "
+		"carries `county` from its parcel, `acreage_by_county` rolls it up and "
+		"`counties` lists them — which is 'which counties do you operate in' as a "
+		"query. Leased ground counts, because a block's county is the county of the "
+		"ground it sits on rather than of whoever holds the deed.",
 		{
 			"owning_entity": _field(_STRING, "The company whose blocks to read. `company` is an alias."),
 			"company": _field(_STRING, "Alias for owning_entity."),
 			"parcel": _field(_STRING, "Only blocks on this parcel. Docname or parcel name."),
+			"county": _field(
+				_STRING,
+				"Only blocks whose PARCEL is in this county. A county this site holds no "
+				"ground in is refused with the ones it does hold, rather than quietly "
+				"matching nothing.",
+			),
 			"crop": _field(_STRING, "Only this crop."),
 			"variety": _field(_STRING, "Only this variety."),
 			"condition": _field(_STRING, "Excellent, Good, Fair, Poor or Fallow."),
 			"food_safety_zone": _field(
 				_BOOLEAN, "true for only covered-produce blocks, false for only the rest."
+			),
+			"organic_status": _field(
+				_STRING, "Conventional, Transitional or Certified Organic. Omit for all."
+			),
+			"organic_certified": _field(
+				_BOOLEAN,
+				"true for only certified blocks, false for everything else. Derived from "
+				"organic_status, so it is the same filter said the short way.",
 			),
 			"linked_to_cost_center": _field(
 				_BOOLEAN, "true for only blocks with a cost center, false for only those without."
@@ -6469,10 +6553,13 @@ TOOLS = {
 	),
 	"get_field": _tool(
 		farm.get_field,
-		"One block in full: its planting, condition, cost center and food-safety "
-		"facts, the parcel it sits on, every irrigation zone over it with the water "
-		"rights they run under, and how much of the block is not zoned at all. "
-		"Read-only.",
+		"One block in full: its planting, condition, cost center, food-safety and "
+		"organic-certification facts, the parcel it sits on and the county that parcel "
+		"is in, every irrigation zone over it with the water rights they run under, "
+		"and how much of the block is not zoned at all. Read-only.\n\n"
+		"`county` and `organic_certified` are both DERIVED and neither is stored where "
+		"it is read: the county comes from the parcel and the flag from "
+		"`organic_status`. Two copies of either would be two answers.",
 		{
 			"field": _field(
 				_STRING,
@@ -6505,8 +6592,15 @@ TOOLS = {
 		"already claimed by another block; negative acreage or density; and — the one "
 		"that catches a bad import — blocks whose acreage would sum to more than the "
 		"parcel they are on, named with both figures and the excess.\n\n"
+		"ORGANIC CERTIFICATION IS SET HERE BECAUSE IT ATTACHES TO GROUND. "
+		"`organic_status` is Conventional, Transitional or Certified Organic — a "
+		"three-way state rather than a checkbox, because the three years of "
+		"transition are the part a buyer and an inspector both ask about. "
+		"`organic_certified` is DERIVED from it on every save and cannot be passed.\n\n"
 		"WARNS without refusing: no acreage; a food-safety block with no hygiene "
-		"station or no water test. Every one of those is a fact worth recording "
+		"station or no water test; a certifying agency on a block whose status is "
+		"Conventional or unanswered; Transitional with no start date; Certified "
+		"Organic with no agency. Every one of those is a fact worth recording "
 		"precisely because it is a problem.",
 		{
 			"parcel": _field(_STRING, "The Parcel this block is part of. Docname or parcel name."),
@@ -6558,6 +6652,21 @@ TOOLS = {
 			"worker_hygiene_station_present": _field(
 				_BOOLEAN, "Toilets and handwashing within a quarter mile (FSMA Subpart L, WPS)."
 			),
+			# v0.97.0. The three columns the certified-acreage line is summed from.
+			"organic_status": _field(
+				_STRING,
+				"Conventional, Transitional or Certified Organic. Leave it out for a block "
+				"nobody has answered for — blank means unasked, which is a different fact "
+				"from Conventional and is reported separately.",
+			),
+			"organic_cert_agency": _field(
+				_STRING, "Who certified it: Oregon Tilth, CCOF, WSDA. Free text."
+			),
+			"transition_start_date": _field(
+				_STRING,
+				"When the transition began, YYYY-MM-DD. The National Organic Program counts "
+				"thirty-six months from the last prohibited application.",
+			),
 			"notes": _field(_STRING, "Anything the fields cannot hold."),
 		},
 		required=("parcel", "field_name"),
@@ -6576,7 +6685,9 @@ TOOLS = {
 		"and every zone points at that docname. CANNOT move a block to another "
 		"parcel — ground does not move, so a block on the wrong parcel was "
 		"mis-registered. CANNOT set cost_center; that is link_field_to_cost_center, "
-		"which checks the cost centre is on the same books and is not a group.\n\n"
+		"which checks the cost centre is on the same books and is not a group. "
+		"CANNOT set organic_certified, which is derived from organic_status on every "
+		"save — a value written to it would be overwritten by the next one.\n\n"
 		"The parcel acreage rule applies here too: raising a block's acreage past "
 		"what the parcel has left is refused with both figures.",
 		{
@@ -6604,10 +6715,20 @@ TOOLS = {
 			"wildlife_intrusion_last_report": _field(_STRING, "New intrusion report date, YYYY-MM-DD."),
 			"food_safety_zone": _field(_BOOLEAN, "New covered-produce flag."),
 			"worker_hygiene_station_present": _field(_BOOLEAN, "New hygiene station flag."),
+			"organic_status": _field(
+				_STRING,
+				"Conventional, Transitional or Certified Organic. Empty string clears it "
+				"back to unanswered.",
+			),
+			"organic_cert_agency": _field(_STRING, "New certifying agency. Empty string clears it."),
+			"transition_start_date": _field(_STRING, "New transition start date, YYYY-MM-DD."),
 			"notes": _field(_STRING, "New notes."),
 			"field_name": _field(_STRING, "Always refused — see the description."),
 			"parcel": _field(_STRING, "Always refused — see the description."),
 			"cost_center": _field(_STRING, "Always refused — use link_field_to_cost_center."),
+			"organic_certified": _field(
+				_BOOLEAN, "Always refused — it is derived from organic_status on every save."
+			),
 		},
 		required=("field",),
 		mutating=True,
@@ -24348,12 +24469,19 @@ TOOLS = {
 	"list_crops": _tool(
 		agronomy.list_crops,
 		"The crop register: every crop with its type, growth cycle, harvest window, "
-		"pre-harvest interval and the varieties planted — plus a count by type and "
-		"three lists of what is missing. Read-only.\n\n"
-		"THE THREE LISTS AT THE END ARE THE REPORT. A crop with no PHI recorded is a "
+		"pre-harvest interval, the varieties planted and the direct-marketed share — "
+		"plus a count by type and four lists of what is missing. Read-only.\n\n"
+		"THE FOUR LISTS AT THE END ARE THE REPORT. A crop with no PHI recorded is a "
 		"crop a spray gate has nothing to fall back on for; a crop with no harvest "
 		"window is one nothing can schedule against; a crop with no varieties is one "
-		"every packout grouped by variety will find empty.\n\n"
+		"every packout grouped by variety will find empty; a crop with no "
+		"direct-marketed share is a survey line somebody will have to answer from "
+		"memory.\n\n"
+		"`pct_direct_marketed` IS AN ASSERTION AND SAYS SO. It is a number somebody "
+		"typed, reported with `pct_direct_marketed_source` naming it as such. The true "
+		"figure is direct revenue over total revenue read off Sales Invoice through "
+		"each customer's `sales_channel`; this is the fallback for the year that "
+		"invoice data is not clean, and it must never be presented as computed.\n\n"
 		"A NULL PHI IS NOT A PHI OF ZERO. Zero means genuinely no interval; null "
 		"means nobody has recorded one. They are reported apart because a gate that "
 		"conflates them clears fruit it should hold.",
@@ -24361,7 +24489,11 @@ TOOLS = {
 			"crop_type": _field(_STRING, "Tree Fruit, Stone Fruit, Berry, Vegetable or Other."),
 			"growth_cycle": _field(_STRING, "Perennial, Annual or Biennial."),
 			"is_organic_certified": _field(
-				_BOOLEAN, "true for only certified-organic crops, false for only the rest."
+				_BOOLEAN,
+				"true for only certified-organic crops, false for only the rest. THIS IS A "
+				"CROP-LEVEL FLAG and cannot answer an acreage question — certification "
+				"attaches to ground, so `list_fields` with organic_status is what sums "
+				"certified acres.",
 			),
 			"limit": _LIMIT,
 		},
@@ -24424,6 +24556,13 @@ TOOLS = {
 				"passing 0 if nobody has recorded one; the two are different facts.",
 			),
 			"is_organic_certified": _field(_BOOLEAN, "Grown under a certified organic programme here."),
+			"pct_direct_marketed": _field(
+				_NUMBER,
+				"Share of this crop sold direct — farm stand, farmers' market, u-pick, "
+				"direct-to-retail — from 0 to 100. A TYPED ASSERTION and reported as one; "
+				"the computed figure comes from Sales Invoice through Customer.sales_channel. "
+				"Leave it out rather than typing 0 for a crop nobody has estimated.",
+			),
 			"varieties": _field(
 				{"type": "array", "items": {"type": "object"}},
 				'The varieties planted: [{"variety_name": "Bing", "rootstock": "Mazzard", '
@@ -24464,6 +24603,9 @@ TOOLS = {
 			"harvest_window_end": _field(_STRING, "New end month."),
 			"default_phi_days": _field(_INTEGER, "New PHI floor in days."),
 			"is_organic_certified": _field(_BOOLEAN, "New organic flag."),
+			"pct_direct_marketed": _field(
+				_NUMBER, "New direct-marketed share, 0 to 100. Empty string clears it."
+			),
 			"varieties": _field(
 				{"type": "array", "items": {"type": "object"}},
 				"The complete new variety list. Replaces the existing one outright.",

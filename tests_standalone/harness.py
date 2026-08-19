@@ -1661,6 +1661,12 @@ APP_DOCTYPES = {
 	# everything else in this map does. See `tools/agronomy.py`.
 	"Crop": "crop",
 	"Crop Variety": "crop_variety",
+	# v0.97.0. The consultants child table, which hangs off ERPNext's Company
+	# through a Custom Field rather than off a doctype of ours — so it is
+	# registered here for its meta, and read through `frappe.get_doc("Company")`
+	# rather than by filtering the child, which is the shape that works on a
+	# bench. It needs no CHILD_TABLE_SOURCES entry for that reason.
+	"Pest Management Provider": "pest_management_provider",
 	"Crop Water Requirement": "crop_water_requirement",
 	"Market": "market",
 	"Market Grade Standard": "market_grade_standard",

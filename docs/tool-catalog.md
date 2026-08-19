@@ -3561,7 +3561,18 @@ nothing to post and is refused with that said.
 `parties`, `notes`.
 
 `category` is one of Operating Agreement, Trust Document, Advisory Agreement,
-Board Resolution, Prior Statement, Amendment, Lease, Tax Filing, Other.
+Board Resolution, Prior Statement, Amendment, Lease, Tax Filing, Audit Packet,
+Succession Plan, Family History, Acreage History, EFU Enterprise, Other.
+
+**The last four are narrative, and they exist so a report can ask for them.**
+Succession planning, the family's own history, the ground added and released
+over the years, and the other Exclusive Farm Use enterprises on the same land
+are all things a grower association asks for annually and nobody wants to
+retype. Filed under `Other` they are unreachable — a generator cannot query
+`Other` and get anything but everything. They amend through `supersedes` like
+the rest, though a family history is *revised* rather than superseded by a
+later instrument, so `operative` on that chain only reads well if somebody
+keeps it tidy.
 
 **Content.** `file_content` is base64 of the document's bytes (no `data:`
 prefix) and needs `file_name`; it is stored as a **private** File attached to
@@ -4800,11 +4811,22 @@ company carries `abbr`, `default_currency`, `country`, `parent_company`,
 `is_group`, `chart_of_accounts`, `default_cost_center`, `tax_id_on_file`,
 `tax_id_last4`, `fiscal_year_start_month`, `fiscal_year_first`,
 `fiscal_year_last`, `fiscal_year_count`, `cost_center_count`, `account_count`,
-`gl_entry_count`, `first_gl_entry` and `last_gl_entry`.
+`gl_entry_count`, `first_gl_entry`, `last_gl_entry` and
+`pest_management_providers`.
 
 **The GL counts are the point on a multi-company site.** A company with no
 postings can still have its currency changed; one with postings cannot, and this
 is where you find out which you are looking at.
+
+**`pest_management_providers` is a table because one consultant is the
+exception.** A farm running pome fruit and stone fruit commonly retains a
+different adviser for each, and a single Link would hold whichever was typed last
+while reading as the whole answer. Each row names a `provider` (a Supplier), the
+`commodity` it covers, the `service_type` and a `license_number`; a row with **no
+commodity** covers the whole operation and says so in `commodity_scope` rather
+than reading as an unanswered question. Where the column has not been installed,
+`pest_management_providers_installed` is `false` and no company is claimed to
+have none.
 
 `party_types` reports whether this app's `Family` and `Contact` Party Types are
 registered on the site, with a hint naming the fix when they are not — because
@@ -4877,7 +4899,15 @@ create_company {"company_name": "Constancy Farms LLC", "abbr": "CF",
 **MUTATING**, default OFF (`allow_update_company`).
 
 **Arguments:** `company` (required — docname or abbreviation), `country`,
-`tax_id`, `notes`, `default_currency`.
+`tax_id`, `notes`, `company_logo`, `pest_management_providers`,
+`default_currency`.
+
+**The consultants table is replaced wholesale** when passed and left alone when
+omitted; `[]` is how it is genuinely cleared. The WHOLE list is validated before
+any of it is written — an unknown Supplier, an unknown Crop, an unrecognised key
+or the same consultant named twice for one commodity refuses the lot, because a
+half-written table leaves a company with some of its advisers and no way to tell
+which half went.
 
 **Returns** `changed` (each as `[before, after]`, with `tax_id` redacted to
 `…nnnn`), `unchanged`, `tax_id_on_file`, `tax_id_last4` and the GL facts.
@@ -4942,14 +4972,36 @@ keeps working exactly as it did.
 
 Read-only, default ON (`allow_list_fields`).
 
-**Arguments:** `owning_entity` (or `company`), `parcel`, `crop`, `variety`,
-`condition`, `food_safety_zone` (boolean), `linked_to_cost_center` (boolean),
-`limit`.
+**Arguments:** `owning_entity` (or `company`), `parcel`, `county`, `crop`,
+`variety`, `condition`, `food_safety_zone` (boolean), `organic_status`,
+`organic_certified` (boolean), `linked_to_cost_center` (boolean), `limit`.
 
 **Returns** `fields`, `field_count`, `total_acreage`, `average_acreage`,
 `oldest_planting_year`, `newest_planting_year`, `by_variety`,
-`known_varieties`, `without_acreage` and
-`spray_dates_from_farm_precision_ag`.
+`known_varieties`, `without_acreage`, `spray_dates_from_farm_precision_ag`,
+`organic_certified_acreage`, `organic_transitional_acreage`,
+`acreage_by_organic_status`, `without_organic_status`, `counties` and
+`acreage_by_county`.
+
+**Certified acres are summed from the BLOCK, not from the crop.** Certification
+attaches to ground. A farm running one variety on eight certified blocks and
+twelve conventional ones has one `Crop` record and one boolean, and "total acres
+organically certified" cannot be got out of it — which is why
+`Crop.is_organic_certified` exists and does not answer this. `organic_status` is
+`Conventional` / `Transitional` / `Certified Organic` rather than a checkbox,
+because the three years of transition are the part a buyer and an inspector both
+ask about, and a checkbox records the end state and loses them. A block with no
+status is listed in `without_organic_status` rather than counted as conventional:
+blank means nobody has answered.
+
+**County is read through the parcel and stored on no block.** Every row carries
+`county` from its parcel; `acreage_by_county` and `counties` roll it up, which is
+"which counties do you operate in" as a query. Leased ground counts, because a
+block's county is the county of the ground it sits on. A `county` filter is
+resolved to that county's parcels, and a county this site holds no ground in is
+refused **with the counties it does** — a filter that quietly matched nothing
+reads as "we farm no ground there", and one that quietly matched everything reads
+as "we farm all of it".
 
 **`known_varieties` is the autosuggest.** It is what is already planted on this
 site. A hardcoded list would be wrong the first time somebody puts a new variety
@@ -4971,8 +5023,13 @@ Read-only, default ON (`allow_get_field`).
 **Arguments:** `field` (required — a docname like `Yellow Camp Block 3 - MC`, or
 just `Yellow Camp Block 3`), `parcel`, `owning_entity`.
 
-**Returns** the block, `parcel_detail`, `zone_count`, `zone_acreage`,
-`unzoned_acreage`, `water_rights` and every `zone` over it.
+**Returns** the block, its `county`, `parcel_detail`, `zone_count`,
+`zone_acreage`, `unzoned_acreage`, `water_rights` and every `zone` over it.
+
+`county` and `organic_certified` are both derived and neither is stored where it
+is read: the county comes from the parcel, the flag from `organic_status`. Two
+copies of either would be two answers, and the wrong one is always the copy
+nobody edited.
 
 A bare field name matching blocks on two parcels is refused with both named
 rather than resolved to whichever came first; `parcel` narrows it.
@@ -4988,7 +5045,8 @@ rather than resolved to whichever came first; `parcel` narrows it.
 `planting_year`, `planting_density_per_acre`, `condition`, `block_number`,
 `external_farm_app_id`, `last_spray_date`, `water_test_last_date`,
 `wildlife_intrusion_last_report`, `food_safety_zone`,
-`worker_hygiene_station_present`, `notes`.
+`worker_hygiene_station_present`, `organic_status`, `organic_cert_agency`,
+`transition_start_date`, `notes`.
 
 **The docname is `<field_name> - <parcel abbr>`**, so every parcel may have a
 "Block 3". The parcel's abbreviation is its `abbr`, or initials derived from its
@@ -5010,9 +5068,18 @@ all.
 Blocks summing to *less* than the parcel is the normal case and is left alone —
 roads, ditches, headlands and the house are all real.
 
-**Warns rather than refusing** on no acreage, and on a food-safety block with no
-hygiene station or no water test. Every one of those is a fact worth recording
-precisely because it is a problem.
+**Organic certification is set here because it attaches to ground.**
+`organic_certified` is DERIVED from `organic_status` on every save and passing it
+is refused — a derived flag a person can set independently is a flag that will
+disagree with the status it came from.
+
+**Warns rather than refusing** on no acreage; on a food-safety block with no
+hygiene station or no water test; on a certifying agency recorded against a block
+whose status is Conventional or unanswered; on Transitional with no transition
+start date; and on Certified Organic with no agency. Every one of those is a fact
+worth recording precisely because it is a problem, and each is a state some block
+is genuinely in — a block mid-application really does have a certifier and no
+certificate.
 
 ---
 
@@ -5024,14 +5091,16 @@ precisely because it is a problem.
 `rootstock`, `planting_year`, `planting_density_per_acre`, `condition`,
 `block_number`, `external_farm_app_id`, `last_spray_date`,
 `water_test_last_date`, `wildlife_intrusion_last_report`, `food_safety_zone`,
-`worker_hygiene_station_present`, `notes`.
+`worker_hygiene_station_present`, `organic_status`, `organic_cert_agency`,
+`transition_start_date`, `notes`.
 
 **Returns** the block and `changed`, every one as `[before, after]`.
 
 Cannot rename it (the docname is built from `field_name`, and every zone points
 at that docname), cannot move it to another parcel (ground does not move — a
-block on the wrong parcel was mis-registered), and cannot set `cost_center` —
-that is **101**. The parcel acreage rule applies here too. A no-op update is
+block on the wrong parcel was mis-registered), cannot set `organic_certified`
+(derived from `organic_status` on every save, so a value written here is
+overwritten by the next one), and cannot set `cost_center` — that is **101**. The parcel acreage rule applies here too. A no-op update is
 refused rather than reported as a success.
 
 ---
@@ -11821,8 +11890,16 @@ One implementation with the nouns swapped, for the reason `list_sales_orders` an
 the truncation must not be able to land on one side only.
 
 Arguments: `supplier_group` / `customer_group`, `territory` (customers),
-`disabled`, `company`, `search`, `limit`. An unknown group or territory is
-refused **with the site's own list**, rather than answering with zero rows.
+`sales_channel` (customers), `disabled`, `company`, `search`, `limit`. An unknown
+group, territory or channel is refused **with the site's own list**, rather than
+answering with zero rows.
+
+`list_customers` also returns `by_sales_channel` and `without_sales_channel`, and
+**the second is the half that matters**: a direct-marketed percentage computed
+over invoices is only as complete as this classification, and a report that
+showed the percentage without showing how many customers were never classified
+would present a partial answer as a whole one. A blank channel is not
+not-direct.
 
 ## `get_supplier` / `get_customer`
 
@@ -11842,6 +11919,12 @@ Groups` / `All Customer Groups`, and a Customer's territory to `All Territories`
 — each used only where the site actually has that record, and otherwise refused
 with what the site does have.
 
+`sales_channel` (customers) is `Direct` / `Wholesale` / `Packer` / `Processor` —
+a Custom Field this app installs at migrate time, and the thing that makes "what
+percentage of each commodity do you direct-market" a query over Sales Invoice
+rather than a number somebody types. `Crop.pct_direct_marketed` is the typed
+fallback for the year the invoice data is not clean, and it is labelled as typed.
+
 `supplier_type` / `customer_type` are matched **case-insensitively against this
 site's own Select options** and stored in the doctype's casing, so `company`
 becomes `Company` and `Partnership` is refused with the real choices listed. The
@@ -11850,8 +11933,12 @@ Select answers with its own values.
 
 ## `update_supplier` / `update_customer` — MUTATING, default off
 
-Group, type, territory, `disabled` and the tax identifiers, in place, never
-renaming. Returns `changed` as before/after pairs, and refuses when nothing sent
+Group, type, territory, `sales_channel` (customers), `disabled` and the tax
+identifiers, in place, never renaming. **This is where an existing customer
+register gets classified** — nothing backfilled `sales_channel` and nothing will,
+because whether a buyer is a farm stand or a packer is a fact only the farm has,
+and a migration that guessed would produce a direct-marketed percentage that
+looks computed and is invented. Returns `changed` as before/after pairs, and refuses when nothing sent
 differs from what is stored — an update that changes nothing and reports success
 is how a caller concludes a value was written when it was not.
 
@@ -14681,7 +14768,7 @@ of its own, not a field option.
 
 | Tool | What it does |
 | --- | --- |
-| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window and no varieties |
+| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window, no varieties and no direct-marketed share |
 | `get_crop` | One crop in full: varieties with rootstock and pollination group, water demand by growth stage, the markets that buy it, the conversions recorded for it |
 | `create_crop` | Register one, with both child tables. **Mutating** |
 | `update_crop` | Change one. Cannot re-key it. **Mutating** |
@@ -14976,7 +15063,7 @@ of its own, not a field option.
 
 | Tool | What it does |
 | --- | --- |
-| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window and no varieties |
+| `list_crops` | The register, varieties counted, plus the crops with no PHI, no harvest window, no varieties and no direct-marketed share |
 | `get_crop` | One crop in full: varieties with rootstock and pollination group, water demand by growth stage, the markets that buy it, the conversions recorded for it |
 | `create_crop` | Register one, with both child tables. **Mutating** |
 | `update_crop` | Change one. Cannot re-key it. **Mutating** |

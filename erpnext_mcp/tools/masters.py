@@ -76,6 +76,29 @@ PRICE_LIST = "Price List"
 SUPPLIER = "Supplier"
 CUSTOMER = "Customer"
 WAREHOUSE = "Warehouse"
+CUSTOM_FIELD = "Custom Field"
+
+#: v0.97.0. The channel a customer buys through, as a Custom Field on ERPNext's
+#: own Customer.
+#:
+#: WHY ON THE CUSTOMER RATHER THAN ON THE INVOICE. The channel is a property of
+#: WHO IS BUYING, not of a particular sale: a farm stand is always direct and a
+#: packer is never it, and asking the question once per customer beats asking it
+#: on every line of every invoice — which is how it would go unanswered.
+#:
+#: WHAT IT IS FOR. "What percentage of each commodity do you direct-market" is a
+#: question no ERPNext install can answer, because nothing classifies a sale.
+#: With this column the answer is direct revenue over total revenue per crop,
+#: read off Sales Invoice — a computed figure rather than an asserted one.
+#: `Crop.pct_direct_marketed` is the fallback for the year the invoice data is
+#: not clean, and the two are deliberately not the same number.
+#:
+#: A CUSTOM FIELD RATHER THAN A DOCTYPE OF OUR OWN, for the reason
+#: `anchors.ensure_pairing_fields` gives: a "Customer Sales Channel" register
+#: with one row per customer is a shadow of a property the record can hold, and
+#: shadows drift.
+SALES_CHANNEL_FIELD = "sales_channel"
+SALES_CHANNELS = ("Direct", "Wholesale", "Packer", "Processor")
 
 #: What `require_doctype` says when one of these is missing. They ship with
 #: ERPNext's Stock, Buying and Selling modules, so the actionable half of the
@@ -145,6 +168,7 @@ _CUSTOMER_FIELDS = (
 	"customer_group",
 	"customer_type",
 	"territory",
+	SALES_CHANNEL_FIELD,
 	"disabled",
 	"tax_id",
 	"tax_category",
@@ -970,6 +994,79 @@ def _party_company_note(doctype: str, company: str) -> str | None:
 	)
 
 
+def ensure_sales_channel_field() -> bool:
+	"""Give Customer the column that says which channel this buyer is.
+
+	Created at migrate time by `install.py` and here on first use, the same
+	arrangement `banking_bridge.ensure_categorization_fields` and
+	`anchors.ensure_pairing_fields` are under: a bench that pulled the code
+	without running the installer still answers the first call, and running the
+	installer means the column is filterable in the Desk before anybody needs it.
+
+	NEVER RAISES. A site that will not take the field loses the channel and keeps
+	every other thing a Customer does; the read tools report the column as absent
+	rather than reporting every customer as unclassified, which are different
+	claims.
+	"""
+	try:
+		if compat.has_field(CUSTOMER, SALES_CHANNEL_FIELD):
+			return True
+		if not compat.doctype_exists(CUSTOM_FIELD) or not compat.doctype_exists(CUSTOMER):
+			return False
+		if frappe.db.exists(CUSTOM_FIELD, {"dt": CUSTOMER, "fieldname": SALES_CHANNEL_FIELD}):
+			return True
+	except Exception:
+		return False
+
+	try:
+		doc = frappe.new_doc(CUSTOM_FIELD)
+		doc.dt = CUSTOMER
+		doc.fieldname = SALES_CHANNEL_FIELD
+		doc.label = "Sales Channel"
+		doc.fieldtype = "Select"
+		doc.options = "\n" + "\n".join(SALES_CHANNELS)
+		doc.insert_after = "customer_group"
+		doc.module = "ERPNext MCP"
+		doc.description = (
+			"How this buyer takes the fruit. Direct is the farm stand, the farmers' market, "
+			"u-pick and direct-to-retail; Wholesale, Packer and Processor are the three ways "
+			"it leaves through somebody else. LEFT BLANK MEANS NOBODY HAS CLASSIFIED THIS "
+			"CUSTOMER, which is not the same as not-direct — a report that read a blank as "
+			"wholesale would understate the direct share of every farm that has not finished "
+			"the exercise."
+		)
+		doc.insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(
+			title=f"erpnext_mcp: could not add {SALES_CHANNEL_FIELD} to Customer",
+			message=compat.traceback_text(),
+		)
+		return False
+
+	try:
+		frappe.clear_cache(doctype=CUSTOMER)
+	except Exception:
+		pass
+	return compat.has_field(CUSTOMER, SALES_CHANNEL_FIELD)
+
+
+def _sales_channel(value: str, verb: str) -> str:
+	"""One of the four channels, or a refusal naming all four.
+
+	Read through `as_choice` off the site's own meta where the column exists, so
+	an operator who has added a fifth channel gets their own list back rather than
+	this app's idea of it.
+	"""
+	if not value:
+		return ""
+	if compat.has_field(CUSTOMER, SALES_CHANNEL_FIELD):
+		return as_choice(CUSTOMER, SALES_CHANNEL_FIELD, value, SALES_CHANNEL_FIELD)
+	raise ToolError(
+		f"this site's Customer has no {SALES_CHANNEL_FIELD} column yet — it is a Custom Field "
+		"this app installs, so run `bench --site <site> migrate`. Nothing was " + verb + "."
+	)
+
+
 def list_suppliers(args: dict) -> ToolResult:
 	"""Suppliers by group and disabled flag."""
 	return _list_party(
@@ -994,6 +1091,7 @@ def list_customers(args: dict) -> ToolResult:
 		fields=_CUSTOMER_FIELDS,
 		key="customers",
 		territory=True,
+		channel=True,
 	)
 
 
@@ -1007,6 +1105,7 @@ def _list_party(
 	fields,
 	key: str,
 	territory: bool = False,
+	channel: bool = False,
 ) -> ToolResult:
 	"""Supplier and Customer are the same listing with the nouns swapped.
 
@@ -1039,6 +1138,12 @@ def _list_party(
 				)
 			filters["territory"] = territory_value
 
+	channel_value = ""
+	if channel:
+		channel_value = _sales_channel(as_str(args, SALES_CHANNEL_FIELD), "listed")
+		if channel_value:
+			filters[SALES_CHANNEL_FIELD] = channel_value
+
 	disabled = _flag(args, "disabled", filters, doctype)
 
 	search = _like(args)
@@ -1068,11 +1173,44 @@ def _list_party(
 			"company": company,
 			"search": search or None,
 			**({"territory": territory_value or None} if territory else {}),
+			**({SALES_CHANNEL_FIELD: channel_value or None} if channel else {}),
 		},
 	}
+	if channel:
+		data.update(_channel_rollup(parties))
 	if company_note:
 		data["company_scope"] = company_note
 	return ToolResult(data, f"{len(parties)} {doctype.lower()}(s)")
+
+
+def _channel_rollup(parties: list) -> dict:
+	"""How many customers sit in each channel, and who is in none of them.
+
+	The unclassified list is the useful half. A direct-marketed percentage
+	computed over invoices is only as complete as this classification, and a
+	report that showed the percentage without showing how many customers were
+	never classified would present a partial answer as a whole one.
+	"""
+	if not compat.has_field(CUSTOMER, SALES_CHANNEL_FIELD):
+		return {
+			"sales_channel_installed": False,
+			"sales_channel_note": (
+				f"Customer has no {SALES_CHANNEL_FIELD} column on this site, so no customer is "
+				"classified either way. It is a Custom Field this app installs — run `bench "
+				"--site <site> migrate`."
+			),
+		}
+	counts: dict = {}
+	for party in parties:
+		key = party.get(SALES_CHANNEL_FIELD) or "(unclassified)"
+		counts[key] = counts.get(key, 0) + 1
+	return {
+		"sales_channel_installed": True,
+		"by_sales_channel": dict(sorted(counts.items())),
+		"without_sales_channel": [
+			party.get("name") for party in parties if not party.get(SALES_CHANNEL_FIELD)
+		],
+	}
 
 
 def get_supplier(args: dict) -> ToolResult:
@@ -1218,6 +1356,14 @@ def create_customer(args: dict) -> ToolResult:
 	if customer_type:
 		doc.customer_type = customer_type
 	_optional(doc, CUSTOMER, args, ("tax_id", "tax_category", "default_currency", "default_price_list"))
+	# v0.97.0. Asked at creation because it is asked once and answered forever,
+	# and because a customer register classified retroactively is a register
+	# somebody has to go back through.
+	channel = ""
+	if as_str(args, SALES_CHANNEL_FIELD):
+		ensure_sales_channel_field()
+		channel = _sales_channel(as_str(args, SALES_CHANNEL_FIELD), "created")
+		doc.set(SALES_CHANNEL_FIELD, channel)
 	doc.insert()
 
 	data = {
@@ -1226,6 +1372,7 @@ def create_customer(args: dict) -> ToolResult:
 		"customer_group": group,
 		"territory": territory,
 		"customer_type": customer_type or None,
+		SALES_CHANNEL_FIELD: channel or None,
 		"company": company,
 		"submittable": False,
 	}
@@ -1303,6 +1450,7 @@ def update_customer(args: dict) -> ToolResult:
 		type_arg="customer_type",
 		extra=("tax_id", "tax_category", "default_currency", "default_price_list"),
 		territory=True,
+		channel=True,
 	)
 
 
@@ -1316,6 +1464,7 @@ def _update_party(
 	type_arg: str,
 	extra,
 	territory: bool = False,
+	channel: bool = False,
 ) -> ToolResult:
 	"""Update a party in place. Never renames it: the display name is the docname
 	on a stock install, and renaming is a different operation with different
@@ -1347,6 +1496,16 @@ def _update_party(
 				changes["territory"] = [doc.get("territory"), value]
 				doc.territory = value
 
+	if channel and SALES_CHANNEL_FIELD in args:
+		# Installed on demand rather than refused, so classifying the customer
+		# register is one call per customer on a site that upgraded without
+		# running the installer.
+		ensure_sales_channel_field()
+		wanted = _sales_channel(as_str(args, SALES_CHANNEL_FIELD), "changed")
+		if wanted != (doc.get(SALES_CHANNEL_FIELD) or ""):
+			changes[SALES_CHANNEL_FIELD] = [doc.get(SALES_CHANNEL_FIELD), wanted]
+			doc.set(SALES_CHANNEL_FIELD, wanted or None)
+
 	party_type = as_str(args, type_arg)
 	if party_type:
 		resolved = _party_type(doctype, type_arg, party_type)
@@ -1374,7 +1533,8 @@ def _update_party(
 	if not changes:
 		raise ToolError(
 			f"nothing to change on {doctype} {name}. Pass at least one of {group_arg}, "
-			f"{type_arg}, disabled{', territory' if territory else ''}, "
+			f"{type_arg}, disabled{', territory' if territory else ''}"
+			f"{', ' + SALES_CHANNEL_FIELD if channel else ''}, "
 			f"{', '.join(extra)} — with a value that differs from what is stored."
 		)
 

@@ -322,15 +322,21 @@ class MigrateThreeTimes(V12TestCase):
 		self.assertEqual(compliance_custom_fields(), [])
 		self.assertTrue(STORE.singles["ERPNext MCP Settings"])
 
-	def test_the_badge_logo_is_not_behind_the_compliance_switch(self):
+	def test_the_non_compliance_company_fields_are_not_behind_the_switch(self):
 		"""`install_compliance_fields` exists so an operator can decline having
 		their Spray Log extended. It is not a switch for every column this app
 		has ever added, and a farm that turned it off did not thereby decide to
-		print badges with no logo on them."""
+		print badges with no logo on them or to stop recording who advises them
+		on pest management.
+
+		The compliance column on Company — `default_housing_deduction_from_wages`
+		— IS absent here, which is the other half of the same assertion: the
+		switch governs exactly the fields that name a regulator."""
 		self.configure(enabled=1, allow_install_compliance_fields=0)
 		install.after_migrate()
 		self.assertEqual(
-			[row["fieldname"] for row in custom_fields("Company")], ["badge_logo"]
+			sorted(row["fieldname"] for row in custom_fields("Company")),
+			["badge_logo", "pest_management_providers"],
 		)
 
 

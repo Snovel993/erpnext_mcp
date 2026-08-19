@@ -1163,9 +1163,10 @@ TARGETS = (
 		mode="verify",
 		purpose=(
 			"Food safety zoning, the agricultural water and spray dates the Produce "
-			"Safety Rule turns on, and — from v0.19.5 — the dates that say when this "
-			"block was actually earning. Shipped as declared fields in v0.12.0 and "
-			"v0.19.5, verified here."
+			"Safety Rule turns on, the dates that say when this block was actually "
+			"earning, and — from v0.97.0 — where the ground stands with the National "
+			"Organic Program. Shipped as declared fields in v0.12.0, v0.19.5 and "
+			"v0.97.0, verified here."
 		),
 		fields=(
 			ComplianceField(
@@ -1241,6 +1242,26 @@ TARGETS = (
 				operational=(
 					"Whether a crew can enter this block today. It is read before every "
 					"pick and every thinning pass."
+				),
+			),
+			ComplianceField(
+				fieldname="organic_status",
+				label="Organic Status",
+				fieldtype="Select",
+				options="\nConventional\nTransitional\nCertified Organic",
+				framework="National Organic Program 7 CFR 205 — §205.202 land requirements, §205.400 certification",
+				why=(
+					"Certification attaches to GROUND. The thirty-six months since the "
+					"last prohibited application is a per-block fact, and a crop-level "
+					"flag can represent neither it nor a farm running certified and "
+					"conventional blocks of one variety. Certified acres are summed from "
+					"this column."
+				),
+				operational=(
+					"Which materials may go on this block at all. A conventional product "
+					"applied to a certified block does not produce a paperwork finding — "
+					"it restarts the three-year clock on that ground, and the decision is "
+					"made at the shed before the tank is filled."
 				),
 			),
 		),

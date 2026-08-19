@@ -303,12 +303,20 @@ worse than the problem it would hide.
 
 ### `Field` — erpnext_mcp
 
-Food safety zoning, the agricultural water and spray dates the Produce Safety Rule turns on, and — from v0.19.5 — the dates that say when this block was actually earning. Shipped as declared fields in v0.12.0 and v0.19.5, verified here.
+Food safety zoning, the agricultural water and spray dates the Produce Safety Rule turns on, the dates that say when this block was actually earning, and — from v0.97.0 — where the ground stands with the National Organic Program. Shipped as declared fields in v0.12.0, v0.19.5 and v0.97.0, verified here.
 
 **Verified, not added.** These are declared fields of a DocType this app ships.
 A missing one means the DocType did not migrate, and the installer reports it
 rather than papering over it with a Custom Field — two columns and no error is
 worse than the problem it would hide.
+
+**`organic_certified` is derived and is not in this table.** The Field controller
+rewrites it from `organic_status` on every save and the Desk shows it read-only,
+so what is verified here is the column the answer actually comes from. A derived
+flag a person can set independently is a flag that will disagree with the status
+it came from, and the one that is wrong is always the one nobody edited.
+`organic_cert_agency` and `transition_start_date` are declared beside it and are
+supporting detail rather than the fact a regulator turns on.
 
 **The three v0.19.5 dates are the denominator of every per-acre metric.** What is
 PRODUCTIVE, not what is owned: fallow ground has acreage, a cost centre and a
@@ -326,6 +334,7 @@ turning a data gap into a number somebody acts on.
 | `pre_yield_end_date` | Date | no | Managerial accounting — Sustainable CF/Acre (v0.19.5) | Perennials spend their first years as capital rather than as crop — cherry is commonly three or four. Recorded separately from `productive_from_date` so a block still in its pre-yield years is COUNTED and reported rather than merely absent: those acres are next year's denominator, and a reader who cannot see them coming cannot read the trend. | When the block moves onto the picking plan, and when the establishment budget stops. Both are planned years ahead off this date. |
 | `food_safety_zone` | Data | no | FSMA Produce Safety Rule 21 CFR 112; GAP / GlobalGAP zoning | Zoning is how a hazard assessment is expressed on the ground — which ground is adjacent to a dairy, a road, a wildlife corridor. | Which blocks get walked for animal intrusion before a pick, and which can be picked at all after a flood event. |
 | `last_spray_date` | Date | no | EPA WPS 40 CFR 170.407 REI; FIFRA label PHI | The date the REI and PHI windows are counted from. | Whether a crew can enter this block today. It is read before every pick and every thinning pass. |
+| `organic_status` | Select | no | National Organic Program 7 CFR 205 — §205.202 land requirements, §205.400 certification | Certification attaches to GROUND. The thirty-six months since the last prohibited application is a per-block fact, and a crop-level flag can represent neither it nor a farm running certified and conventional blocks of one variety. Certified acres are summed from this column. | Which materials may go on this block at all. A conventional product applied to a certified block does not produce a paperwork finding — it restarts the three-year clock on that ground, and the decision is made at the shed before the tank is filled. |
 
 ---
 

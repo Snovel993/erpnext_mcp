@@ -47,6 +47,24 @@ from ..errors import ToolError
 from ..result import ToolResult
 
 PARTY_TYPE = "Party Type"
+CUSTOM_FIELD = "Custom Field"
+
+#: v0.97.0. Who advises this operation on pest management, as a child table on
+#: Company rather than a single Link.
+#:
+#: A LINK WOULD BE WRONG THE FIRST TIME SOMEBODY ANSWERED IT HONESTLY. This site
+#: runs apples, pears and cherries; a farm growing pome fruit and stone fruit
+#: commonly retains a different consultant for each, and one Link holds whichever
+#: was typed last while reading as though it were the whole answer. The table
+#: costs one small doctype and does not have to be migrated the first time a
+#: second consultant is named.
+#:
+#: ON COMPANY RATHER THAN A SINGLETON, for the reason the housing-deduction
+#: default is on Company: this app is multi-company, and a `"issingle": 1`
+#: settings doctype holds one row for the whole site — which would need a
+#: per-company child table to be correct, i.e. this table with an extra column.
+PEST_PROVIDER_FIELD = "pest_management_providers"
+PEST_PROVIDER_DOCTYPE = "Pest Management Provider"
 
 #: The party types this app registers: the account type each settles against, and
 #: — the part that is not obvious and that v0.12.1 exists because of — the DocType
@@ -146,6 +164,165 @@ MONTHS = (
 	"November",
 	"December",
 )
+
+
+# ── pest management providers ───────────────────────────────────────────────
+def ensure_pest_provider_field() -> bool:
+	"""Give Company the child table the pest management consultants sit in.
+
+	The ninth place this app installs a Custom Field at migrate time, and it uses
+	the same arrangement as the eight before it: created by `install.py` and again
+	here on first use, so a bench that pulled the code without running the
+	installer answers the first call.
+
+	NEVER RAISES. A site that will not take the field loses the register and keeps
+	everything else; the reads report `pest_management_providers_installed: false`
+	rather than reporting a company with no consultants, which is a different
+	claim.
+	"""
+	try:
+		if compat.has_field("Company", PEST_PROVIDER_FIELD):
+			return True
+		if not compat.doctype_exists(CUSTOM_FIELD) or not compat.doctype_exists("Company"):
+			return False
+		if not compat.doctype_exists(PEST_PROVIDER_DOCTYPE):
+			# The child doctype ships with this app. Without it the Table field
+			# would render as a form Frappe cannot build, which is worse than the
+			# column being absent.
+			return False
+		if frappe.db.exists(CUSTOM_FIELD, {"dt": "Company", "fieldname": PEST_PROVIDER_FIELD}):
+			return True
+	except Exception:
+		return False
+
+	try:
+		doc = frappe.new_doc(CUSTOM_FIELD)
+		doc.dt = "Company"
+		doc.fieldname = PEST_PROVIDER_FIELD
+		doc.label = "Pest Management Providers"
+		doc.fieldtype = "Table"
+		doc.options = PEST_PROVIDER_DOCTYPE
+		doc.module = "ERPNext MCP"
+		doc.description = (
+			"Who advises this entity on pest management, one row per consultant per "
+			"commodity. A row with no commodity covers the whole operation. Left empty, "
+			"nobody has answered — which is not the same as the farm having no consultant."
+		)
+		doc.insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(
+			title=f"erpnext_mcp: could not add {PEST_PROVIDER_FIELD} to Company",
+			message=compat.traceback_text(),
+		)
+		return False
+
+	try:
+		frappe.clear_cache(doctype="Company")
+	except Exception:
+		pass
+	return compat.has_field("Company", PEST_PROVIDER_FIELD)
+
+
+def _pest_providers(company: str) -> dict:
+	"""The consultants recorded for one company, read through the parent.
+
+	READ THROUGH THE PARENT AND NOT BY FILTERING THE CHILD DOCTYPE. A child table
+	is reached from the document that owns it; querying the child by `parent` is
+	the shape that works on a bench and returns nothing under a test double, and
+	the difference does not show up until the site.
+	"""
+	if not compat.has_field("Company", PEST_PROVIDER_FIELD):
+		return {
+			"pest_management_providers_installed": False,
+			"pest_management_providers_note": (
+				"Company has no pest_management_providers table on this site, so nobody is "
+				"recorded either way. It is a Custom Field this app installs — run `bench "
+				"--site <site> migrate`."
+			),
+		}
+	try:
+		rows = frappe.get_doc("Company", company).get(PEST_PROVIDER_FIELD) or []
+	except Exception:
+		rows = []
+	providers = [
+		{
+			"provider": row.get("provider"),
+			"commodity": row.get("commodity") or None,
+			"commodity_scope": "the whole operation" if not row.get("commodity") else None,
+			"service_type": row.get("service_type") or None,
+			"license_number": row.get("license_number") or None,
+		}
+		for row in rows
+	]
+	return {
+		"pest_management_providers_installed": True,
+		"pest_management_providers": providers,
+	}
+
+
+def _pest_provider_rows(value) -> list:
+	"""Validate a whole providers list before any of it is written.
+
+	THE WHOLE LIST IS CHECKED BEFORE THE FIRST ROW IS KEPT, because this write
+	replaces the table wholesale — a half-validated list would leave a company
+	with some of its consultants and no way to tell which half was dropped.
+
+	Two rows naming one consultant for one commodity are refused: they are two
+	answers to one question and which one a report reads depends on row order.
+	"""
+	if value in (None, ""):
+		return []
+	if not isinstance(value, list):
+		raise ToolError(
+			f"{PEST_PROVIDER_FIELD} must be a list of objects, each with `provider` and "
+			"optionally commodity, service_type and license_number. Nothing was changed."
+		)
+	out, seen = [], set()
+	for position, entry in enumerate(value, start=1):
+		if not isinstance(entry, dict):
+			raise ToolError(f"row {position} is not an object. Nothing was changed.")
+		unknown = set(entry) - {"provider", "commodity", "service_type", "license_number"}
+		if unknown:
+			raise ToolError(
+				f"row {position} has unrecognised key(s): {', '.join(sorted(unknown))}. A key "
+				"silently ignored is a consultant somebody thinks they recorded. Nothing was "
+				"changed."
+			)
+		provider = str(entry.get("provider") or "").strip()
+		if not provider:
+			raise ToolError(f"row {position} names no provider. Nothing was changed.")
+		if compat.doctype_exists("Supplier") and not frappe.db.exists("Supplier", provider):
+			raise ToolError(
+				f"row {position}: no Supplier called {provider!r} on this site. A consultant is "
+				"a Supplier on these books — create them with create_supplier first. Nothing "
+				"was changed."
+			)
+		commodity = str(entry.get("commodity") or "").strip()
+		if commodity and compat.doctype_exists("Crop") and not frappe.db.exists("Crop", commodity):
+			known = frappe.db.get_all("Crop", pluck="name", limit=25) or []
+			raise ToolError(
+				f"row {position}: no Crop called {commodity!r} on this site. Known: "
+				f"{', '.join(sorted(known)) or '<none>'}. Leave commodity out for a consultant "
+				"covering the whole operation. Nothing was changed."
+			)
+		key = (provider, commodity)
+		if key in seen:
+			raise ToolError(
+				f"row {position} repeats {provider!r} for "
+				f"{commodity or 'the whole operation'}. Two rows are two answers to one "
+				"question and which one a report reads depends on row order. Nothing was "
+				"changed."
+			)
+		seen.add(key)
+		out.append(
+			{
+				"provider": provider,
+				"commodity": commodity,
+				"service_type": str(entry.get("service_type") or "").strip(),
+				"license_number": str(entry.get("license_number") or "").strip(),
+			}
+		)
+	return out
 
 
 # ── shared ──────────────────────────────────────────────────────────────────
@@ -352,6 +529,7 @@ def list_companies(args: dict) -> ToolResult:
 				"fiscal_year_count": len(years),
 				"cost_center_count": frappe.db.count("Cost Center", {"company": name}),
 				"account_count": frappe.db.count("Account", {"company": name}),
+				**_pest_providers(name),
 				**gl,
 			}
 		)
@@ -708,16 +886,37 @@ def update_company(args: dict) -> ToolResult:
 			raise ToolError("this ERPNext's Company has no company_logo field. Nothing was changed.")
 		_stage(changes, unchanged, row, "company_logo", _file_url(as_str(args, "company_logo")))
 
-	if not changes and not unchanged:
+	# The consultants table is REPLACED WHOLESALE when passed, never merged. A
+	# merge needs a stable row key and these rows have none a caller can see;
+	# omitting the argument leaves the table untouched, and passing an empty list
+	# is how a caller genuinely clears it. Validated in full before anything is
+	# written — see `_pest_provider_rows`.
+	providers = None
+	if PEST_PROVIDER_FIELD in args:
+		if not ensure_pest_provider_field():
+			raise ToolError(
+				f"this site's Company has no {PEST_PROVIDER_FIELD} table and it could not be "
+				"installed — it is a Custom Field this app adds, so run `bench --site <site> "
+				"migrate`. Nothing was changed."
+			)
+		providers = _pest_provider_rows(args.get(PEST_PROVIDER_FIELD))
+
+	if not changes and not unchanged and providers is None:
 		raise ToolError(
-			"nothing to change. This tool takes country, tax_id, notes, company_logo and — only "
-			"on a company with no postings — default_currency."
+			"nothing to change. This tool takes country, tax_id, notes, company_logo, "
+			f"{PEST_PROVIDER_FIELD} and — only on a company with no postings — default_currency."
 		)
 
-	if changes:
+	if changes or providers is not None:
 		doc = frappe.get_doc("Company", company)
 		for field, (_before, after) in changes.items():
 			doc.set(field, after or None)
+		if providers is not None:
+			before = len(doc.get(PEST_PROVIDER_FIELD) or [])
+			doc.set(PEST_PROVIDER_FIELD, [])
+			for entry in providers:
+				doc.append(PEST_PROVIDER_FIELD, entry)
+			changes[PEST_PROVIDER_FIELD] = [f"{before} row(s)", f"{len(providers)} row(s)"]
 		doc.save(ignore_permissions=True)
 
 	reported = {
@@ -728,6 +927,7 @@ def update_company(args: dict) -> ToolResult:
 			"company": company,
 			"changed": reported,
 			"unchanged": unchanged,
+			**_pest_providers(company),
 			**_tax_id_status(changes.get("tax_id", (row.get("tax_id"), row.get("tax_id")))[1]),
 			**gl,
 		},

@@ -35,6 +35,12 @@
   "compliance_col",
   "food_safety_zone",
   "worker_hygiene_station_present",
+  "organic_section",
+  "organic_status",
+  "organic_certified",
+  "organic_col",
+  "organic_cert_agency",
+  "transition_start_date",
   "boundary_section",
   "boundary_geojson",
   "boundary_centroid_lat",
@@ -244,6 +250,46 @@
    "fieldname": "worker_hygiene_station_present",
    "fieldtype": "Check",
    "label": "Worker Hygiene Station Present"
+  },
+  {
+   "description": "Certification attaches to GROUND, not to a commodity. A crop-level organic flag cannot answer 'how many acres are certified' on a farm running Gala on eight certified blocks and twelve conventional ones — there is one Crop record and one boolean, and the honest answer is unobtainable from it. This is the per-block state, and it is where the acreage sum comes from.",
+   "fieldname": "organic_section",
+   "fieldtype": "Section Break",
+   "label": "Organic Certification"
+  },
+  {
+   "description": "Where this block stands. A SELECT RATHER THAN A CHECKBOX BECAUSE THE THREE YEARS OF TRANSITION ARE THE PART A BUYER AND AN INSPECTOR BOTH ASK ABOUT, and a checkbox records the end state and loses them. Left empty on purpose for a block nobody has answered for: blank means unasked, which is a different fact from Conventional, and defaulting would turn every unanswered block into a stated one.",
+   "fieldname": "organic_status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Organic Status",
+   "options": "\nConventional\nTransitional\nCertified Organic",
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "description": "Computed from Organic Status on every save and NOT editable — a derived flag a person can set independently is a flag that will disagree with the status it came from, and the one that is wrong is always the one nobody edited. It exists so 'SUM(acreage) WHERE organic_certified' is one filter rather than a string comparison, and so a caller that only wants the boolean does not have to know the vocabulary.",
+   "fieldname": "organic_certified",
+   "fieldtype": "Check",
+   "label": "Organic Certified",
+   "read_only": 1
+  },
+  {
+   "fieldname": "organic_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Who certified it: Oregon Tilth, CCOF, WSDA. Free text, because the accreditied certifier list changes and a Select would have to be migrated when it does. An agency recorded on a block whose status is Conventional is a contradiction, and the field tools say so rather than refusing it — a block mid-application really does have an agency and no certificate yet.",
+   "fieldname": "organic_cert_agency",
+   "fieldtype": "Data",
+   "label": "Organic Certifying Agency"
+  },
+  {
+   "description": "When the transition began. The National Organic Program requires thirty-six months from the last prohibited application before ground can be certified, so this date is what says when the block becomes eligible — and it stays worth keeping after certification, because it is the evidence for the window that was served.",
+   "fieldname": "transition_start_date",
+   "fieldtype": "Date",
+   "label": "Transition Start Date"
   },
   {
    "description": "The shape on the ground. Everything below the polygon is DERIVED from it on save and must not be edited by hand — a figure a person can change independently of the polygon is a figure that will disagree with it, and the disagreement surfaces as a geofence saying no to somebody standing in the right place.",

@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-18 12:00:00.000000",
+ "description": "One pest management consultant, and which commodity they advise on. A CHILD TABLE RATHER THAN A LINK BECAUSE ONE IS THE EXCEPTION HERE, NOT THE RULE: a farm running pome fruit and cherries commonly has a different consultant for each, and a single Link on the Company would hold whichever was typed last. Left with no commodity, a row means the consultant covers the whole operation.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "provider",
+  "commodity",
+  "service_type",
+  "license_number"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "description": "The consulting firm or licensed consultant, as a Supplier — because that is who they already are on these books, and a second register of the same company is a second place their name can be wrong.",
+   "fieldname": "provider",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Provider",
+   "options": "Supplier",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "description": "The crop this consultant advises on. EMPTY MEANS THE WHOLE OPERATION, which is the ordinary case for a farm with one consultant — it is not an unanswered question, and the reads say so rather than listing the row as incomplete. A firm covering pome fruit and not cherries is two rows, one per crop, because 'pome fruit' is a category this site's Crop register does not have and inventing one here would put a second vocabulary beside it.",
+   "fieldname": "commodity",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Commodity",
+   "options": "Crop"
+  },
+  {
+   "columns": 3,
+   "description": "What they actually do: scouting, written recommendations, the whole IPM programme, application. Free text rather than a Select, because the arrangement a farm has with a consultant is not drawn from a list somebody wrote down once, and a Select would refuse the next one.",
+   "fieldname": "service_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Service Type"
+  },
+  {
+   "columns": 2,
+   "description": "The consultant's licence number where they hold one. Oregon licenses pesticide consultants under ORS 634, and a written recommendation from an unlicensed adviser is not a recommendation an inspector recognises. Left blank for an unlicensed adviser, which is a legitimate arrangement for scouting that stops short of a recommendation.",
+   "fieldname": "license_number",
+   "fieldtype": "Data",
+   "label": "Licence Number"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-18 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Pest Management Provider",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

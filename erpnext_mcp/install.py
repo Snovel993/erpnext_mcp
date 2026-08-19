@@ -156,6 +156,8 @@ def after_install() -> None:
 	_receipt_intelligence_fields()
 	_translations()
 	_breakeven_account_fields()
+	_sales_channel_field()
+	_pest_provider_field()
 	_agricultural_masters()
 	_employment_types()
 	_farm_designations()
@@ -199,9 +201,81 @@ def after_migrate() -> None:
 	_reporting_templates()
 	_translations()
 	_breakeven_account_fields()
+	_sales_channel_field()
+	_pest_provider_field()
 	_agricultural_masters()
 	_employment_types()
 	_farm_designations()
+
+
+def _pest_provider_field() -> None:
+	"""Give Company the pest management consultants table. v0.97.0.
+
+	The ninth place this app installs a Custom Field at migrate time, and a child
+	table rather than a Link on purpose: a farm running pome fruit and stone fruit
+	commonly retains a different consultant for each, and one Link holds whichever
+	was typed last while reading as the whole answer.
+
+	`tools/company.ensure_pest_provider_field` creates the same column lazily on
+	first use. Doing it here means it exists before anybody needs it, which is what
+	makes it visible on the Company form.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		if not frappe.db.exists("DocType", "Company"):
+			return
+		if company.ensure_pest_provider_field():
+			return
+		print(
+			"erpnext_mcp: Company did not take the pest_management_providers Custom Field. "
+			"list_companies reports the table as absent rather than reporting every company as "
+			"having no consultant, which is a different claim. Nothing else is affected."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			"erpnext_mcp: the Company pest management provider table was not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
+
+
+def _sales_channel_field() -> None:
+	"""Give Customer the column that says which channel a buyer is. v0.97.0.
+
+	The eighth place this app installs a Custom Field at migrate time, and the
+	narrowest argument of the eight: "what percentage of each commodity do you
+	direct-market" is a question a stock ERPNext cannot answer at all, because
+	nothing on the site says whether a sale was direct. One Select on the record
+	that knows — the customer — turns it into a query over Sales Invoice.
+
+	`tools/masters.ensure_sales_channel_field` creates the same column lazily on
+	first use, so a bench that pulled the code without running the installer
+	classifies a customer the first time somebody says so. Doing it here means it
+	exists before anybody needs it, which is what makes it visible on the Customer
+	form and filterable in the Desk.
+
+	Never raises: it runs inside `bench migrate`, where an exception aborts the
+	migration for the whole bench.
+	"""
+	try:
+		from .tools import masters
+
+		if not frappe.db.exists("DocType", "Customer"):
+			return
+		if masters.ensure_sales_channel_field():
+			return
+		print(
+			"erpnext_mcp: Customer did not take the sales_channel Custom Field. Every customer "
+			"tool still works and reports the column as absent — which is a different claim from "
+			"reporting every customer as unclassified. The direct-marketed share stays answerable "
+			"only from the typed Crop.pct_direct_marketed fallback."
+		)
+	except Exception as exc:  # pragma: no cover - a site mid-migrate
+		print(
+			"erpnext_mcp: the Customer sales channel field was not installed — "
+			f"{type(exc).__name__}: {exc}"
+		)
 
 
 def _agricultural_masters() -> None:

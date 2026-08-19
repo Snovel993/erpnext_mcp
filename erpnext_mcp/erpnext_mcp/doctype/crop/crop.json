@@ -14,6 +14,7 @@
   "identity_col",
   "growth_cycle",
   "is_organic_certified",
+  "pct_direct_marketed",
   "harvest_section",
   "days_to_harvest",
   "harvest_window_start",
@@ -77,6 +78,12 @@
    "fieldname": "is_organic_certified",
    "fieldtype": "Check",
    "label": "Organic Certified"
+  },
+  {
+   "description": "The share of this crop's volume sold direct — farm stand, farmers' market, u-pick, direct-to-retail — as a TYPED NUMBER somebody asserts, not a computed one. It is the fallback, and it is labelled as one on purpose: the true figure is direct revenue over total revenue read off Sales Invoice with each customer's sales_channel, and where the invoice data supports that, the computed figure wins and this is shown beside it as a disagreement. It exists because the survey is due in February whether or not that year's invoices are clean, and a number labelled as asserted beats a blank. Leave it empty rather than typing 0 for a crop nobody has estimated: nothing sold direct and nobody asked are different answers.",
+   "fieldname": "pct_direct_marketed",
+   "fieldtype": "Percent",
+   "label": "Direct-Marketed %"
   },
   {
    "fieldname": "harvest_section",

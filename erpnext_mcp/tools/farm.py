@@ -65,6 +65,12 @@ PARCEL = "Parcel"
 PRECISION_AG_APP = "farm_precision_ag"
 SPRAY_LOG = "Spray Log"
 
+#: The one `organic_status` value that means the certificate is in hand, spelled
+#: once. The Field controller derives `organic_certified` from the same string;
+#: two spellings of it would let a block report itself conventional and look fine.
+CERTIFIED_ORGANIC = "Certified Organic"
+TRANSITIONAL = "Transitional"
+
 _FIELD_FIELDS = (
 	"name",
 	"field_name",
@@ -88,6 +94,10 @@ _FIELD_FIELDS = (
 	"wildlife_intrusion_last_report",
 	"food_safety_zone",
 	"worker_hygiene_station_present",
+	"organic_status",
+	"organic_certified",
+	"organic_cert_agency",
+	"transition_start_date",
 	"boundary_geojson",
 	"boundary_centroid_lat",
 	"boundary_centroid_lon",
@@ -288,8 +298,39 @@ def _observed_spray_dates(field_names) -> dict:
 	return newest
 
 
-def _describe_field(row: dict, observed: dict | None = None) -> dict:
+def _parcel_counties(parcel_names) -> dict:
+	"""Parcel → county, for every parcel named, in one query.
+
+	COUNTY IS READ THROUGH THE PARCEL AND IS NEVER COPIED ONTO A BLOCK. A second
+	copy on the Field would be a second answer, and the one that is wrong is
+	always the one nobody edited when the assessor redrew a line. So the register
+	reports it, the survey groups by it, and there is exactly one place it is
+	stored.
+
+	Returns `{}` on a site whose Parcel has no county column rather than raising,
+	so a block register still lists on a site that never recorded one.
+	"""
+	wanted = sorted({str(name) for name in (parcel_names or []) if name})
+	if not wanted:
+		return {}
+	try:
+		if not compat.doctype_exists(PARCEL) or not compat.has_field(PARCEL, "county"):
+			return {}
+		rows = frappe.db.get_all(
+			PARCEL,
+			filters={"name": ("in", wanted)},
+			fields=["name", "county"],
+			limit=max(len(wanted), 1),
+		)
+	except Exception:
+		return {}
+	return {row["name"]: (row.get("county") or None) for row in rows or []}
+
+
+def _describe_field(row: dict, observed: dict | None = None, counties: dict | None = None) -> dict:
 	observed = observed or {}
+	if counties is None:
+		counties = _parcel_counties([row.get("parcel")])
 	recorded = _date_str(row.get("last_spray_date"))
 	seen = observed.get(row.get("name")) or None
 	effective = max(filter(None, (recorded, seen)), default=None)
@@ -326,6 +367,13 @@ def _describe_field(row: dict, observed: dict | None = None) -> dict:
 		"wildlife_intrusion_last_report": _date_str(row.get("wildlife_intrusion_last_report")),
 		"food_safety_zone": compat.checked(row.get("food_safety_zone")),
 		"worker_hygiene_station_present": compat.checked(row.get("worker_hygiene_station_present")),
+		"organic_status": row.get("organic_status") or None,
+		"organic_certified": compat.checked(row.get("organic_certified")),
+		"organic_cert_agency": row.get("organic_cert_agency") or None,
+		"transition_start_date": _date_str(row.get("transition_start_date")),
+		# Read through the parcel on every call and stored on none of them. See
+		# `_parcel_counties`.
+		"county": counties.get(row.get("parcel")) or None,
 		**_boundary_summary(row),
 		"satellite_provider": row.get("satellite_provider") or None,
 		"imagery_asset_ref": row.get("imagery_asset_ref") or None,
@@ -436,17 +484,39 @@ def list_fields(args: dict) -> ToolResult:
 	if company:
 		filters["owning_entity"] = company
 	parcel = as_str(args, "parcel")
-	if parcel:
-		filters["parcel"] = _resolve_parcel(args)
+	parcel_filter = _resolve_parcel(args) if parcel else None
+	if parcel_filter:
+		filters["parcel"] = parcel_filter
 	for key in ("crop", "variety", "condition"):
 		value = as_str(args, key)
 		if value:
 			filters[key] = value
 	if "food_safety_zone" in args:
 		filters["food_safety_zone"] = 1 if as_bool(args, "food_safety_zone") else 0
+	organic_status = as_str(args, "organic_status")
+	if organic_status:
+		filters["organic_status"] = as_choice(FIELD, "organic_status", organic_status, "organic_status")
+	if "organic_certified" in args:
+		filters["organic_certified"] = 1 if as_bool(args, "organic_certified") else 0
 	linked = as_bool(args, "linked_to_cost_center")
 	if linked is not None:
 		filters["cost_center"] = ("is", "set") if linked else ("is", "not set")
+
+	# A county filter is a PARCEL filter, resolved here, because the county is
+	# the parcel's and a Field carries no copy of it. A county nothing is
+	# registered in narrows to nothing rather than being ignored — silently
+	# dropping it would answer a question about Wasco with every block on
+	# the site.
+	county = as_str(args, "county")
+	if county:
+		in_county = _parcels_in_county(county, company or "")
+		if parcel_filter and parcel_filter not in in_county:
+			raise ToolError(
+				f"{parcel_filter} is not in {county!r}, so the two filters together match "
+				"nothing. Pass one or the other."
+			)
+		if not parcel_filter:
+			filters["parcel"] = ("in", in_county)
 
 	rows = frappe.db.get_all(
 		FIELD,
@@ -456,7 +526,8 @@ def list_fields(args: dict) -> ToolResult:
 		limit=min(limit, REGISTER_CAP),
 	)
 	observed = _observed_spray_dates([row.get("name") for row in rows])
-	fields = [_describe_field(dict(row), observed) for row in rows]
+	counties = _parcel_counties([row.get("parcel") for row in rows])
+	fields = [_describe_field(dict(row), observed, counties) for row in rows]
 
 	acreage = round(sum(row["acreage"] for row in fields), 2)
 	planted = [row["planting_year"] for row in fields if row["planting_year"]]
@@ -467,7 +538,8 @@ def list_fields(args: dict) -> ToolResult:
 
 	data = {
 		"company": company,
-		"parcel": filters.get("parcel"),
+		"parcel": parcel_filter,
+		"county": county or None,
 		"field_count": len(fields),
 		"total_acreage": acreage,
 		"average_acreage": round(acreage / len(fields), 2) if fields else 0.0,
@@ -477,12 +549,92 @@ def list_fields(args: dict) -> ToolResult:
 		"known_varieties": _known_varieties(company or ""),
 		"without_acreage": [row["name"] for row in fields if not row["acreage"]],
 		"spray_dates_from_farm_precision_ag": _spray_log_available(),
+		**_organic_rollup(fields),
+		**_county_rollup(fields),
 		"fields": fields,
 	}
 	return ToolResult(
 		data=data,
 		summary=f"{len(fields)} field(s), {acreage} acres",
 	)
+
+
+def _parcels_in_county(county: str, company: str) -> list:
+	"""Every parcel docname in one county, for the Field filter to run against.
+
+	Refuses a county this site has no parcel in, and names the ones it does have.
+	A filter that quietly matched nothing and a filter that quietly matched
+	everything are both worse than a sentence: one reads as "we farm no ground
+	there" and the other as "we farm all of it", and neither is what a typo means.
+	"""
+	if not compat.doctype_exists(PARCEL) or not compat.has_field(PARCEL, "county"):
+		raise ToolError(
+			"this site's Parcel has no county column, so blocks cannot be grouped by county. "
+			"County is the parcel's fact and a Field never carries a copy of it."
+		)
+	scope = {"owning_entity": company} if company else {}
+	names = frappe.db.get_all(
+		PARCEL, filters={**scope, "county": county}, pluck="name", limit=REGISTER_CAP
+	)
+	if names:
+		return sorted(names)
+	known = sorted(
+		{
+			str(value).strip()
+			for value in frappe.db.get_all(
+				PARCEL, filters={**scope, "county": ("is", "set")}, pluck="county", limit=REGISTER_CAP
+			)
+			or []
+			if str(value or "").strip()
+		}
+	)
+	where = f" for {company}" if company else ""
+	raise ToolError(
+		f"no Parcel is recorded in {county!r}{where}. The counties this site does hold ground "
+		f"in are: {', '.join(known) or '<none recorded>'}."
+	)
+
+
+def _organic_rollup(fields: list) -> dict:
+	"""Certified and transitional acres, which is the survey line itself.
+
+	CERTIFIED ACRES ARE SUMMED FROM THE STATUS, NOT COUNTED FROM THE CROP. One
+	Crop record covers eight certified blocks and twelve conventional ones, so a
+	crop-level flag cannot answer this at all — and the transitional figure is the
+	one a crop-level flag cannot even represent.
+
+	Blocks with no status are reported by name rather than folded into
+	Conventional: a blank means nobody has answered, and quietly counting it as
+	conventional would make an unanswered farm look like a fully-answered
+	conventional one.
+	"""
+	acres: dict = {}
+	for row in fields:
+		key = row["organic_status"] or "(unrecorded)"
+		acres[key] = round(acres.get(key, 0.0) + row["acreage"], 2)
+	return {
+		"organic_certified_acreage": acres.get(CERTIFIED_ORGANIC, 0.0),
+		"organic_transitional_acreage": acres.get(TRANSITIONAL, 0.0),
+		"acreage_by_organic_status": dict(sorted(acres.items())),
+		"without_organic_status": [row["name"] for row in fields if not row["organic_status"]],
+	}
+
+
+def _county_rollup(fields: list) -> dict:
+	"""Acres by county, read through each block's parcel.
+
+	This is "which counties do you operate in" as arithmetic. Operations rather
+	than ownership is the point: leased ground counts, and it counts in the county
+	of the parcel it sits on.
+	"""
+	acres: dict = {}
+	for row in fields:
+		key = row["county"] or "(unrecorded)"
+		acres[key] = round(acres.get(key, 0.0) + row["acreage"], 2)
+	return {
+		"counties": sorted(key for key in acres if key != "(unrecorded)"),
+		"acreage_by_county": dict(sorted(acres.items())),
+	}
 
 
 # ── 101. get_field ──────────────────────────────────────────────────────────
@@ -608,6 +760,16 @@ def create_field(args: dict) -> ToolResult:
 		if value is not None:
 			doc.set(check_key, 1 if value else 0)
 
+	# v0.97.0. Certification is a fact about GROUND, so it is set on the block
+	# and not on the crop. `organic_certified` is deliberately not settable —
+	# the controller derives it from the status on every save.
+	_reject_derived_organic(args)
+	organic_status = as_str(args, "organic_status")
+	if organic_status:
+		doc.organic_status = as_choice(FIELD, "organic_status", organic_status, "organic_status")
+	doc.organic_cert_agency = as_str(args, "organic_cert_agency")
+	doc.transition_start_date = as_date(args, "transition_start_date")
+
 	doc.insert(ignore_permissions=True)
 
 	described = _describe_field(dict(doc.as_dict()))
@@ -648,6 +810,7 @@ def _field_warnings(described: dict, parcel: str) -> list:
 			"on the Irrigation Zone satisfy this too — record it in whichever place the water is "
 			"actually managed."
 		)
+	out.extend(_organic_warnings(described))
 	remaining = frappe.db.get_value(PARCEL, parcel, "acreage")
 	if remaining:
 		used = sum(
@@ -658,6 +821,37 @@ def _field_warnings(described: dict, parcel: str) -> list:
 		)
 		out.append(
 			f"{parcel} is {round(float(remaining), 2)} acres and its blocks now total {round(used, 2)}."
+		)
+	return out
+
+
+def _organic_warnings(described: dict) -> list:
+	"""The three ways the organic columns can contradict each other.
+
+	NONE OF THEM REFUSES, and each is a real state some block is genuinely in. A
+	block mid-application has a certifier and no certificate; a farm that has
+	just started a transition may not have dug out the date yet. What is not
+	acceptable is any of them passing unremarked, because the acreage sum is a
+	number somebody signs.
+	"""
+	out = []
+	status = described.get("organic_status")
+	if described.get("organic_cert_agency") and status in (None, "Conventional"):
+		out.append(
+			f"A certifying agency is recorded and the organic status is "
+			f"{status or 'unanswered'}. One of the two is out of date — the acreage sum reads "
+			"the status, so this block is NOT counted as certified."
+		)
+	if status == TRANSITIONAL and not described.get("transition_start_date"):
+		out.append(
+			"Marked Transitional with no transition start date. The National Organic Program "
+			"counts thirty-six months from the last prohibited application, so without the date "
+			"nothing can say when this block becomes eligible."
+		)
+	if status == CERTIFIED_ORGANIC and not described.get("organic_cert_agency"):
+		out.append(
+			"Marked Certified Organic with no certifying agency recorded. The certificate is "
+			"issued by somebody, and a survey line or a buyer asks who."
 		)
 	return out
 
@@ -723,6 +917,19 @@ def update_field(args: dict) -> ToolResult:
 		if key in args:
 			value = as_bool(args, key)
 			_stage(changes, doc, key, 1 if value else 0)
+	_reject_derived_organic(args)
+	if "organic_status" in args:
+		value = as_str(args, "organic_status")
+		_stage(
+			changes,
+			doc,
+			"organic_status",
+			as_choice(FIELD, "organic_status", value, "organic_status") if value else "",
+		)
+	if "organic_cert_agency" in args:
+		_stage(changes, doc, "organic_cert_agency", as_str(args, "organic_cert_agency"))
+	if "transition_start_date" in args:
+		_stage(changes, doc, "transition_start_date", as_date(args, "transition_start_date") or "")
 
 	if not changes:
 		raise ToolError(
@@ -731,6 +938,7 @@ def update_field(args: dict) -> ToolResult:
 			"external_farm_app_id, last_spray_date, water_test_last_date, "
 			"wildlife_intrusion_last_report, productive_from_date, productive_through_date, "
 			"pre_yield_end_date, food_safety_zone, worker_hygiene_station_present, "
+			"organic_status, organic_cert_agency, transition_start_date, "
 			"notes."
 		)
 
@@ -745,6 +953,22 @@ def update_field(args: dict) -> ToolResult:
 		summary=f"{doc.name}: {len(changes)} field(s) changed",
 		docstatus_delta="0 → 0 (updated)",
 	)
+
+
+def _reject_derived_organic(args: dict) -> None:
+	"""`organic_certified` is computed, and a tool that took it would create drift.
+
+	The same rule the boundary's derived columns are under, said out loud rather
+	than ignored: a caller who sets the flag and leaves the status alone has two
+	answers to "are these acres certified", and the next save overwrites theirs
+	anyway. Refusing names the field that actually decides it.
+	"""
+	if "organic_certified" in args:
+		raise ToolError(
+			"organic_certified cannot be set: it is DERIVED from organic_status on every save, "
+			"so a value written here would be overwritten by the next one. Set organic_status "
+			f"to {CERTIFIED_ORGANIC!r} instead. Nothing was changed."
+		)
 
 
 def _stage(changes: dict, doc, field: str, wanted) -> None:
@@ -1152,7 +1376,8 @@ def get_parcel_field_summary(args: dict) -> ToolResult:
 		limit=REGISTER_CAP,
 	)
 	observed = _observed_spray_dates([row.get("name") for row in rows])
-	fields = [_describe_field(dict(row), observed) for row in rows]
+	counties = _parcel_counties([parcel["name"]])
+	fields = [_describe_field(dict(row), observed, counties) for row in rows]
 
 	zones = []
 	if compat.doctype_exists(IRRIGATION_ZONE):
@@ -1660,7 +1885,8 @@ def find_fields_containing_point(args: dict) -> ToolResult:
 		if shape is not None and geo.covers_point(shape, latitude, longitude):
 			matches.append(dict(row))
 
-	described = [_describe_field(row) for row in matches]
+	counties = _parcel_counties([row.get("parcel") for row in matches])
+	described = [_describe_field(row, None, counties) for row in matches]
 	unmapped = frappe.db.count(
 		FIELD, {**({"owning_entity": company} if company else {}), "boundary_geojson": ("is", "not set")}
 	)
@@ -1732,7 +1958,8 @@ def find_fields_by_h3_cell(args: dict) -> ToolResult:
 		if any(geo.cell_parent(entry, resolution) == cell for entry in coarsest):
 			matches.append(dict(row))
 
-	described = [_describe_field(row) for row in matches]
+	counties = _parcel_counties([row.get("parcel") for row in matches])
+	described = [_describe_field(row, None, counties) for row in matches]
 	return ToolResult(
 		data={
 			"cell": cell,
