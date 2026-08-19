@@ -105,6 +105,7 @@ from .. import training as training_register
 from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
 from ..errors import ToolError
 from ..tools import asset_tags, badges, bucket_log, dispatch, fieldwork, i9, shifts, signatures, signers, w4
+from ..tools import binseals as bin_seal_tools
 from ..tools import tasktemplates as template_tools
 from ..tools import signed_documents
 from ..tools import evidence as evidence_tools
@@ -11381,3 +11382,108 @@ def render_training_sign_in_sheet(user: str, session=None, overwrite=None) -> di
 		inner["overwrite"] = overwrite
 
 	return training_session_tools.render_training_sign_in_sheet(inner).data
+
+
+# ── 133. seal_bin ────────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("seal_bin", mutating=True, limit=guard.UPLOAD_LIMIT)
+def seal_bin(
+	user: str,
+	bin_tag=None,
+	bucket_count=None,
+	contributors=None,
+	shift=None,
+	field=None,
+	block=None,
+	crop=None,
+	bucket_session=None,
+	gps_lat=None,
+	gps_lon=None,
+	gps_accuracy_meters=None,
+	h3_hex=None,
+	sealed_at=None,
+	sealed_by=None,
+	client_event_id=None,
+	nostr_event_id=None,
+	notes=None,
+) -> dict:
+	"""Close one bin in the field, with the names of the people whose buckets are in it.
+
+	THE MOMENT THE ANSWER EXISTS AND THE ONLY ONE. A bin leaves the orchard on a
+	trailer carrying a tag and nothing else; the buckets are tipped and mixed, the
+	badge scans live on a handset, and every question the packing house will ask
+	afterwards — whose fruit, which block, which shift, and therefore which spray
+	record and which weather timeline — is a join from that tag back to an hour
+	nobody wrote down. This is what writes it down, at the moment the checker taps
+	Seal, which is the last instant anybody knows.
+
+	`UPLOAD_LIMIT` RATHER THAN `WRITE_LIMIT`, and for the reason `sync_bucket_entries`
+	uses it: a checker seals bins through a morning with no signal and the queue
+	drains in a burst when the phone finds the yard's wifi. Ten calls a minute
+	would refuse most of a day's harvest, and a refused seal is a bin that arrives
+	at the pack line traceable to nobody. `client_event_id` is what makes that
+	safe — a retry finds the seal it already wrote and creates nothing.
+
+	`company` IS NOT ON THIS SIGNATURE. It is resolved from the shift, or from the
+	checker, and never from a body key: this table's argument filter is what makes
+	that unreachable rather than merely refused, and a phone that could name an
+	entity would be filing another farm's harvest against this one's crew.
+
+	`source` IS NOT ON IT EITHER, for the same kind of reason. Everything arriving
+	here IS the handset, and a key that could say `Manual` would let a phone
+	disguise a typed record as a scanned one — the two are different evidence and
+	the register has to be able to tell them apart.
+	"""
+	allowed = guard.require_scope(user)
+
+	inner: dict = {"bin_tag": bin_tag, "bucket_count": bucket_count}
+	if shift is not None:
+		inner["shift"] = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)
+	if sealed_by is not None:
+		inner["sealed_by"] = _employee_argument(sealed_by, allowed, "sealed_by")
+	if contributors is not None:
+		inner["contributors"] = _bin_contributors(contributors, allowed)
+	for key, value in (
+		("field", field),
+		("block", block),
+		("crop", crop),
+		("bucket_session", bucket_session),
+		("gps_lat", gps_lat),
+		("gps_lon", gps_lon),
+		("gps_accuracy_meters", gps_accuracy_meters),
+		("h3_hex", h3_hex),
+		("sealed_at", sealed_at),
+		("client_event_id", client_event_id),
+		("nostr_event_id", nostr_event_id),
+		("notes", notes),
+	):
+		if value is not None:
+			inner[key] = value
+
+	result = bin_seal_tools.seal_bin(inner)
+	return result.data
+
+
+def _bin_contributors(raw, allowed: list) -> list:
+	"""The contributor list, with every Employee docname held to the caller's scope.
+
+	A BADGE IS PASSED THROUGH UNCHECKED AND AN EMPLOYEE IS NOT, which looks
+	inconsistent and is not. `_employee_argument` is what stops an account naming
+	somebody from an entity it cannot see; a badge carries no entity, and the tool
+	resolves it against the badge register FOR THIS COMPANY — a card issued by
+	another farm resolves to nobody there. So the two arrive at the same guarantee
+	by different doors, and checking the badge here would mean resolving it twice
+	with two chances to disagree.
+
+	A NON-LIST IS PASSED THROUGH UNTOUCHED so the tool produces the refusal. A
+	wrapper that quietly coerced the wrong shape would move the error message away
+	from the code that knows what the right shape is.
+	"""
+	if not isinstance(raw, (list, tuple)):
+		return raw
+	out = []
+	for entry in raw:
+		if isinstance(entry, dict) and entry.get("employee"):
+			entry = {**entry, "employee": _employee_argument(entry["employee"], allowed, "contributors")}
+		out.append(entry)
+	return out

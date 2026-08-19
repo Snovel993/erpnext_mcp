@@ -424,6 +424,18 @@ def _item_below_reorder(row: dict) -> dict:
 	return _task_action("create_task", "Raise a task to reorder this item")
 
 
+def _minor_hours_approaching(row: dict) -> dict:
+	return _no_fix(
+		"What answers this is a rostering decision about tomorrow — do not put this person on "
+		"the crew, or send them home early — and there is no form on a phone for either. A Farm "
+		"Task saying 'do not schedule somebody' is a card nobody can complete and evidence of "
+		"nothing, which is why this rule ships without a task recipe. It clears BY ITSELF when "
+		"the workweek turns, because the figure it counts resets. Until then: "
+		"add_worker_to_shift will refuse to roster them past the ceiling, and clock_out_worker "
+		"is how a day that is already close gets stopped."
+	)
+
+
 #: THE CLOSED MAP. Every key is an alert_type this release names a rectification
 #: for; adding one is a code change on purpose, same reasoning as
 #: `tools/signatures.SIGNATURE_BOXES` — this table is a claim about which route
@@ -460,6 +472,11 @@ _BUILDERS = {
 	"rei_active_block_entry": _rei_active_block_entry,
 	"phi_harvest_window": _phi_harvest_window,
 	"item_below_reorder": _item_below_reorder,
+	# v0.98.0. AN EXPLICIT REFUSAL RATHER THAN AN ABSENCE, which is what this map
+	# is for: an alert type with no entry would fall through to the generic
+	# "raise a task" fallback and produce a card reading "do not schedule this
+	# person", and nobody can complete that. See `_minor_hours_approaching`.
+	"minor_hours_approaching": _minor_hours_approaching,
 }
 
 

@@ -23,6 +23,13 @@
   "applies_to",
   "break_scope_col",
   "employee",
+  "heat_section",
+  "peak_heat_index_f",
+  "peak_temp_f",
+  "heat_col",
+  "threshold_crossed_at",
+  "weather_source",
+  "heat_obligation",
   "detail_section",
   "description",
   "producer_section",
@@ -142,6 +149,56 @@
    "label": "Employee",
    "options": "Employee",
    "depends_on": "eval:doc.applies_to=='Individual'"
+  },
+  {
+   "fieldname": "heat_section",
+   "fieldtype": "Section Break",
+   "label": "Heat Conditions",
+   "description": "Filled by `log_shift_break` when the break_kind is a HEAT one — Cool-Down, Water Break or Shade Break. Everything here is copied off the shift's own weather timeline at the moment the break is logged, so a break row read years later carries the conditions it was called in without a reader having to reconstruct them from ninety readings. The timeline behind it is what proves the numbers.",
+   "depends_on": "eval:doc.break_kind"
+  },
+  {
+   "description": "The HIGHEST heat index reached on this shift at or before the break, not the reading at the break's own instant — that is `weather_snapshot_heat_index_f` above. The two answer different questions and an inspector asks the peak: OAR 437-004-1131 obligations attach once the index CROSSES a threshold, and a cool-down called at four o'clock after a 96 °F afternoon is evidence about the afternoon.",
+   "fieldname": "peak_heat_index_f",
+   "fieldtype": "Float",
+   "label": "Peak Heat Index to Here (°F)",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "description": "The highest ambient temperature on this shift at or before the break.",
+   "fieldname": "peak_temp_f",
+   "fieldtype": "Float",
+   "label": "Peak Temp to Here (°F)",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "fieldname": "heat_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "When this shift's heat index FIRST crossed the threshold that starts the cool-down cycle. It is what makes a break row answer 'was relief provided in time' without a join: the interval between this stamp and `event_datetime` is the answer, and it is a number an inspector can read off one row.",
+   "fieldname": "threshold_crossed_at",
+   "fieldtype": "Datetime",
+   "label": "Threshold Crossed At",
+   "read_only": 1
+  },
+  {
+   "description": "Where the figures on this row came from — the `source` of the weather reading they were copied off, or blank where the foreman typed a temperature themselves. PROVENANCE RATHER THAN DECORATION: a number from a grid-square forecast and a number from a thermometer at the block are both true and they are not the same claim, and the one being quoted back in a citation should say which it is.",
+   "fieldname": "weather_source",
+   "fieldtype": "Data",
+   "label": "Weather Source",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Set when this break discharges a heat-illness-prevention obligation rather than a wage-and-hour one — the three kinds in `breaks.HEAT_RELIEF_KINDS`. Derived on write from `break_kind` and never taken from a caller: a flag a phone could set would let a meal period be counted as a cool-down in the one register that has to answer OAR 437-004-1131 honestly.",
+   "fieldname": "heat_obligation",
+   "fieldtype": "Check",
+   "label": "Counts Toward Heat Obligation",
+   "read_only": 1
   },
   {
    "fieldname": "detail_section",

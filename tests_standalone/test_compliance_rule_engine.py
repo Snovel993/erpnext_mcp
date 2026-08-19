@@ -33,10 +33,12 @@ from .harness import STORE
 from .test_alerts import ALL_ON, TODAY, AlertTestCase, days_from_today
 
 #: The rules that are SWEPT — walked nightly against the site's records. Thirty
-#: since v0.69.0, and the number is spelled out rather than derived because it is
-#: the claim these tests exist to make: every rule this app ships became a record,
-#: one for one, and a release that drops one should fail here loudly.
-SWEPT_RULES = 30
+#: since v0.69.0 and THIRTY-ONE since v0.98.0, which added
+#: `minor_hours_approaching`; the number is spelled out rather than derived
+#: because it is the claim these tests exist to make: every rule this app ships
+#: became a record, one for one, and a release that drops one should fail here
+#: loudly.
+SWEPT_RULES = 31
 
 #: v0.80.0. The rules that are GATES — consulted at the moment of a transaction
 #: rather than swept. Derived from `enforcement.CONTROL_POINTS` rather than
@@ -428,6 +430,14 @@ class TheThirteenMigrateInThreeShapes(RuleEngineTestCase):
 				# no question you can ask of a Bin whose answer is on an Item's
 				# child table.
 				"item_below_reorder",
+				# v0.98.0, and the seventh permanent built-in. The condition is a
+				# SUM over the crew rows of every shift a person is on, bounded
+				# by a workweek, compared against a ceiling that depends on their
+				# AGE ON THE DAY — three things the declarative vocabulary has
+				# none of. It also has to count the shift that is still running,
+				# which is the whole point of the rule and which no stored column
+				# holds until the shift closes.
+				"minor_hours_approaching",
 				"supervisor_review_lapsed",
 			],
 		)
@@ -1176,7 +1186,14 @@ class TheRuleTools(RuleEngineTestCase):
 		employees = self.tool_data("list_compliance_rules", {"target_doctype": "Employee"})
 		self.assertEqual(
 			sorted(rule["alert_type"] for rule in employees["rules"]),
-			["employee_missing_w4", "flc_license_expiring", "i9_expired"],
+			[
+				"employee_missing_w4",
+				"flc_license_expiring",
+				"i9_expired",
+				# v0.98.0. The fourth rule whose subject is the person rather
+				# than a document about them.
+				"minor_hours_approaching",
+			],
 		)
 
 	def test_a_regime_that_is_not_in_the_vocabulary_is_refused_by_name(self):

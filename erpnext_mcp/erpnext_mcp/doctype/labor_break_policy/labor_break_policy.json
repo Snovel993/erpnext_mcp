@@ -26,6 +26,10 @@
   "meal_schedule",
   "heat_section",
   "heat_schedule",
+  "minor_section",
+  "minor_rest_schedule",
+  "minor_meal_schedule",
+  "minor_max_hours_without_rest",
   "config_section",
   "max_hours_without_rest",
   "notes_section",
@@ -139,6 +143,33 @@
    "fieldtype": "Table",
    "label": "Heat Schedule",
    "options": "Labor Heat Break Row"
+  },
+  {
+   "fieldname": "minor_section",
+   "fieldtype": "Section Break",
+   "label": "Minor Schedule (under 18)",
+   "description": "OAR 839-021-0072. A worker under eighteen is owed a rest period every TWO hours and a meal every FOUR, against four and six for an adult under OAR 839-020-0050 — so the entitlement is a different table rather than a multiplier on this one. LEAVING THESE EMPTY IS SAFE AND VISIBLE: a policy with no minor rows computes a minor's entitlement from the adult schedule above, which owes FEWER periods and therefore shows up as a shortfall the moment anybody reads the shift, rather than as a silent exemption."
+  },
+  {
+   "description": "Rest periods owed a worker under eighteen, by hours worked. Read INSTEAD OF `rest_schedule` for anybody whose `date_of_birth` makes them a minor on the day of the shift — never in addition to it.",
+   "fieldname": "minor_rest_schedule",
+   "fieldtype": "Table",
+   "label": "Minor Rest Schedule",
+   "options": "Labor Break Schedule Row"
+  },
+  {
+   "description": "Meal periods owed a worker under eighteen, by hours worked. Read INSTEAD OF `meal_schedule` for a minor.",
+   "fieldname": "minor_meal_schedule",
+   "fieldtype": "Table",
+   "label": "Minor Meal Schedule",
+   "options": "Labor Break Schedule Row"
+  },
+  {
+   "description": "The longest a minor may work without a rest period. Supersedes `max_hours_without_rest` for a minor where it is set, and falls back to it where it is not — the same direction as the two tables above. Zero or empty means the adult ceiling applies.",
+   "fieldname": "minor_max_hours_without_rest",
+   "fieldtype": "Float",
+   "label": "Minor Max Hours Without Rest",
+   "precision": "2"
   },
   {
    "fieldname": "config_section",

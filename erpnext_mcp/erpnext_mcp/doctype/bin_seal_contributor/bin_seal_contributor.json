@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-18 12:00:00.000000",
+ "description": "One worker whose badge was scanned into the buckets that went into this bin. The accountability chain from a pack line back to a person: a bin tag is what a packing house holds, and this is the only row that says whose fruit is inside it.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "identity_col",
+  "badge_id",
+  "buckets_contributed",
+  "position_section",
+  "first_scan_at",
+  "last_scan_at"
+ ],
+ "fields": [
+  {
+   "description": "The worker. A Link rather than a badge string, because a badge is reassigned between seasons and a settlement question asked two years later is about the person.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Denormalised at write time, so a bin read years later names the person as they were named then — the same rule every other record in this app snapshots a name under.",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The badge that was actually scanned, as it was scanned. Kept beside the Employee rather than instead of it: the badge is what the checker's phone saw and the link is what it resolved to, and a dispute about a mis-scan needs both.",
+   "fieldname": "badge_id",
+   "fieldtype": "Data",
+   "label": "Badge Scanned"
+  },
+  {
+   "description": "How many of this bin's buckets came from this person, where the checker's phone counted per badge. ZERO IS A REAL ANSWER and is not the same as absent: a worker whose badge was scanned at the bin and whose buckets were not separately counted is a contributor with an unknown share, which is honest, and a share invented by dividing the bin evenly would be a piece-rate figure nobody measured.",
+   "fieldname": "buckets_contributed",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Buckets Contributed"
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Scans"
+  },
+  {
+   "description": "The first badge scan counted into this bin, where the phone reported one.",
+   "fieldname": "first_scan_at",
+   "fieldtype": "Datetime",
+   "label": "First Scan"
+  },
+  {
+   "description": "The last badge scan counted into this bin. Together with the first, it is the window this person was tipping into it — which is what a re-entry-interval or a heat-exposure question about a named bin is actually asking.",
+   "fieldname": "last_scan_at",
+   "fieldtype": "Datetime",
+   "label": "Last Scan"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-18 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bin Seal Contributor",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 0,
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

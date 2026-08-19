@@ -1,0 +1,285 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "",
+ "creation": "2026-08-18 12:00:00.000000",
+ "description": "One bin, closed in the field, with the names of the people whose buckets are in it. THE ACCOUNTABILITY CHAIN FROM A PACK LINE BACK TO A BLOCK AND A CREW: a bin arriving at a packing house carries a tag and nothing else, and every question asked of it afterwards — whose fruit is this, which block did it come from, was that block inside a re-entry interval, who do we pay for it, and where else did that afternoon's picking go if this bin is the one that failed a residue test — is answered from this record or from nowhere. NOT A CHILD TABLE OF THE BUCKET SESSION, for the reason Shift Location Log is not a child table of the shift: a bin is sealed by a CHECKER whose phone is not editing anybody's session, several sessions tip into one bin, and one session fills many bins over a day.",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "bin_tag",
+  "bucket_count",
+  "identity_col",
+  "company",
+  "sealed_at",
+  "sealed_by",
+  "sealed_by_name",
+  "where_section",
+  "shift",
+  "field",
+  "block",
+  "where_col",
+  "bucket_session",
+  "crop",
+  "position_section",
+  "gps_lat",
+  "gps_lon",
+  "position_col",
+  "gps_accuracy_meters",
+  "h3_hex",
+  "contributors_section",
+  "contributors",
+  "provenance_section",
+  "source",
+  "client_event_id",
+  "provenance_col",
+  "nostr_event_id",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "BIN-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "BIN-.YYYY.-.#####",
+   "reqd": 1
+  },
+  {
+   "description": "What is printed or stuck on the bin — the QR code the checker scanned, or MANUAL-XXXX where there was no tag to scan and somebody keyed one. NOT UNIQUE ON THIS SITE AND NOT MADE SO: bin tags are reused between seasons and between growers, and a uniqueness constraint would refuse the second true record rather than the first false one. `trace_bin` reports every seal carrying a tag and says how many it found, which is the honest answer to a reused tag and the one a packing house can act on.",
+   "fieldname": "bin_tag",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Bin Tag",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "How many buckets were in the bin when it was closed. The figure the checker's tally showed, not a figure derived from the contributor rows — the two are allowed to disagree and the disagreement is information. A bucket tipped by somebody whose badge did not scan is in the bin and not in the rows, and a record that silently made the numbers agree would delete exactly that.",
+   "fieldname": "bucket_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Buckets",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identity_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "Filled from the shift or the sealer on save. It is what scopes a bin to a company — a User Permission on Company reaches this doctype because this column links to one.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "When the bin was closed, which is not when the record arrived. A phone out of signal in a canyon posts an afternoon of seals the moment the bars come back, and a timestamp assigned on receipt would file the whole day at the spot where the signal returned.",
+   "fieldname": "sealed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Sealed At",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "The checker who closed it. A named person, because a bin count is a piece-rate figure before it is a traceability one and somebody answers for it.",
+   "fieldname": "sealed_by",
+   "fieldtype": "Link",
+   "label": "Sealed By",
+   "options": "Employee",
+   "search_index": 1
+  },
+  {
+   "description": "Denormalised at write time, so a seal read years later names the checker as they were named then.",
+   "fieldname": "sealed_by_name",
+   "fieldtype": "Data",
+   "label": "Sealed By (Name)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "where_section",
+   "fieldtype": "Section Break",
+   "label": "Where It Was Filled"
+  },
+  {
+   "description": "The shift the picking happened on. It is what joins a bin to the crew, the weather timeline and the break log for the afternoon it was filled — every exposure question about a bin is asked of a shift.",
+   "fieldname": "shift",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Shift",
+   "options": "Farm Shift",
+   "search_index": 1
+  },
+  {
+   "description": "The block, as this app's own register names it. A Link and not a string: a residue trace runs from a bin to a block to a spray application, and a typed block name breaks that chain at its weakest point.",
+   "fieldname": "field",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Field",
+   "options": "Field",
+   "search_index": 1
+  },
+  {
+   "description": "The block as the CREW calls it, where that is not a Field on the register — 'the young Bings', 'row 14 east'. Kept beside the Link rather than instead of it: a record naming only a Field cannot be checked against what the checker actually said, and a record naming only a phrase cannot be joined to anything.",
+   "fieldname": "block",
+   "fieldtype": "Data",
+   "label": "Block (as called)"
+  },
+  {
+   "fieldname": "where_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The bucket session this bin's buckets were counted through, where the checker's phone was running one. Optional: a bin filled by a crew being tallied on paper is a real bin.",
+   "fieldname": "bucket_session",
+   "fieldtype": "Link",
+   "label": "Bucket Session",
+   "options": "Bucket Log Session",
+   "search_index": 1
+  },
+  {
+   "description": "What is in it, where the checker said. Free of the Field's own crop on purpose — a block is replanted and a bin sealed in 2026 holds what was picked in 2026.",
+   "fieldname": "crop",
+   "fieldtype": "Data",
+   "label": "Crop"
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Where It Was Sealed"
+  },
+  {
+   "description": "Decimal degrees, -90 to 90. Where the bin was standing when it was closed, which is a stronger claim than which block it was picked from: a bin is sealed at the end of a row and a coordinate is what puts it there.",
+   "fieldname": "gps_lat",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "7"
+  },
+  {
+   "description": "Decimal degrees, -180 to 180. Negative in the western hemisphere: a Pacific Northwest orchard reads about -121, and a positive number there is a coordinate in China.",
+   "fieldname": "gps_lon",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "7"
+  },
+  {
+   "fieldname": "position_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The horizontal accuracy the phone reported, in metres. Kept and never used as a gate — the same argument Shift Location Log makes: a fix under a canopy reads badly and is still the only record of where the bin was.",
+   "fieldname": "gps_accuracy_meters",
+   "fieldtype": "Float",
+   "label": "Accuracy (metres)",
+   "precision": "2"
+  },
+  {
+   "description": "Computed at resolution 10 where the coordinates allow it, so a bin can be joined against a Field's or a Parcel's stored coverage without loading a polygon — which is how a bin whose `field` was left blank is still placed on the ground. Blank on a site without the h3 package: the coordinates are the record and this is the index.",
+   "fieldname": "h3_hex",
+   "fieldtype": "Data",
+   "label": "H3 Cell (res 10)",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "contributors_section",
+   "fieldtype": "Section Break",
+   "label": "Who Filled It"
+  },
+  {
+   "description": "The workers whose badges were scanned into this bin since the last seal. THIS TABLE IS THE FEATURE: everything else here can be reconstructed from a shift and a tag, and this cannot be reconstructed from anything once the crew has gone home.",
+   "fieldname": "contributors",
+   "fieldtype": "Table",
+   "label": "Contributors",
+   "options": "Bin Seal Contributor"
+  },
+  {
+   "fieldname": "provenance_section",
+   "fieldtype": "Section Break",
+   "label": "Provenance"
+  },
+  {
+   "default": "iOS",
+   "description": "Where the seal came from. iOS is the ordinary case — a checker closing a bin on the tally screen. Manual is somebody entering it afterwards, and it is a different kind of evidence: worth keeping, worth being able to tell apart.",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "iOS\nManual\nImport"
+  },
+  {
+   "description": "The identifier the handset generated for this seal before it sent it. IT IS WHAT MAKES A RETRY SAFE: a phone that sealed a bin and did not hear the answer sends the same call again, and without this the orchard gets two records of one bin and the packing house gets a doubled count. Unique where present.",
+   "fieldname": "client_event_id",
+   "fieldtype": "Data",
+   "label": "Client Event ID",
+   "search_index": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "provenance_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "description": "The id of the kind-4004 NOSTR event the handset published for this seal, where it published one. Recorded and never required: the relay is a distribution channel and this record is the register, and a bin sealed while the relay was unreachable is still a sealed bin.",
+   "fieldname": "nostr_event_id",
+   "fieldtype": "Data",
+   "label": "NOSTR Event ID",
+   "search_index": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "description": "Anything the checker wants on the record — a bin topped up from another row, a tag that would not scan, a bucket somebody could not account for."
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-18 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Bin Seal",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "bin_tag,shift,sealed_at",
+ "sort_field": "sealed_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

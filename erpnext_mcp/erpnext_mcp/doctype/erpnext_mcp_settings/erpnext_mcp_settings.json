@@ -719,6 +719,12 @@
   "fill_pipeline_write_section",
   "allow_update_fill_threshold",
   "allow_acknowledge_threshold_update",
+  "bin_seal_read_section",
+  "allow_get_bin_seal",
+  "allow_list_bin_seals",
+  "allow_trace_bin",
+  "bin_seal_write_section",
+  "allow_seal_bin",
   "document_intel_read_section",
   "allow_get_document_validation",
   "allow_list_document_validations",
@@ -5647,6 +5653,44 @@
    "fieldname": "allow_acknowledge_threshold_update",
    "fieldtype": "Check",
    "label": "Acknowledge Threshold Update"
+  },
+  {
+   "fieldname": "bin_seal_read_section",
+   "fieldtype": "Section Break",
+   "label": "Bin Sealing — Read"
+  },
+  {
+   "default": "1",
+   "description": "READ. One bin seal in full, with every contributor, the buckets attributed to each and the window their badge was scanning. `unattributed_buckets` is the checker's tally minus the badge scans and is reported rather than reconciled — a bucket tipped by somebody whose badge did not scan is in the bin and not in the rows, which is the fact a piece-rate dispute turns on.",
+   "fieldname": "allow_get_bin_seal",
+   "fieldtype": "Check",
+   "label": "Get Bin Seal"
+  },
+  {
+   "default": "1",
+   "description": "READ. The bin register by shift, field, block, tag, bucket session, checker or day. Contributors are deliberately not on it — one bin's crew is a child table, and forty bins would be forty reads of it.",
+   "fieldname": "allow_list_bin_seals",
+   "fieldtype": "Check",
+   "label": "List Bin Seals"
+  },
+  {
+   "default": "1",
+   "description": "READ. GIVEN A BIN TAG AT THE PACKING HOUSE, WHO PUT BUCKETS INTO IT — with the block, the shift and the checker. The accountability chain from the pack line back to the field, and the read the whole bin-sealing feature exists for. It answers with EVERY seal carrying the tag, because tags are reused between seasons and between growers and one confident answer about the wrong afternoon is worse than an ambiguous one. ON by default, because reading a trace cannot create one.",
+   "fieldname": "allow_trace_bin",
+   "fieldtype": "Check",
+   "label": "Trace Bin"
+  },
+  {
+   "fieldname": "bin_seal_write_section",
+   "fieldtype": "Section Break",
+   "label": "Bin Sealing — Write"
+  },
+  {
+   "default": "0",
+   "description": "MUTATING. Closes one bin and records whose buckets are in it — what the iOS tally screen posts when a checker seals. Idempotent on `client_event_id`, so a phone that did not hear the answer can retry without doubling a count at the pack line or a piece rate on somebody's cheque. OFF by default, like every other mutating tool: a bin count feeds a settlement, and turning it on is a decision an operator takes on purpose.",
+   "fieldname": "allow_seal_bin",
+   "fieldtype": "Check",
+   "label": "Seal Bin"
   },
   {
    "fieldname": "document_intel_read_section",

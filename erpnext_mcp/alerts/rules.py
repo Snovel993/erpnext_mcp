@@ -91,7 +91,8 @@ from dataclasses import dataclass
 
 import frappe
 
-from .. import compat
+from .. import compat, minors
+from .. import shifts as shift_records
 from .. import training as training_records
 from ..records import CORRECTIVE_ACTION_REQUIRED, RECORDED
 from .base import (
@@ -3263,6 +3264,140 @@ shape(
 		"producer_task_minutes": 15,
 	},
 	evidence_contract={"findings_text": True},
+)
+
+
+# ── 24. minor_hours_approaching ─────────────────────────────────────────────
+#
+# v0.98.0. THE ONE RULE HERE WHOSE SUBJECT IS A PERSON'S AGE, and the reason it
+# is a rule rather than a message on `add_worker_to_shift` is that the check at
+# the roster call happens when somebody is being ADDED. A fifteen-year-old who
+# was rostered on Monday and has been working since is nobody's roster call on
+# Thursday afternoon — and Thursday afternoon is when the fortieth hour arrives.
+#
+# COUNTED OFF THE SHIFTS AND NOT OFF ATTENDANCE, for the reason
+# `shifts.hours_worked_by` gives at length: Attendance is written when a shift
+# CLOSES, so the register says nothing about the day that is still running,
+# which is the only day this rule can do anything about.
+#
+# THE SEVERITY LADDER IS THE LIMIT ITSELF. Over the weekly ceiling is Critical —
+# the hours have already been worked and the employer is already answerable for
+# them. Inside `minors.WEEKLY_WARNING_HOURS` of it is a Warning, because there is
+# still an afternoon in which somebody can be sent home.
+def _scan_minor_hours(context: dict) -> list:
+	if not _employee_field("date_of_birth"):
+		return []
+	today = context["today"]
+	filters = _company_filter({}, context.get("company") or "")
+	if compat.has_field("Employee", "status"):
+		filters["status"] = "Active"
+	out = []
+	for row in _rows(
+		"Employee",
+		filters,
+		("name", "employee_name", "company", "date_of_birth", "status"),
+	):
+		described = minors.describe(row.get("date_of_birth"), today)
+		if not described["is_minor"]:
+			continue
+		band = described["minor_band"]
+		worked = shift_records.hours_worked_by(row["name"], today)
+		if not worked["shifts"]:
+			continue
+		limits = described["minor_limits"] or {}
+		weekly = float(limits.get("weekly_hours") or 0)
+		if not weekly:
+			continue
+		remaining = weekly - worked["week"]
+		if remaining > minors.WEEKLY_WARNING_HOURS:
+			continue
+
+		who = row.get("employee_name") or row["name"]
+		if remaining < 0:
+			severity = SEVERITY_CRITICAL
+			message = (
+				f"{who} is {described['age']} and has worked {worked['week']:.1f} hours in the "
+				f"week beginning {worked.get('week_start')} — {abs(remaining):.1f} hour(s) OVER "
+				f"the {weekly:.0f}-hour ceiling for the {band} band ({limits.get('citation')}). "
+				"The hours have been worked; what is left is to stop them growing and to be able "
+				"to say when somebody asks."
+			)
+		else:
+			severity = SEVERITY_WARNING
+			message = (
+				f"{who} is {described['age']} and has worked {worked['week']:.1f} of the "
+				f"{weekly:.0f} hours a {band} worker may work in the week beginning "
+				f"{worked.get('week_start')} — {remaining:.1f} left ({limits.get('citation')}). "
+				"This is the last part of the week in which sending them home is still a "
+				"decision rather than a finding."
+			)
+		out.append(
+			Observation(
+				source_doctype="Employee",
+				source_docname=row["name"],
+				message=message,
+				severity=severity,
+				due_date=today,
+				company=str(row.get("company") or ""),
+				category="Workforce",
+			)
+		)
+	return out
+
+
+register(
+	Rule(
+		key="minor_hours_approaching",
+		title="A worker under eighteen is at or over their weekly hour ceiling",
+		category="Workforce",
+		requires=("Employee", "Farm Shift", "Farm Shift Crew Member"),
+		framework="ORS 653.315 / OAR 839-021-0220 (under 16); OAR 839-021-0104 (16-17)",
+		purpose=(
+			"A child-labour hour limit is a limit on what may be SCHEDULED, and the moment it "
+			"can still be acted on is before the week ends rather than at the next inspection."
+		),
+		kairotic_gate=(
+			"Fires on hours ALREADY WORKED this workweek, counted off the crew rows of every "
+			"shift the person is on — including the one still running, which Attendance cannot "
+			"see because Attendance is written at the close. Silent until the total is within "
+			f"{minors.WEEKLY_WARNING_HOURS:.0f} hours of the band's ceiling, so a minor working "
+			"an ordinary week raises nothing at all; Critical once it is past. Clears by itself "
+			"at the start of the next workweek, because the figure it reads resets."
+		),
+		# Oregon BOLI enforces the wage-and-hour side and there is no packet of
+		# this app's that a child-labour hour finding belongs in, so `Internal`
+		# rather than a regime it does not answer to — the argument every other
+		# `Internal` rule here makes.
+		regimes=("Internal",),
+		scan=_scan_minor_hours,
+	)
+)
+
+# BUILT-IN AND NOT DECLARATIVE, and it could not be otherwise: the condition is a
+# sum over child rows of another doctype, filtered by a workweek, compared with a
+# ceiling that depends on the subject's age on the day. `date_field` empty with
+# both thresholds at -1 is this file's way of saying "every matching row raises";
+# what "matching" means lives in the scanner.
+shape(
+	"minor_hours_approaching",
+	target_doctype="Employee",
+	builtin_scanner="minor_hours_approaching",
+	requires_doctypes="Employee, Farm Shift, Farm Shift Crew Member",
+	requires_fields="date_of_birth",
+	date_field="",
+	threshold_critical_days=-1,
+	threshold_warning_days=-1,
+	severity_critical=SEVERITY_CRITICAL,
+	severity_warning=SEVERITY_WARNING,
+	severity_expired=SEVERITY_WARNING,
+	default_severity=SEVERITY_WARNING,
+	due_date_mode="Today",
+	category="Workforce",
+	retention_years=3,
+	# NO TASK RECIPE, DELIBERATELY. What answers this alert is a rostering
+	# decision somebody makes about tomorrow — send them home, or do not put them
+	# on the crew — and a Farm Task saying "do not schedule a person" is a card
+	# nobody can complete and evidence of nothing. It clears when the week turns.
 )
 
 

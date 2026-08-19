@@ -61,7 +61,7 @@ import json
 
 import frappe
 
-from .. import alerts, compat, completions, records, sessions
+from .. import alerts, compat, completions, minors, records, sessions, training_sessions
 from ..args import as_bool, as_choice, as_int, as_limit, as_str, as_visit_id, resolve_company
 from ..erpnext_mcp.doctype.farm_task.farm_task import (
 	AVAILABLE,
@@ -104,6 +104,12 @@ FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
 #: three places test it and a literal in each is how the fourth gets missed.
 SPRAY_TASK_TYPE = "Spray"
 ALERT = alerts.ALERT_DOCTYPE
+
+#: The alert type whose several rows become ONE afternoon, and the register it
+#: points at. v0.98.0 — see `_bundle_into_training_sessions`. Named here rather
+#: than spelled inline for the reason `SPRAY_TASK_TYPE` is: three places test it.
+TRAINING_ALERT = "training_expiring"
+TRAINING_RECORD = "Employee Training Record"
 
 BOARD_CAP = 500
 
@@ -883,6 +889,46 @@ def _worker(args: dict, key: str = "worker_id", required: bool = True) -> str:
 	return worker
 
 
+def _refuse_a_minor_on_prohibited_work(worker: str, worker_name: str, task: dict, verb: str = "changed") -> dict:
+	"""Refuse to send somebody under eighteen to work an age bar closes to them.
+
+	v0.98.0. AN AGE BAR AND NOT A TRAINING GAP, which is the whole reason this is
+	a refusal in a file whose posture is otherwise to record and report. Every
+	other warning `assign_farm_task` raises — a live re-entry interval, a
+	concurrent claim, a missing I-9 — describes work that is lawful with the right
+	precaution, so refusing would invent a rule stricter than the regulation and
+	teach a foreman to route around this app. 40 CFR §170.309(c) and 29 CFR
+	§570.71(a) are not like that: there is no course, no PPE and no supervision
+	that makes a sixteen-year-old a lawful pesticide handler.
+
+	Returns the minor findings on a dispatch that is allowed, so the caller can
+	put "this person is seventeen" on the answer. Empty for an adult, and empty
+	with a NOTE where no date of birth is recorded — never a refusal on a blank
+	column, for the same reason `minor_findings` gives.
+	"""
+	if not (worker and hr_installed() and compat.has_field(EMPLOYEE, "date_of_birth")):
+		return {}
+	born = frappe.db.get_value(EMPLOYEE, worker, "date_of_birth")
+	described = minors.describe(born, frappe.utils.today())
+	if described["is_minor"] is None:
+		return {
+			"date_of_birth_missing": (
+				f"{worker_name or worker} has no date of birth on file, so this app cannot check "
+				"the age bars on this kind of work. Set it with update_employee."
+			)
+		}
+	if not described["is_minor"]:
+		return {}
+	reason = minors.prohibited_reason(described["minor_band"], str(task.get("task_type") or ""))
+	if reason:
+		raise ToolError(
+			f"{worker_name or worker} is {described['age']}, and {task.get('name')} is a "
+			f"{task.get('task_type')} task. {reason} Nothing was {verb}. Send somebody eighteen "
+			"or over, or raise a different task."
+		)
+	return described
+
+
 def _worker_name(worker: str, given: str = "") -> str:
 	if given:
 		return given
@@ -1272,6 +1318,13 @@ def assign_farm_task(args: dict) -> ToolResult:
 	# nobody may work is not a task worth arguing about who holds.
 	phi_override = _refuse_harvest_inside_phi(row, args, "changed", override_tool="assign_farm_task")
 
+	# v0.98.0. AND FOR THE SAME REASON, ONE LINE LATER: whether this PERSON may
+	# do this KIND of work at all. There is no override argument beside it —
+	# unlike the pre-harvest interval, which a licensed applicator may lawfully
+	# shorten and which therefore has one — because nobody can consent a
+	# sixteen-year-old into being a lawful pesticide handler.
+	minor = _refuse_a_minor_on_prohibited_work(worker, worker_name, row, verb="changed")
+
 	held = live_assignment(row["name"])
 	reassigned_from = None
 	if held:
@@ -1330,6 +1383,16 @@ def assign_farm_task(args: dict) -> ToolResult:
 	}
 	if reassigned_from:
 		data["reassigned_from"] = reassigned_from
+	if minor.get("is_minor"):
+		data["minor"] = minor
+		data["minor_note"] = (
+			f"{worker_name} is {minor['age']}. This kind of task is open to them, but the "
+			f"{minor['minor_band']} hour and time-of-day limits still apply to the shift they "
+			f"work it on — {(minor.get('minor_limits') or {}).get('citation')}. "
+			"add_worker_to_shift is where those are checked."
+		)
+	if minor.get("date_of_birth_missing"):
+		data["date_of_birth_missing"] = minor["date_of_birth_missing"]
 
 	# THE DISPATCH IS NOT REFUSED OVER A LIVE RESTRICTED-ENTRY WINDOW, AND THAT
 	# IS DELIBERATE. Work inside an REI is lawful with the label's PPE on — 40
@@ -3697,6 +3760,7 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		"alerts_considered": len(rows),
 		"created": [],
 		"sessions": [],
+		"training_sessions": [],
 		"skipped_already_answered": [],
 		"skipped_unmapped": [],
 		"failed": [],
@@ -3707,6 +3771,15 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 	# all of them. Those become one visit rather than N trips. Everything this
 	# does not bundle falls through to the unchanged per-alert path below.
 	bundled = _bundle_into_sessions(rows, answered, report, dry_run, producers)
+
+	# v0.98.0. AND THE SAME MOVE ALONG THE OTHER AXIS. `_bundle_into_sessions`
+	# groups by PLACE — several things wrong with one cabin become one visit.
+	# This groups by CURRICULUM — several people whose heat-illness training is
+	# lapsing become one afternoon, with all of them on the attendance sheet.
+	# The two cannot collide: this one only ever looks at alerts whose source is
+	# an Employee Training Record, which is not a place anybody is sent to and is
+	# therefore never in `sessions.MATCHABLE_ASSET_TYPES`.
+	bundled |= _bundle_into_training_sessions(rows, answered, bundled, report, dry_run)
 
 	for row in rows:
 		alert_type = str(row.get("alert_type") or "")
@@ -3746,6 +3819,10 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		by_type[entry["alert_type"]] = by_type.get(entry["alert_type"], 0) + 1
 	report["created_count"] = len(report["created"])
 	report["session_count"] = len(report["sessions"])
+	report["training_session_count"] = len(report["training_sessions"])
+	report["alerts_bundled_into_training_sessions"] = sum(
+		len(entry["alerts"]) for entry in report["training_sessions"]
+	)
 	report["alerts_bundled_into_sessions"] = sum(len(entry["alerts"]) for entry in report["sessions"])
 	report["by_alert_type"] = dict(sorted(by_type.items()))
 	report["kanban_route"] = "/app/farm-task/view/kanban/Farm Task Dispatch"
@@ -3756,6 +3833,18 @@ def generate_tasks_from_compliance_alerts(args: dict) -> ToolResult:
 		f"{len(report['skipped_unmapped'])} have no recipe. Re-running is safe: a task carries the "
 		"alert that produced it, so this finds what it raised last time and skips it."
 	)
+	if report["training_sessions"]:
+		report["training_session_note"] = (
+			f"{report['alerts_bundled_into_training_sessions']} lapsing training record(s) across "
+			f"{len(report['training_sessions'])} curriculum(s) became ONE Training Session each "
+			"instead of one Farm Task apiece. A retraining is a trainer, a room, a language and "
+			"forty minutes for a crew — the delivery is one afternoon whether three people or "
+			"eleven need it, and eleven cards on a board are eleven things nobody closes and no "
+			"attendance sheet at the end. The session is where the badges are scanned and the "
+			"signatures taken; complete_training_session is what writes the records. Only "
+			"curricula ticked `group_training` are bundled, and the bundling is idempotent "
+			"because the session stores the alerts it answers."
+		)
 	if report["sessions"]:
 		report["session_note"] = (
 			f"{report['alerts_bundled_into_sessions']} alert(s) at "
@@ -3848,10 +3937,41 @@ def materialize_task_for_alert(args: dict) -> ToolResult:
 		)
 
 	entry = _task_from_alert(row, recipe, dry_run=False)
+	# v0.98.0. A GROUP CURRICULUM GETS ITS TASK AND IS TOLD ABOUT THE COHORT.
+	# This tool answers ONE docname by design — a tap on a phone names the alert
+	# somebody is looking at, not a filter — so it does not bundle, and bundling
+	# here would raise a session for a crew the caller never asked about. What it
+	# owes them instead is the sentence: the sweep will make one afternoon of
+	# this, and closing eleven tasks by hand is the work that sentence saves.
+	cohort = _cohort_note(row)
+	if cohort:
+		entry["cohort_note"] = cohort
 	return ToolResult(
 		data=entry,
 		summary=f"{name}: raised {entry.get('task_type')} task {entry.get('task')}",
 		docstatus_delta="none → 0 (created)",
+	)
+
+
+def _cohort_note(row: dict) -> str:
+	"""How many others are lapsing on the same curriculum, said in one sentence."""
+	if str(row.get("alert_type") or "") != TRAINING_ALERT:
+		return ""
+	source = _training_record(row)
+	curriculum = str(source.get("training_type") or "")
+	if not curriculum or not compat.checked(
+		training_sessions.type_row(curriculum).get("group_training")
+	):
+		return ""
+	others = frappe.db.count(
+		ALERT, {"alert_type": TRAINING_ALERT, "dismissed": 0, "company": row.get("company") or ""}
+	)
+	return (
+		f"{curriculum} is delivered as a GROUP session, and {others} open training alert(s) name "
+		f"this company. This tool raised the single task you asked for; "
+		"generate_tasks_from_compliance_alerts turns the whole set into ONE Training Session "
+		"with everybody on the attendance sheet, which is what the delivery actually is — a "
+		"trainer, a room, a language and forty minutes, whether three people need it or eleven."
 	)
 
 
@@ -3971,6 +4091,166 @@ def _bundle_into_sessions(
 		report["sessions"].append(entry)
 		bundled.update(row["name"] for row in alerts_here)
 	return bundled
+
+
+def _bundle_into_training_sessions(
+	rows: list, answered: dict, bundled: set, report: dict, dry_run: bool
+) -> set:
+	"""One Training Session per curriculum, for the people whose training is lapsing.
+
+	v0.98.0. THE SERVER USED TO FIRE N FARM TASKS FOR ONE AFTERNOON'S WORK, and
+	that is the whole of the defect. `training_expiring` raises one alert per
+	Employee Training Record, so a crew of eleven whose heat-illness training all
+	lapses in the same fortnight produced eleven Compliance-Audit tasks, each
+	saying "arrange and deliver the retraining" — eleven cards for one delivery,
+	no cohort anywhere in the record, and an attendance sheet that has to be
+	assembled by hand afterwards from eleven separately closed tasks. iOS has had
+	`TrainingSessionRunner` and `AttendanceSignatureView` since before this
+	release and nothing was ever raised for them to run.
+
+	THE RULE, IN FULL:
+
+	  1. Only `training_expiring` alerts, and only those whose source record
+	     names a Training Type. An alert about a certificate is not about a
+	     curriculum.
+	  2. Only where that Training Type is ticked `group_training`. An applicator
+	     licence and a forklift certification are one-to-one items and stay on
+	     the per-alert path, which is unchanged.
+	  3. Grouped by `(company, training_type)`. Two entities retraining the same
+	     curriculum are two sessions, because a Training Session belongs to one
+	     company and its records land on one payroll's people.
+	  4. TWO OR MORE PEOPLE. One person needing a retraining is one task; a
+	     session opened for a single attendee would be a heavier document
+	     answering a lighter question, and the per-alert path already handles it
+	     well.
+	  5. Anything already answered — by an open session from a previous sweep or
+	     by a plain task somebody raised — takes the whole curriculum out of the
+	     running, exactly as `_bundle_into_sessions` does, because a second
+	     delivery overlapping the first is worse than a task too many.
+
+	NOTHING IS FILED ON ANYBODY. The session is created SCHEDULED with its
+	attendees listed and `attended` unticked. `complete_training_session` is the
+	only call that writes a training record, which is what makes it safe to raise
+	one of these off a sweep at two in the morning.
+
+	NEVER RAISES PAST ONE CURRICULUM. A session that could not be created lands in
+	`failed` for that curriculum and its alerts fall through to the per-alert
+	path, which is strictly better than losing them.
+	"""
+	if not training_sessions.available() or not compat.has_field(
+		training_sessions.DOCTYPE, "source_alerts"
+	):
+		return set()
+
+	groups = {}
+	for row in rows:
+		if row["name"] in bundled or str(row.get("alert_type") or "") != TRAINING_ALERT:
+			continue
+		source = _training_record(row)
+		curriculum = str(source.get("training_type") or "")
+		employee = str(source.get("employee") or "")
+		if not (curriculum and employee):
+			continue
+		groups.setdefault((str(row.get("company") or ""), curriculum), []).append(
+			{"alert": row, "employee": employee, "employee_name": source.get("employee_name") or employee}
+		)
+
+	already = training_sessions.alerts_answered_by_open_sessions()
+	taken = set()
+	for (company, curriculum), members in sorted(groups.items()):
+		if len({entry["employee"] for entry in members}) < 2:
+			continue
+		curriculum_row = training_sessions.type_row(curriculum)
+		if not compat.checked(curriculum_row.get("group_training")):
+			continue
+		if any(entry["alert"]["name"] in already or entry["alert"]["name"] in answered for entry in members):
+			for entry in members:
+				found = already.get(entry["alert"]["name"])
+				if found:
+					taken.add(entry["alert"]["name"])
+					report["skipped_already_answered"].append(
+						{
+							"alert": entry["alert"]["name"],
+							"alert_type": entry["alert"].get("alert_type"),
+							"training_session": found.get("session"),
+						}
+					)
+			continue
+
+		record = {
+			"company": company,
+			"training_type": curriculum,
+			"attendees": [
+				{"employee": entry["employee"], "employee_name": entry["employee_name"]}
+				for entry in members
+			],
+			"alerts": [entry["alert"]["name"] for entry in members],
+			"training_session": None,
+		}
+		if not dry_run:
+			try:
+				record["training_session"] = _training_session_from_alerts(company, curriculum, members)
+			except Exception as exc:
+				report["failed"].append(
+					{
+						"training_type": curriculum,
+						"company": company,
+						"error": f"{type(exc).__name__}: {exc}",
+					}
+				)
+				continue
+		report["training_sessions"].append(record)
+		taken.update(record["alerts"])
+	return taken
+
+
+def _training_record(row: dict) -> dict:
+	"""The Employee Training Record one `training_expiring` alert points at."""
+	doctype = str(row.get("source_doctype") or "")
+	docname = str(row.get("source_docname") or "")
+	if doctype != TRAINING_RECORD or not docname or not compat.doctype_exists(TRAINING_RECORD):
+		return {}
+	return dict(
+		frappe.db.get_value(
+			TRAINING_RECORD, docname, ["employee", "employee_name", "training_type", "company"], as_dict=True
+		)
+		or {}
+	)
+
+
+def _training_session_from_alerts(company: str, curriculum: str, members: list) -> str:
+	"""Open ONE Scheduled session for a cohort, with everybody on the sheet.
+
+	Written through `frappe.new_doc` rather than through `create_training_session`
+	deliberately: that tool takes `require_shift_role` off the CALLER, and this
+	runs inside a nightly sweep with no caller. The document it produces is the
+	same one, and `add_session_attendee` is what a foreman uses at the door to
+	turn a listed attendee into a scanned one.
+
+	`attended` IS NOT TICKED. Listing somebody who is going to be retrained is a
+	roster; ticking it would be a claim that they turned up, made before the
+	afternoon happened.
+	"""
+	doc = frappe.new_doc(training_sessions.DOCTYPE)
+	doc.training_type = curriculum
+	doc.company = company or None
+	doc.status = training_sessions.STATUS_SCHEDULED
+	doc.session_date = frappe.utils.today()
+	doc.source_alerts = "\n".join(entry["alert"]["name"] for entry in members)
+	doc.notes = (
+		f"Raised from {len(members)} open training alert(s) by the compliance sweep. Everybody "
+		"listed has a lapsing or lapsed record for this curriculum. Scan badges at the door with "
+		"add_session_attendee, take signatures with sign_session_attendance, and "
+		"complete_training_session writes the records — nothing is on anybody's file until then."
+	)
+	for entry in members:
+		doc.append(
+			"attendees",
+			{"employee": entry["employee"], "employee_name": entry["employee_name"], "attended": 0},
+		)
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+	return doc.name
 
 
 def _session_from_alerts(match: dict, doctype: str, docname: str, alerts_here: list) -> dict:

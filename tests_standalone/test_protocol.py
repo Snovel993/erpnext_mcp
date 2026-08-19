@@ -1074,10 +1074,17 @@ class Catalogue(SeededTestCase):
 		five updates all carry `new_name`, because three of the five masters hold
 		nothing but their name and a correction is the only edit there is — and a
 		rename repoints every Employee already on it.
+
+		v0.98.0 IS BIN SEALING, four tools over one new register: `seal_bin` writes
+		what a checker's phone makes when it closes a bin, `get_bin_seal` and
+		`list_bin_seals` read it back, and `trace_bin` answers the only question a
+		packing house ever asks — given this tag, whose buckets are in this bin.
+		Three reads and one write, which is why the write count moves by one and
+		the read count by three.
 		"""
-		self.assertEqual(len(registry.TOOLS), 744)
-		self.assertEqual(len(registry.READ_TOOLS), 371)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 373)
+		self.assertEqual(len(registry.TOOLS), 748)
+		self.assertEqual(len(registry.READ_TOOLS), 374)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 374)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

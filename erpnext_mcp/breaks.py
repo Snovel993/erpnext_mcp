@@ -66,6 +66,40 @@ def _schedule_rows(policy: dict, key: str) -> list[dict]:
     return policy.get(key) or []
 
 
+#: The adult schedule table, and the one that supersedes it for a worker under
+#: eighteen. v0.98.0.
+#:
+#: A FALLBACK RATHER THAN A REQUIREMENT, and the direction of the fallback is
+#: the whole of the design. A policy with no minor rows computes a minor's
+#: entitlement from the ADULT schedule — which owes FEWER periods, and so shows
+#: up as a shortfall the moment anybody looks rather than as silent generosity.
+#: The opposite fallback ("no minor rows, no extra obligation") would report a
+#: fifteen-year-old as fully rested on a policy nobody had finished filling in.
+#:
+#: OAR 839-021-0072 is why the rows differ at all: a minor is owed a rest period
+#: every TWO hours and a meal every FOUR, against four and six for an adult under
+#: OAR 839-020-0050. `install.py` seeds both bands onto the OR and WA policies,
+#: so an operator editing one is editing the band they meant to.
+MINOR_SCHEDULE_KEYS = {
+    "rest_schedule": "minor_rest_schedule",
+    "meal_schedule": "minor_meal_schedule",
+}
+
+
+def _schedule_key(key: str, is_minor) -> str:
+    """Which table this worker's entitlement is read from.
+
+    `is_minor` is None on a worker with no date of birth on file, and None is
+    falsy here — the adult schedule. Deliberate: this decides an entitlement, and
+    inventing a minor's schedule for somebody whose age nobody recorded would
+    report a shortfall that may not exist. The GAP is reported where it can still
+    be acted on, by `add_worker_to_shift`.
+    """
+    if not is_minor:
+        return key
+    return MINOR_SCHEDULE_KEYS.get(key, key)
+
+
 def _checked(value) -> bool:
     return value in (1, "1", True)
 
@@ -73,20 +107,28 @@ def _checked(value) -> bool:
 # ── 1. entitlement ──────────────────────────────────────────────────────────
 
 
-def entitlement(hours_worked: float, policy: dict) -> dict:
+def entitlement(hours_worked: float, policy: dict, is_minor=False) -> dict:
     """How many rest and meal periods are owed for this many hours.
 
     Walks the schedule rows and picks the band whose range contains
     `hours_worked`. Returns the HIGHEST matching band — a 10-hour shift owes
     everything a 6-hour shift owes plus more.
+
+    `is_minor` reads the minor tables where the policy carries them and falls
+    back to the adult ones where it does not — see `MINOR_SCHEDULE_KEYS`. The
+    answer gains `schedule`, naming which band produced it: "two rests owed"
+    means different things under the two, and a reader has no other way to tell.
     """
-    rest = _best_band(hours_worked, _schedule_rows(policy, "rest_schedule"))
-    meal = _best_band(hours_worked, _schedule_rows(policy, "meal_schedule"))
+    minor_rest = _schedule_rows(policy, _schedule_key("rest_schedule", is_minor))
+    minor_meal = _schedule_rows(policy, _schedule_key("meal_schedule", is_minor))
+    rest = _best_band(hours_worked, minor_rest or _schedule_rows(policy, "rest_schedule"))
+    meal = _best_band(hours_worked, minor_meal or _schedule_rows(policy, "meal_schedule"))
     return {
         "rest_periods": rest.get("periods_owed", 0) if rest else 0,
         "rest_minutes": (rest["periods_owed"] * rest["minutes_each"]) if rest else 0,
         "meal_periods": meal.get("periods_owed", 0) if meal else 0,
         "meal_minutes": (meal["periods_owed"] * meal["minutes_each"]) if meal else 0,
+        "schedule": "minor" if is_minor and (minor_rest or minor_meal) else "adult",
     }
 
 
@@ -190,7 +232,7 @@ def worker_breaks(segment: dict, events: list[dict], policy: dict) -> dict:
     seg_end = segment.get("left_at") or segment.get("end_datetime")
     hours_worked = _hours_between(seg_start, seg_end)
 
-    ent = entitlement(hours_worked, policy)
+    ent = entitlement(hours_worked, policy, segment.get("is_minor"))
 
     paid_minutes = 0.0
     unpaid_minutes = 0.0
@@ -251,6 +293,7 @@ def worker_breaks(segment: dict, events: list[dict], policy: dict) -> dict:
         "meal_taken": meal_taken,
         "meal_owed": meal_owed,
         "shortfall_minutes": round(shortfall_minutes, 1),
+        "schedule": ent["schedule"],
     }
 
 
@@ -266,6 +309,11 @@ def crew_reconciliation(shift: dict, crew: list[dict], events: list[dict], polic
             "employee": member.get("employee"),
             "joined_at": member.get("joined_at") or shift.get("start_datetime"),
             "left_at": member.get("left_at") or shift.get("end_datetime"),
+            # v0.98.0. Set by `shifts.describe` from one query over the whole
+            # crew. Absent on a caller that assembled the rows by hand, which
+            # reads as an adult — the conservative direction, because the adult
+            # schedule owes fewer periods and so cannot hide a shortfall.
+            "is_minor": member.get("is_minor"),
         }
         wb = worker_breaks(seg, break_events, policy)
         if wb["rest_taken"] < wb["rest_owed"] or wb["meal_taken"] < wb["meal_owed"]:
@@ -278,9 +326,14 @@ def crew_reconciliation(shift: dict, crew: list[dict], events: list[dict], polic
                     "meal_owed": wb["meal_owed"],
                     "meal_taken": wb["meal_taken"],
                     "shortfall_minutes": wb["shortfall_minutes"],
+                    "schedule": wb["schedule"],
+                    "is_minor": bool(member.get("is_minor")),
                 }
             )
-    return {"workers_short": workers_short}
+    return {
+        "workers_short": workers_short,
+        "minors_on_crew": len([member for member in crew if member.get("is_minor")]),
+    }
 
 
 # ── 6. next_break_due ──────────────────────────────────────────────────────
@@ -292,6 +345,7 @@ def next_break_due(
     events: list[dict],
     policy: dict,
     heat_index: float | None = None,
+    is_minor=False,
 ) -> dict:
     """What break is due next, for the break coach.
 
@@ -303,13 +357,20 @@ def next_break_due(
         return {"due": None}
 
     hours_so_far = (now_dt - seg_start).total_seconds() / 3600
-    ent = entitlement(hours_so_far + 1.0, policy)
+    ent = entitlement(hours_so_far + 1.0, policy, is_minor)
 
     break_events = [ev for ev in events if ev.get("break_kind")]
     rest_taken = sum(1 for ev in break_events if ev.get("break_kind") == "Paid Rest")
     meal_taken = sum(1 for ev in break_events if ev.get("break_kind") == "Unpaid Meal")
 
-    max_without = _as_float(policy.get("max_hours_without_rest")) if policy.get("max_hours_without_rest") else None
+    # v0.98.0. The minor ceiling supersedes the adult one where the policy has
+    # it, and falls back where it does not — the same direction as the schedules.
+    max_field = (
+        "minor_max_hours_without_rest"
+        if is_minor and policy.get("minor_max_hours_without_rest")
+        else "max_hours_without_rest"
+    )
+    max_without = _as_float(policy.get(max_field)) if policy.get(max_field) else None
 
     # Check WA-style max hours without rest
     if max_without is not None:
@@ -327,7 +388,10 @@ def next_break_due(
                 "due": "Paid Rest",
                 "urgency": "overdue" if remaining <= 0 else "imminent",
                 "minutes_until": round(remaining * 60, 0),
-                "reason": f"WA: no more than {max_without:.0f} hours without a rest period",
+                "reason": (
+                    f"WA: no more than {max_without:.0f} hours without a rest period"
+                    + (" — the minor ceiling" if max_field.startswith("minor_") else "")
+                ),
             }
 
     # Check heat cool-down
@@ -360,6 +424,7 @@ def next_break_due(
             "urgency": "upcoming",
             "rest_owed": ent["rest_periods"],
             "rest_taken": rest_taken,
+            "schedule": ent["schedule"],
         }
     if meal_taken < ent["meal_periods"]:
         return {
@@ -367,6 +432,7 @@ def next_break_due(
             "urgency": "upcoming",
             "meal_owed": ent["meal_periods"],
             "meal_taken": meal_taken,
+            "schedule": ent["schedule"],
         }
 
-    return {"due": None}
+    return {"due": None, "schedule": ent["schedule"]}

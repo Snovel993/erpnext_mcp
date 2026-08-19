@@ -781,6 +781,18 @@ ROUTES = (
 	Route("/mobile", mobile_api.list_employee_deductions),
 	Route("/mobile", mobile_api.create_payroll_deduction),
 	Route("/mobile", mobile_api.update_payroll_deduction),
+	# v0.98.0. Bin sealing — `PieceTallyViewModel.sealBin(tag:)`. THE LAST
+	# MOMENT ANYBODY KNOWS THE ANSWER: a bin leaves the orchard carrying a tag
+	# and nothing else, and every question the packing house asks afterwards is a
+	# join from that tag back to an hour that was never written down. This route
+	# is what writes it down, at the instant the checker taps Seal.
+	#
+	# `company` AND `source` ARE ABSENT FROM ITS SIGNATURE, so this table's
+	# argument filter is what makes them unreachable rather than merely refused.
+	# The first would let a phone file another farm's harvest against this one's
+	# crew; the second would let a handset disguise a typed record as a scanned
+	# one, and the register has to be able to tell those apart.
+	Route("/mobile", mobile_api.seal_bin),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

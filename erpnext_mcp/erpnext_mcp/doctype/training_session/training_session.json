@@ -33,6 +33,7 @@
   "expires_date",
   "attendance_section",
   "attendees",
+  "source_alerts",
   "completion_section",
   "completed_at",
   "completed_by",
@@ -214,6 +215,13 @@
    "fieldtype": "Table",
    "label": "Attendees",
    "options": "Training Session Attendee"
+  },
+  {
+   "description": "The Compliance Alert docnames this session was raised to answer, one per line. WHOLE DOCNAMES, NEVER A SUBSTRING MATCH — `Inspection Session.source_alerts` holds the same shape for the same reason, and the sweep that reads it splits on newlines. It is what makes the bundling idempotent: a second sweep finds this session, sees the alerts it already answers, and raises nothing. Empty on every session somebody opened by hand, which is most of them.",
+   "fieldname": "source_alerts",
+   "fieldtype": "Small Text",
+   "label": "Source Alerts",
+   "read_only": 1
   },
   {
    "fieldname": "completion_section",

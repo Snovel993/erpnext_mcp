@@ -69,7 +69,7 @@ import itertools
 import frappe
 
 from .. import breaks as breaks_mod
-from .. import compat, geo, shifts, timezones
+from .. import compat, geo, minors, shifts, timezones
 from ..args import as_choice, as_date, as_float, as_int, as_limit, as_str, resolve_company
 from ..errors import ToolError
 from ..result import ToolResult
@@ -169,8 +169,29 @@ def _refuse_a_second_open_shift(employee: str, employee_name: str = "", exclude:
 	)
 
 
+#: Every spelling a caller has ever used for a shift docname, tried in order.
+#: v0.98.0, AND IT IS A LIVE BUG REPORT RATHER THAN TIDYING. `get_shift` resolved
+#: on `("name", "name", "farm_shift")` — `shift` was never consulted at all, even
+#: though the registry advertises it as an alias and `api/mobile.get_shift`
+#: passes exactly that key. So the shift read on the mobile surface answered
+#: "farm_shift is required" for every call a handset made, which is the identical
+#: failure v0.96.0 fixed on `end_shift` (item 1) at a different door. Naming the
+#: spellings once means the next tool cannot resolve on a different subset of
+#: them.
+SHIFT_KEYS = ("shift", "name", "farm_shift")
+
+
 def _resolve_shift(args: dict, key: str = "shift") -> dict:
-	name = (as_str(args, key) or as_str(args, "name") or as_str(args, "farm_shift", required=True)).strip()
+	name = ""
+	for candidate in (key, *SHIFT_KEYS):
+		name = as_str(args, candidate)
+		if name:
+			break
+	if not name:
+		# The refusal keeps naming `farm_shift`, because that is the spelling the
+		# handset sends and the one somebody debugging a 400 will search for.
+		as_str(args, "farm_shift", required=True)
+	name = name.strip()
 	if not frappe.db.exists(DOCTYPE, name):
 		raise ToolError(
 			f"no {DOCTYPE} called {name!r} on this site. list_shifts has the register; a docname "
@@ -265,6 +286,107 @@ def _crew_argument(raw, label: str = "crew_employees") -> list:
 #: `Pending`, `Expired`, `N-A`, or the column simply absent on a site that has
 #: not run `install_compliance_fields` — is not evidence of readiness.
 _I9_CLEARED = ("Verified",)
+
+
+def minor_findings(employee: str, employee_name: str, shift_row: dict, joined: str, exclude: str = "") -> dict:
+	"""What being under eighteen says about putting this person on this shift.
+
+	v0.98.0. RETURNS FINDINGS; IT DOES NOT REFUSE. Two callers want two different
+	answers out of one piece of arithmetic — `add_worker_to_shift` refuses on a
+	`blocked` finding, because it is being asked about ONE named person and the
+	shift goes on existing without them, while `start_shift` reports the same
+	finding, because refusing there would mean no shift record at all for a crew
+	that is standing in the block whatever this app says. The regulation is the
+	same in both; what differs is what a refusal would destroy.
+
+	THREE CHECKS, AND EACH ONE NAMES ITS OWN CITATION (see `minors.py`):
+
+	  * the clock — a 14- or 15-year-old may not work before 07:00 or after
+	    19:00 (29 CFR 570.35), checked against the moment they join and, where
+	    the shift already has one, the moment it ends;
+	  * the day — 8 hours for under-16, 10 for 16-17, counted across every shift
+	    they are already on today (ORS 653.315 / OAR 839-021-0104);
+	  * the week — 40 and 60 respectively, over the Monday-start workweek.
+
+	AN UNKNOWN DATE OF BIRTH IS A FINDING AND NOT A BLOCK. `is_minor` is
+	three-valued and None means nobody recorded it; refusing on that would stop a
+	farm rostering its adult crew because a column is empty, and clearing on it
+	silently would be the failure this whole item exists to close. So it comes
+	back as `date_of_birth_missing`, which the callers put in front of the
+	foreman.
+	"""
+	when = str(joined or shift_row.get("start_datetime") or "")
+	born = None
+	if compat.doctype_exists("Employee") and compat.has_field("Employee", "date_of_birth"):
+		row = frappe.db.get_value("Employee", employee, ["employee_name", "date_of_birth"], as_dict=True) or {}
+		born = row.get("date_of_birth")
+		# THE NAME IS LOOKED UP WHERE THE CALLER DID NOT HAVE ONE, because every
+		# sentence this function produces is read by a foreman standing next to
+		# the person — and "HR-EMP-00091 is 15" is a refusal nobody can act on
+		# without going to look somebody up. `start_shift` calls this with no
+		# name in hand; `add_worker_to_shift` already has one.
+		employee_name = employee_name or str(row.get("employee_name") or "")
+	described = minors.describe(born, when[:10] or frappe.utils.today())
+	out = {"employee": employee, "employee_name": employee_name or employee, **described, "blocked": []}
+	if described["is_minor"] is None:
+		out["date_of_birth_missing"] = (
+			f"{employee_name or employee} has no date of birth on file, so this app cannot say "
+			"whether the minor hour and time-of-day limits apply to them. That is a gap in the "
+			"record rather than a finding about the person — set it with update_employee."
+		)
+		return out
+	if not described["is_minor"]:
+		return out
+
+	band = described["minor_band"]
+	clock = minors.time_of_day_violation(band, when, shift_row.get("end_datetime") or "")
+	if clock:
+		out["blocked"].append(f"{employee_name or employee} is {described['age']} — {clock}")
+
+	worked = shifts.hours_worked_by(employee, when[:10], exclude=exclude or str(shift_row.get("name") or ""))
+	out["hours_today"] = worked["today"]
+	out["hours_this_week"] = worked["week"]
+	out["other_shifts_today"] = [
+		entry for entry in worked["shifts"] if entry["day"] == worked["day"]
+	]
+
+	# The span this shift ADDS, where the shift already has an end time. Where it
+	# does not — the ordinary case, a shift that is still running — nothing is
+	# projected: an invented finishing time would produce a refusal nobody can
+	# check, and the hours already worked are a fact.
+	projected = shifts.hours_between(when, str(shift_row.get("end_datetime") or "")) or 0.0
+	out["hours_added_by_this_shift"] = projected
+
+	over = minors.hours_violation(band, worked["today"] + projected, worked["week"] + projected)
+	if over:
+		out["blocked"].append(f"{employee_name or employee} is {described['age']} — {over}")
+	else:
+		warning = minors.hours_warning(band, worked["today"] + projected, worked["week"] + projected)
+		if warning:
+			out["approaching_limit"] = warning
+	return out
+
+
+def _refuse_a_minor_over_the_limit(findings: dict) -> None:
+	"""Turn `minor_findings` into the refusal `add_worker_to_shift` owes a foreman."""
+	if not findings.get("blocked"):
+		return
+	limits = findings.get("minor_limits") or {}
+	raise ToolError(
+		"; ".join(findings["blocked"])
+		+ ". Nothing was changed. This is a limit on what may lawfully be SCHEDULED, so it is a "
+		"refusal rather than a note: the ceiling is "
+		f"{limits.get('daily_hours')} hour(s) a day and {limits.get('weekly_hours')} a week for the "
+		f"{findings.get('minor_band')} band"
+		+ (
+			f", between {limits['earliest']} and {limits['latest']}"
+			if limits.get("earliest")
+			else ""
+		)
+		+ f" ({limits.get('citation')}). If they have already worked today on another crew, close "
+		"or clock them out of that shift first; if the date of birth on their record is wrong, "
+		"correct it with update_employee."
+	)
 
 
 def _i9_unverified(employees: list[str]) -> list[dict]:
@@ -403,6 +525,41 @@ def start_shift(args: dict) -> ToolResult:
 			"there is no place here. A point-in-time temperature is a data point and a timeline is "
 			"a defence; set the coordinates while the shift is still open."
 		)
+	# v0.98.0. REPORTED AND NOT REFUSED, which is the opposite of what
+	# `add_worker_to_shift` does with the identical arithmetic — see
+	# `minor_findings`. A crew is standing in the block; a server that would not
+	# open a shift for them because one fifteen-year-old is over their weekly
+	# hours produces NO record of the afternoon at all, which is worse evidence
+	# than a record carrying the finding. The finding is loud and it names the
+	# person, the citation and the figure.
+	minors_found = [
+		minor_findings(entry["employee"], "", dict(doc.as_dict()), entry["joined_at"] or start, exclude=doc.name)
+		for entry in crew
+	]
+	over = [entry for entry in minors_found if entry.get("blocked")]
+	unknown = [entry for entry in minors_found if entry.get("date_of_birth_missing")]
+	on_crew = [entry for entry in minors_found if entry.get("is_minor")]
+	# NOT `minors_on_crew`, WHICH `shifts.describe` ALREADY SETS TO A COUNT. Two
+	# keys of one name on one payload is a shape that changes type depending on
+	# which line ran last, and it is exactly the class of failure wave 1 was
+	# seven instances of. The count is the number; this is the detail.
+	if on_crew:
+		data["minor_crew_findings"] = on_crew
+	if over:
+		data["minor_limits_exceeded"] = [
+			{"employee": entry["employee"], "reasons": entry["blocked"]} for entry in over
+		]
+		data["minor_note"] = (
+			f"{len(over)} worker(s) under eighteen on this crew are over a scheduling limit: "
+			+ "; ".join(reason for entry in over for reason in entry["blocked"])
+			+ ". The shift was still opened — a crew in the block with no record of the "
+			"afternoon is worse evidence than a record carrying this finding — but the hours "
+			"are a limit on what may lawfully be scheduled, not a note. Clock them out of the "
+			"other shift, or send them home."
+		)
+	if unknown:
+		data["date_of_birth_missing"] = [entry["employee"] for entry in unknown]
+
 	unverified = _i9_unverified([entry["employee"] for entry in crew])
 	summary_suffix = ""
 	if unverified:
@@ -470,6 +627,18 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 	# RIGHT FOR THE SAME REASON. A worker rostered at the beginning was there at
 	# the beginning; a worker added mid-shift arrived when somebody said so.
 	joined = _when(args, "joined_at")
+
+	# v0.98.0. AND THIS IS WHERE A MINOR'S DAY IS CHECKED, before the append and
+	# after everything cheaper. It REFUSES here and merely reports in
+	# `start_shift`, which is not an inconsistency: this call is about one named
+	# person and the shift carries on without them, so a refusal costs a name off
+	# a crew; there it would cost the whole shift record for a crew already in the
+	# block. What a refusal buys is the thing a note cannot — ORS 653.315 and 29
+	# CFR 570.35 are limits on what may be SCHEDULED, and a foreman who is told
+	# after the fact that the afternoon was unlawful has been told too late.
+	minor = minor_findings(person, str(theirs.get("employee_name") or ""), row, joined)
+	_refuse_a_minor_over_the_limit(minor)
+
 	doc.append(
 		"crew",
 		{
@@ -507,6 +676,20 @@ def add_worker_to_shift(args: dict) -> ToolResult:
 			"none of the morning's water breaks and none of the acclimatization the crew has "
 			"— OAR 437-004-1131(g) is about exactly this person."
 		)
+	# The findings that did NOT block. `date_of_birth_missing` is the common one
+	# and it is the one worth surfacing: a crew whose ages nobody recorded is a
+	# crew this app cannot check, and saying so on the roster call is the only
+	# moment somebody is looking at the right screen to fix it.
+	if minor.get("is_minor"):
+		data["minor"] = minor
+	if minor.get("approaching_limit"):
+		data["minor_note"] = (
+			f"{minor['employee_name']} is {minor['age']} — {minor['approaching_limit']} "
+			f"({(minor.get('minor_limits') or {}).get('citation')})."
+		)
+	if minor.get("date_of_birth_missing"):
+		data["date_of_birth_missing"] = minor["date_of_birth_missing"]
+
 	summary_suffix = ""
 	unverified = _i9_unverified([person])
 	if unverified:
@@ -1489,21 +1672,44 @@ def log_shift_break(args: dict) -> ToolResult:
 	duration = as_float(args.get("duration_minutes"), "duration_minutes")
 	event_type = BREAK_KINDS[break_kind]["event_type"]
 
+	# v0.98.0. A HEAT BREAK IS A COMPLIANCE EVENT AND NOT ONLY A PAYROLL ONE, and
+	# what makes it one is the weather beside it. `break_kind` and `event_type`
+	# already told the register WHICH provision was discharged; what they could
+	# not say is what the crew was standing in when it was — and OAR
+	# 437-004-1131's obligations attach at a heat-index CROSSING, not at the
+	# moment relief happens. So the three heat kinds carry the shift's peak
+	# figures, the crossing timestamp and the provenance of the reading, copied
+	# from the timeline at the instant they are logged.
+	#
+	# DERIVED FROM `break_kind` AND NOT TAKEN FROM THE BODY. `heat_obligation` is
+	# the column that decides whether a break counts toward a heat-illness
+	# obligation, and a phone that could set it directly could file an unpaid meal
+	# as a cool-down in the one register that has to answer honestly — the same
+	# argument that keeps `event_type` off this method's signature.
+	heat = break_kind in breaks_mod.HEAT_RELIEF_KINDS
+	entry = {
+		"event_type": event_type,
+		"event_datetime": when,
+		"logged_by": row.get("foreman"),
+		"description": as_str(args, "description") or None,
+		"break_kind": break_kind,
+		"duration_minutes": duration,
+		"duration_source": "Scheduled",
+		"applies_to": applies_to,
+		"employee": employee,
+		"heat_obligation": 1 if heat else 0,
+	}
+	if heat:
+		# EMPTY KEYS ARE DROPPED rather than written as nulls. A shift with no
+		# weather timeline — no GPS on the shift, or the sweep has not run — gets
+		# a break row with blank heat columns, which is the honest answer:
+		# nobody measured, and that is not a temperature.
+		entry.update(
+			{key: value for key, value in shifts.heat_conditions(shifts.weather_of(row["name"]), when).items() if value is not None}
+		)
+
 	doc = frappe.get_doc(DOCTYPE, row["name"])
-	doc.append(
-		"compliance_events",
-		{
-			"event_type": event_type,
-			"event_datetime": when,
-			"logged_by": row.get("foreman"),
-			"description": as_str(args, "description") or None,
-			"break_kind": break_kind,
-			"duration_minutes": duration,
-			"duration_source": "Scheduled",
-			"applies_to": applies_to,
-			"employee": employee,
-		},
-	)
+	doc.append("compliance_events", entry)
 	doc.flags.ignore_permissions = True
 	doc.save(ignore_permissions=True)
 
@@ -1517,19 +1723,43 @@ def log_shift_break(args: dict) -> ToolResult:
 		if bk:
 			break_tally[bk] = break_tally.get(bk, 0) + 1
 
-	return ToolResult(
-		data={
-			**described,
-			"actor": actor,
-			"logged": {
-				"break_kind": break_kind,
-				"started_at": when,
-				"duration_minutes": duration,
-				"applies_to": applies_to,
-				"covers_workers": covers,
-			},
-			"breaks_today": break_tally,
+	data = {
+		**described,
+		"actor": actor,
+		"logged": {
+			"break_kind": break_kind,
+			"started_at": when,
+			"duration_minutes": duration,
+			"applies_to": applies_to,
+			"covers_workers": covers,
+			"heat_obligation": heat,
 		},
+		"breaks_today": break_tally,
+	}
+	if heat:
+		data["heat_conditions"] = {
+			key: entry.get(key)
+			for key in ("peak_temp_f", "peak_heat_index_f", "threshold_crossed_at", "weather_source")
+		}
+		if entry.get("threshold_crossed_at"):
+			data["heat_note"] = (
+				f"This {break_kind} discharges a heat-illness-prevention obligation under "
+				f"{shifts.CITATION}, not a wage-and-hour one, and the row carries the conditions "
+				f"it was called in: the shift crossed {shifts.HEAT_THRESHOLD_F:.0f} °F heat index "
+				f"at {entry['threshold_crossed_at']} and peaked at "
+				f"{entry.get('peak_heat_index_f')} °F. The interval between the crossing and this "
+				"break is what an inspector reads off one row instead of reconstructing from "
+				"ninety weather readings."
+			)
+		elif not entry.get("peak_heat_index_f"):
+			data["heat_note"] = (
+				f"This {break_kind} is logged as a heat-obligation break, but {row['name']} has "
+				"no weather reading at or before it — so the row carries no conditions. Blank "
+				"rather than zero: nobody measured, which is not a temperature. A shift with no "
+				"farm_location_gps gets no timeline; set it while the shift is open."
+			)
+	return ToolResult(
+		data=data,
 		summary=f"logged {break_kind} on {row['name']} at {when} ({applies_to})",
 		docstatus_delta="0 → 0 (amended)",
 	)
@@ -1668,6 +1898,27 @@ def get_break_policy(args: dict) -> ToolResult:
 	# state's and carries no company, so this is the one key that says which
 	# farm the question was asked on behalf of.
 	policy_dict["company"] = company
+	if not policy_dict["has_minor_schedule"]:
+		# STATED, NOT FILLED IN. `human_approved_by` exists on this doctype
+		# because a break schedule is something the operation says about what it
+		# owes its crew, so writing rows into an approved policy would move that
+		# statement with nobody's name on it. The rows are handed back marked
+		# unapproved instead: the gap is visible on the handset that is about to
+		# coach a minor off the adult table, and the operator has the table to
+		# paste rather than a citation to go and look up.
+		policy_dict["minor_schedule_suggested"] = {
+			"citation": minors.MINOR_SCHEDULE_CITATION,
+			"approved": False,
+			"rest_schedule": [dict(entry) for entry in minors.MINOR_REST_SCHEDULE],
+			"meal_schedule": [dict(entry) for entry in minors.MINOR_MEAL_SCHEDULE],
+		}
+		policy_dict["minor_gap"] = (
+			f"{doc.name} carries no minor rest or meal schedule, so a worker under eighteen on "
+			f"a shift under this policy is being counted off the ADULT table — which owes fewer "
+			f"periods, and is therefore a shortfall rather than an exemption. "
+			f"`minor_schedule_suggested` is {minors.MINOR_SCHEDULE_CITATION} written as rows; "
+			f"nothing wrote them here, because an approved policy is a statement somebody signed."
+		)
 
 	return ToolResult(
 		data=policy_dict,
@@ -1716,8 +1967,46 @@ def _describe_break_policy(row: dict) -> dict:
 			for r in (row.get("heat_schedule") or [])
 		],
 		"max_hours_without_rest": row.get("max_hours_without_rest") or None,
+		# v0.98.0. THE SCHEDULE A WORKER UNDER EIGHTEEN COUNTS FROM, and it is
+		# returned whether or not it is filled in. iOS has computed a minor's
+		# break schedule since `BreakSchedule.compute(..., isMinor:)` shipped and
+		# had nothing to compute it from: the endpoint answered with one table
+		# and the app needed two, so the purple "Minor's schedule" badge had a
+		# renderer and no data. An EMPTY list here is a real answer — this policy
+		# has no minor rows, so a minor falls back to the adult table above, and
+		# the app can say which of the two it drew.
+		"minor_rest_schedule": _schedule_rows(row.get("minor_rest_schedule")),
+		"minor_meal_schedule": _schedule_rows(row.get("minor_meal_schedule")),
+		"minor_max_hours_without_rest": row.get("minor_max_hours_without_rest") or None,
+		"has_minor_schedule": bool(row.get("minor_rest_schedule") or row.get("minor_meal_schedule")),
+		"minor_note": (
+			"OAR 839-021-0072 — a worker under eighteen is owed a rest period every two hours "
+			"and a meal every four. `is_minor` is derived from `date_of_birth` on the crew "
+			"roster and is stored nowhere; it is three-valued, and null means no date of birth "
+			"is on file rather than that somebody is an adult."
+		),
 		"notes": row.get("notes") or None,
 	}
+
+
+def _schedule_rows(rows) -> list:
+	"""One rest-or-meal table, in the shape the handset already reads.
+
+	The adult tables are spelled out inline above and this is the same shaping —
+	extracted rather than copied a third and fourth time, because four hand-typed
+	copies of one row shape is how the minor tables come to be missing a key the
+	adult ones have.
+	"""
+	return [
+		{
+			"hours_from": entry.get("hours_from"),
+			"hours_to": entry.get("hours_to"),
+			"periods_owed": entry.get("periods_owed"),
+			"minutes_each": entry.get("minutes_each"),
+			"paid": bool(entry.get("paid")),
+		}
+		for entry in (rows or [])
+	]
 
 
 # ── 12. get_shift_production ─────────────────────────────────────────────

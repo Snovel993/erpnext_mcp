@@ -529,6 +529,19 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/list_employee_deductions",
 		"/mobile/create_payroll_deduction",
 		"/mobile/update_payroll_deduction",
+		# v0.98.0. Bin sealing — `PieceTallyViewModel.sealBin(tag:)` and the
+		# kind-4004 event beside it. THE LAST MOMENT ANYBODY KNOWS THE ANSWER: a
+		# bin leaves the orchard carrying a tag and nothing else, the buckets are
+		# tipped and mixed, and the badge scans live on the handset. Everything
+		# the packing house asks afterwards is a join from that tag back to an
+		# hour that was never written down.
+		#
+		# `company` AND `source` ARE ABSENT FROM ITS SIGNATURE, so this surface's
+		# argument filter makes them unreachable rather than merely refused. The
+		# first would let a phone file another farm's harvest against this one's
+		# crew; the second would let a handset pass a typed record off as a
+		# scanned one, and the register has to tell those apart.
+		"/mobile/seal_bin",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

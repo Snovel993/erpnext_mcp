@@ -1711,6 +1711,15 @@ APP_DOCTYPES = {
 	# would let a read tool return it and the test still pass.
 	"Employee Bank Account": "employee_bank_account",
 	"ACH Originator Configuration": "ach_originator_configuration",
+	# v0.98.0 — bin sealing. One closed bin and the crew whose buckets are in it.
+	# STANDALONE rather than a child table of Bucket Log Session, for the reason
+	# `bin_seal.py` gives: a bin is sealed by a CHECKER whose phone is not editing
+	# anybody's session, several sessions tip into one bin, and one session fills
+	# many bins over a day. The contributors table needs no CHILD_TABLE_SOURCES
+	# entry — `get_bin_seal` and `trace_bin` read it through the parent document,
+	# which is the shape that works on a bench.
+	"Bin Seal": "bin_seal",
+	"Bin Seal Contributor": "bin_seal_contributor",
 }
 
 #: The standard reports this app ships, by folder name under `REPORT_DIR`. Rows

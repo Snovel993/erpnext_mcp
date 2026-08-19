@@ -277,6 +277,11 @@ TYPE_FIELDS = (
 	"materials_description",
 	"duration_minutes",
 	"delivery_method",
+	# v0.98.0. Whether this curriculum is delivered to a crew at once. Read by
+	# the compliance-alert bundler to decide whether several lapsing records
+	# become ONE session or N tasks. Through `compat.existing_fields` below, so a
+	# site mid-migrate loses the key rather than the read.
+	"group_training",
 )
 
 
@@ -376,6 +381,7 @@ FIELDS = (
 	"records_created",
 	"generated_pdf",
 	"generated_pdf_on",
+	"source_alerts",
 	"notes",
 )
 
@@ -422,6 +428,69 @@ def rows(filters: dict, limit: int = 500, order_by: str = "session_date desc") -
 		)
 		or []
 	]
+
+
+#: Most sessions one idempotency read walks. Same figure `sessions.SESSION_CAP`
+#: uses and for the same reason: this is a question about outstanding work, not
+#: an export.
+SESSION_CAP = 500
+
+
+def alerts_answered_by_open_sessions(company: str = "") -> dict:
+	"""alert docname → the Training Session that already answers it.
+
+	v0.98.0. THE TWIN OF `sessions.alerts_answered_by_open_sessions`, and it is a
+	separate function rather than a parameter on that one because the two read
+	different doctypes with different open-states and neither should have to know
+	about the other's.
+
+	SCOPED TO SESSIONS STILL OPEN. A COMPLETED session has written its training
+	records; those move the register; the alerts it answered dismiss themselves on
+	the next sweep and never reach the generator, which only ever looks at alerts
+	that are still open. A CANCELLED one answers nothing and its alerts must come
+	back — which is exactly what leaving it out of this read does.
+	"""
+	if not compat.doctype_exists(DOCTYPE) or not compat.has_field(DOCTYPE, "source_alerts"):
+		return {}
+	filters = {"status": ("in", list(OPEN_STATUSES)), "source_alerts": ("is", "set")}
+	if company:
+		filters["company"] = company
+	out = {}
+	for row in (
+		frappe.db.get_all(
+			DOCTYPE,
+			filters=filters,
+			fields=["name", "training_type", "company", "session_date", "source_alerts"],
+			limit=SESSION_CAP,
+		)
+		or []
+	):
+		for alert in alert_names(row.get("source_alerts")):
+			out[alert] = {
+				"session": str(row["name"]),
+				"training_type": row.get("training_type"),
+				"session_date": str(row.get("session_date") or "") or None,
+			}
+	return out
+
+
+def alert_names(raw) -> list:
+	"""The alert docnames on a session, parsed from the stored text.
+
+	WHOLE TOKENS, NEVER A SUBSTRING — the identical argument `sessions.alert_names`
+	makes: an alert docname is a prefix of the next one often enough that a LIKE
+	would answer yes about the wrong record, and the consequence is a compliance
+	alert silently treated as answered.
+	"""
+	if not raw:
+		return []
+	pieces = [str(entry) for entry in raw] if isinstance(raw, (list, tuple)) else str(raw).replace(",", "\n").split("\n")
+	out = []
+	for piece in pieces:
+		name = piece.strip()
+		if name and name not in out:
+			out.append(name)
+	return out
 
 
 def attendees_of(session: str, limit: int = 500) -> list:

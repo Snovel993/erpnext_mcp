@@ -151,7 +151,7 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, roles, security
+from .. import compat, minors, roles, security
 from ..args import as_bool, as_choice, as_date, as_str, resolve_company, select_options
 from ..errors import ToolError
 from ..result import ToolResult
@@ -1582,6 +1582,20 @@ def employee_detail(name: str) -> dict:
 		detail[field] = answered
 		reconciled.append(field)
 	detail["reconciled"] = reconciled
+
+	# v0.98.0. WHETHER THIS PERSON IS UNDER EIGHTEEN, DERIVED AND NEVER STORED.
+	# `minors.py` argues the whole of it; the short version is that a stored flag
+	# is correct on the day it is ticked and wrong every day afterwards, and the
+	# direction it goes wrong in is the one that permits more work. Computed
+	# against TODAY because that is the day a roster question is being asked
+	# about — a caller reconstructing a past shift asks `minors.describe` with the
+	# shift's own date rather than reading this.
+	#
+	# THREE-VALUED. `is_minor` is None where no date of birth is on file, which is
+	# not the same as False, and `date_of_birth_recorded` is what tells the two
+	# apart. iOS renders the purple badge on True and nothing on either of the
+	# others, which is right; a foreman reading the record still sees the gap.
+	detail.update(minors.describe(detail.get("date_of_birth"), frappe.utils.today()))
 	return detail
 
 

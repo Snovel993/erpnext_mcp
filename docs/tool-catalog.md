@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 744 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 748 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 371 read tools are **on** by default and can be switched off individually. A
+All 374 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16857,3 +16857,111 @@ this reason.
 
 `reason` is required and has a length floor, because that row is the audit trail
 for destroying somebody's credential and issuing another.
+
+---
+
+# v0.98.0 — Bin sealing, and the chain from a pack line back to a crew
+
+## What this answers
+
+A bin leaves the orchard on a trailer carrying a **tag** and nothing else. Every
+question anybody asks about it afterwards is about the hour before it was closed:
+
+| the question | what it needs |
+|---|---|
+| a residue detection at the packing house | which block, and was that block inside a re-entry interval |
+| a piece-rate dispute | whose buckets, and how many each |
+| a food-safety hold | which **other** bins the same crew filled that afternoon |
+| a heat-exposure question | which shift, and therefore which weather timeline and which break log |
+
+None of them is reconstructable once the crew has gone home. The buckets are
+tipped and mixed, the badge scans exist only on the handset, and the tag points
+at nothing. So the record is written at the moment of sealing, by the person who
+closed the bin — which is also the only moment anybody knows the answer.
+
+## `seal_bin`
+
+**MUTATING (default OFF).** Also reachable from a handset at
+`POST /farmops/api/mobile/seal_bin`. Required: `bin_tag`, `bucket_count`.
+
+```json
+{"bin_tag": "OML-4471", "bucket_count": 42,
+ "contributors": [{"badge_id": "B-0117", "buckets_contributed": 18,
+                   "first_scan_at": "2026-08-18 09:14:02", "last_scan_at": "2026-08-18 10:41:55"},
+                  {"employee": "HR-EMP-00031", "buckets_contributed": 21}],
+ "shift": "SHIFT-2026-0114", "field": "Mill Creek Block 4",
+ "gps_lat": 45.9327, "gps_lon": -118.3877,
+ "sealed_by": "HR-EMP-00008", "client_event_id": "8f2c…"}
+```
+
+```json
+{"name": "BIN-2026-00017", "bin_tag": "OML-4471", "bucket_count": 42,
+ "contributor_count": 2, "buckets_attributed": 39, "unattributed_buckets": 3,
+ "h3_hex": "8a2a1072b59ffff", "already_sealed": false, "manual_tag": false}
+```
+
+**Idempotent on `client_event_id`,** which is the handset's own identifier for
+one sealing action. A phone that sealed a bin and did not hear the answer sends
+the same call again — over a funnel, in a canyon, on a dying battery this is the
+ordinary case — and a second record of one bin is a doubled count at the pack
+line and a doubled piece rate on somebody's cheque. A retry gets the same seal
+back with `already_sealed: true`.
+
+**Contributors arrive as Employee docnames, as badge strings, or as objects.**
+All three land on one row shape. Duplicates are **merged**, not refused:
+somebody who came back with a second bucket is one row with the buckets added up
+and the scan window widened. A badge that resolves to nobody is **reported and
+the bin is still sealed** — it comes back on `unresolved_badges`, because a
+record with a gap in it is worth more than no record, and a bin refused over an
+unregistered card is a bin nothing can trace at all.
+
+**The two counts are allowed to disagree.** `bucket_count` is what the checker's
+tally read; the contributors' `buckets_contributed` is what the badge scans
+attributed. This app never reconciles them, because a bucket tipped by somebody
+whose badge did not scan is *in the bin and not in the rows* — which is exactly
+the fact a piece-rate dispute turns on. `unattributed_buckets` names the
+difference instead.
+
+## `get_bin_seal`
+
+**READ (default ON).** One seal in full, contributors included, with
+`unattributed_buckets` and the sentence explaining it where it is non-zero.
+
+## `list_bin_seals`
+
+**READ (default ON).** The register by `shift`, `field`, `block`, `bin_tag`,
+`bucket_session`, `sealed_by` or a date range, newest first. Contributors are
+deliberately **not** on this answer — one bin's crew is a child table, and forty
+bins would be forty reads of it.
+
+## `trace_bin`
+
+**READ (default ON).** The read this whole feature exists for.
+
+```json
+{"bin_tag": "OML-4471"}
+```
+
+```json
+{"bin_tag": "OML-4471", "matches": 1, "name": "BIN-2026-00017",
+ "sealed_at": "2026-08-18 10:52:31", "sealed_by": "HR-EMP-00008",
+ "sealed_by_name": "Ana Reyes", "field": "Mill Creek Block 4",
+ "shift": "SHIFT-2026-0114", "bucket_count": 42,
+ "contributors": [{"employee": "HR-EMP-00017", "employee_name": "…",
+                   "buckets_contributed": 18, "first_scan_at": "…", "last_scan_at": "…"}],
+ "unattributed_buckets": 3}
+```
+
+**It takes the tag, not a docname,** because nobody standing at a pack line has a
+docname.
+
+**It answers with every seal carrying the tag,** newest first, and `matches` says
+how many. Bin tags are reused between seasons and between growers, so this app
+does not make `bin_tag` unique: a uniqueness constraint would refuse the **second
+true record** rather than the first false one. Where there is more than one,
+`ambiguous` lists them all with their dates and blocks, and the sentence says so.
+
+**A tag with no seal behind it is a refusal that says so plainly.** It is a break
+in the chain rather than a lookup failure — nothing records which block that bin
+came from and nothing can reconstruct it now. The refusal points at
+`list_bin_seals(shift=…)`, which is usually how a mis-keyed tag is found.

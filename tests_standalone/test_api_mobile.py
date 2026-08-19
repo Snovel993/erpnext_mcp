@@ -691,6 +691,19 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"get_state_tax_remittance",
 		"get_tax_deposit_schedule",
 		"get_futa_summary",
+		# v0.98.0. Bin sealing — `PieceTallyViewModel.sealBin(tag:)` and the
+		# kind-4004 event beside it. THE LAST MOMENT ANYBODY KNOWS THE ANSWER: a
+		# bin leaves the orchard carrying a tag and nothing else, the buckets are
+		# tipped and mixed, and the badge scans live on the handset. Everything
+		# the packing house asks afterwards is a join from that tag back to an
+		# hour that was never written down.
+		#
+		# `company` AND `source` ARE ABSENT FROM ITS SIGNATURE, so this surface's
+		# argument filter makes them unreachable rather than merely refused. The
+		# first would let a phone file another farm's harvest against this one's
+		# crew; the second would let a handset pass a typed record off as a
+		# scanned one, and the register has to tell those apart.
+		"seal_bin",
 	}
 
 	def _whitelisted(self, module):

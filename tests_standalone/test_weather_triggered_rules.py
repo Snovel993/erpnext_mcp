@@ -970,5 +970,5 @@ class TheThirteenAreUntouched(WeatherRuleTestCase):
 		# primitive that folds a child table compares numbers by design.
 		# Six since v0.69.0: `item_below_reorder` reads a balance on Bin against a
 		# level on Item's child table, which is a join rather than a filter.
-		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 6)
+		self.assertEqual(len(shapes[compliance_rules.SHAPE_BUILTIN]), 7)
 		self.assertEqual(shapes.get(compliance_rules.SHAPE_CUSTOM, []), [])

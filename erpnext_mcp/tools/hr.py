@@ -19,7 +19,7 @@ always "who was out".
 
 import frappe
 
-from .. import compat
+from .. import compat, minors
 from ..args import as_date, as_filter, as_limit, as_str
 from ..errors import ToolError
 from ..result import ToolResult
@@ -65,16 +65,26 @@ def list_employees(args: dict) -> ToolResult:
 			"reports_to",
 			"branch",
 			"employment_type",
+			# v0.98.0. FETCHED SO `is_minor` CAN BE DERIVED, and derived rather
+			# than stored — see `minors.py`. Through `compat.existing_fields` like
+			# everything else here, so a site whose Employee has been customised
+			# without it loses the two derived keys rather than the read.
+			"date_of_birth",
 		],
 	)
 	rows = frappe.db.get_all(
 		"Employee", filters=filters, fields=fields, order_by="employee_name asc", limit=limit
 	)
 
+	today = frappe.utils.today()
 	by_department = {}
+	minor_count = 0
 	for row in rows:
 		key = row.get("department") or "<none>"
 		by_department[key] = by_department.get(key, 0) + 1
+		row.update(minors.describe(row.get("date_of_birth"), today))
+		if row.get("is_minor"):
+			minor_count += 1
 
 	data = {
 		"employees": rows,
@@ -88,13 +98,26 @@ def list_employees(args: dict) -> ToolResult:
 			"designation": designation or None,
 			"company": company or None,
 		},
+		"minors": minor_count,
 		"note": (
 			"`name` is the Employee docname (HR-EMP-…); `employee_number` is the "
 			"payroll number an operator will recognise. Pass `name` to the other "
 			"HR tools."
 		),
+		"minor_note": (
+			"`is_minor` is DERIVED from `date_of_birth` on every read and is stored nowhere — a "
+			"fifteen-year-old hired in April is sixteen in July, and a ticked column would still "
+			"say otherwise. It is THREE-VALUED: null means no date of birth is on file, which is "
+			"not the same as an adult. `minor_band` is under-16 or 16-17, because the hour and "
+			"time-of-day limits differ between them, and `minor_limits` carries the ceiling with "
+			"its citation."
+		),
 	}
-	return ToolResult(data, f"{len(rows)} employee(s) ({status or 'any status'})")
+	return ToolResult(
+		data,
+		f"{len(rows)} employee(s) ({status or 'any status'})"
+		+ (f", {minor_count} under 18" if minor_count else ""),
+	)
 
 
 # ── 29. get_attendance_summary ──────────────────────────────────────────────

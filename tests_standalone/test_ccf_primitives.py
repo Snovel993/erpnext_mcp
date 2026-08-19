@@ -1257,8 +1257,8 @@ class TheUpgradeFromV0220(PrimitiveTestCase):
 		# sentence above true — the patch still leaves exactly thirty swept rules —
 		# without this assertion breaking every time a phase adds a control.
 		swept = [row for row in compliance_rules.rule_rows() if not row.get("control_point")]
-		self.assertEqual(len(swept), 30)
-		self.assertEqual(len(compliance_rules.rule_rows()), 30 + len(enforcement.CONTROL_POINTS))
+		self.assertEqual(len(swept), 31)
+		self.assertEqual(len(compliance_rules.rule_rows()), 31 + len(enforcement.CONTROL_POINTS))
 
 	def test_an_operator_edited_threshold_survives_the_migration(self):
 		"""The question the patch exists to answer well. A site that contracted its

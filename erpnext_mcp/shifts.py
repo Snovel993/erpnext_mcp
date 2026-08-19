@@ -89,10 +89,13 @@ and none of them stops it.
 
 from __future__ import annotations
 
+import datetime as _dt
+
 import frappe
 
 from . import breaks as breaks_mod
 from . import compat
+from . import minors as minors_mod
 
 DOCTYPE = "Farm Shift"
 CREW_DOCTYPE = "Farm Shift Crew Member"
@@ -285,6 +288,108 @@ def open_shifts_for(employee: str, exclude: str = "") -> list:
 	return sorted(out, key=lambda entry: str(entry.get("start_datetime") or ""))
 
 
+#: Which day a week starts on, for the weekly ceiling in `minors.LIMITS`.
+#: MONDAY, because ORS 653.010(12) defines a workweek as a fixed and regularly
+#: recurring period of seven consecutive days and this app has to pick one — and
+#: because a Sunday boundary would split a Saturday-Sunday harvest weekend across
+#: two weeks, which is the direction that hides an over-hours week rather than
+#: the one that shows it. An operation on a different workweek reads a figure
+#: shifted by a day or two at the boundary; that is a known approximation and it
+#: is stated in the refusal, rather than a silent claim of exactness.
+WEEK_STARTS_MONDAY = True
+
+
+def week_bounds(on_date: str) -> tuple:
+	"""(first_day, last_day) of the workweek containing `on_date`, as YYYY-MM-DD."""
+	day = str(on_date or "")[:10]
+	try:
+		parsed = _dt.datetime.strptime(day, "%Y-%m-%d").date()
+	except ValueError:
+		return ("", "")
+	start = parsed - _dt.timedelta(days=parsed.weekday())
+	return (start.isoformat(), (start + _dt.timedelta(days=6)).isoformat())
+
+
+def hours_worked_by(employee: str, on_date: str, exclude: str = "", now: str = "") -> dict:
+	"""How long this person has been on shifts today and this workweek.
+
+	v0.98.0, AND IT READS THE SHIFTS RATHER THAN ATTENDANCE. `bridge_to_attendance`
+	writes one Attendance row per crew member WHEN THE SHIFT CLOSES, so on the
+	afternoon somebody is being rostered onto a second crew the Attendance
+	register says nothing at all about the morning they have already worked —
+	which is exactly the moment a child-labour hour check is being asked. The crew
+	rows exist from the moment the shift is formed, so this reads those.
+
+	AN OPEN SHIFT IS COUNTED TO `now`. A worker who started at six and is being
+	added to something else at two has worked eight hours, and treating an
+	unfinished span as zero would clear every over-hours case that is still
+	happening. A CLOSED shift is counted to its own end.
+
+	`exclude` drops one shift by docname — the one being rostered onto, so its own
+	span is not counted twice by a caller that then adds it.
+
+	Returns hours by day and for the workweek, with the shifts each came from, so
+	a refusal can name them. Empty where the crew doctype is absent.
+	"""
+	out = {"today": 0.0, "week": 0.0, "day": str(on_date or "")[:10], "shifts": []}
+	employee = str(employee or "").strip()
+	if not employee or not compat.doctype_exists(CREW_DOCTYPE):
+		return out
+	first, last = week_bounds(on_date)
+	if not first:
+		return out
+	out["week_start"], out["week_end"] = first, last
+	stamp = str(now or "").strip() or frappe.utils.now()
+
+	rows = (
+		frappe.db.get_all(
+			CREW_DOCTYPE,
+			filters={"employee": employee, "parenttype": DOCTYPE, "parentfield": "crew"},
+			fields=["parent", *compat.existing_fields(CREW_DOCTYPE, ("joined_at", "left_at"))],
+			limit=CREW_HISTORY_CAP,
+		)
+		or []
+	)
+	seen = set()
+	for row in rows:
+		parent = str(row.get("parent") or "")
+		if not parent or parent in seen or parent == str(exclude or ""):
+			continue
+		shift = frappe.db.get_value(DOCTYPE, parent, list(FIELDS), as_dict=True)
+		if not shift:
+			continue
+		shift = dict(shift)
+		if compat.checked(shift.get("cancelled")):
+			# A shift that was called off is not hours anybody worked.
+			continue
+		seen.add(parent)
+		start = str(row.get("joined_at") or shift.get("start_datetime") or "")
+		day = start[:10]
+		if not day or day < first or day > last:
+			continue
+		end = str(row.get("left_at") or shift.get("end_datetime") or "") or stamp
+		hours = hours_between(start, end)
+		if hours is None:
+			continue
+		out["week"] += hours
+		if day == out["day"]:
+			out["today"] += hours
+		out["shifts"].append(
+			{
+				"shift": parent,
+				"day": day,
+				"joined_at": start,
+				"until": end,
+				"hours": hours,
+				"open": is_open(shift),
+			}
+		)
+	out["today"] = round(out["today"], 2)
+	out["week"] = round(out["week"], 2)
+	out["shifts"].sort(key=lambda entry: entry["joined_at"])
+	return out
+
+
 # ── reading ─────────────────────────────────────────────────────────────────
 FIELDS = (
 	"name",
@@ -356,6 +461,16 @@ EVENT_FIELDS = (
 	"duration_source",
 	"applies_to",
 	"employee",
+	# v0.98.0. The heat block, added for the same reason the six break columns
+	# were added in v0.64.0: a column that exists and is never FETCHED is a column
+	# nothing downstream can read, and the failure is silent arithmetic rather
+	# than a missing key. Through `compat.existing_fields`, so a site whose
+	# migration has not reached them loses the keys rather than the read.
+	"peak_temp_f",
+	"peak_heat_index_f",
+	"threshold_crossed_at",
+	"weather_source",
+	"heat_obligation",
 	"idx",
 )
 
@@ -466,6 +581,42 @@ def crew_of(shift: str) -> list:
 	return _child_rows(CREW_DOCTYPE, CREW_FIELDS, shift, "crew", "idx asc")
 
 
+def minor_flags(employees, on_date: str = "") -> dict:
+	"""employee docname → `minors.describe`, in ONE query for the whole crew.
+
+	v0.98.0. ONE QUERY AND NOT ONE PER ROW: a thirty-person crew described inside
+	an audit packet that walks a season of shifts is thirty thousand round trips
+	the moment this is done per member, and the answer is a single column.
+
+	`on_date` IS THE SHIFT'S OWN DAY AND NOT TODAY where the caller has one. A
+	shift being read in November is being read about the afternoon it happened,
+	and a picker who turned eighteen in September was seventeen on the day the
+	crew was formed. Defaulting to today would rewrite last season's roster on
+	every birthday.
+
+	Empty where the Employee doctype is absent or has no `date_of_birth`, which
+	leaves every `is_minor` at None: "this site does not record it" rather than
+	"nobody is under eighteen".
+	"""
+	wanted = sorted({str(name) for name in (employees or []) if name})
+	if not wanted:
+		return {}
+	if not compat.doctype_exists("Employee") or not compat.has_field("Employee", "date_of_birth"):
+		return {}
+	when = str(on_date or "").strip() or frappe.utils.today()
+	rows = (
+		frappe.db.get_all(
+			"Employee",
+			filters={"name": ("in", wanted)},
+			fields=["name", "date_of_birth"],
+			limit=len(wanted),
+		)
+		or []
+	)
+	born = {str(row["name"]): row.get("date_of_birth") for row in rows}
+	return {name: minors_mod.describe(born.get(name), when) for name in wanted}
+
+
 def events_of(shift: str) -> list:
 	"""The compliance events of one shift, IN TIME ORDER.
 
@@ -568,7 +719,76 @@ def describe_crew_row(row: dict, shift_end: str = "") -> dict:
 		"present_until": left or (str(shift_end or "") or None),
 		"left_early": bool(left),
 		"notes": row.get("notes") or None,
+		# v0.98.0. DERIVED UPSTREAM AND MERELY CARRIED HERE — this function is
+		# pure over the row it is given, and `describe` is what runs the one
+		# query. None where the row was not enriched or no date of birth is on
+		# file; the three-valued answer is the point (see `minors.py`).
+		"is_minor": row.get("is_minor"),
+		"minor_band": row.get("minor_band"),
+		"minor_limits": row.get("minor_limits"),
 	}
+
+
+def _float(value, default: float = 0.0) -> float:
+	try:
+		return float(value) if value not in (None, "") else default
+	except (TypeError, ValueError):
+		return default
+
+
+def heat_conditions(readings: list, when: str) -> dict:
+	"""What this shift's weather had done BY `when` — the peak, and the crossing.
+
+	v0.98.0, AND IT IS A DIFFERENT QUESTION FROM THE SNAPSHOT the Farm Shift
+	controller already writes onto every event. `weather_snapshot_temp_f` is the
+	reading current at the event's own instant, bounded to half an hour; that is
+	the conditions the foreman was standing in. This is the shift's HIGHEST
+	figures so far and the moment the heat index first crossed the threshold — the
+	conditions the break was called ABOUT.
+
+	The distinction is not academic. A cool-down called at 16:10, when the index
+	has fallen back to 88, sits on a row whose snapshot reads 88 and whose peak
+	reads 97. OAR 437-004-1131 attaches its obligations at the CROSSING, and an
+	inspector asking whether relief was provided in time is asking about the
+	crossing rather than about the moment of relief. A register that carried only
+	the snapshot could not answer, and the join to reconstruct it — ninety
+	readings, per break, per shift — is the one nobody performs.
+
+	AT OR BEFORE `when`, never after: reaching forward would stamp a break with a
+	measurement that did not exist when it was called. Empty where the shift has
+	no timeline, which is not the same as zero and is why the caller writes
+	nothing rather than writing nulls.
+	"""
+	if not when:
+		return {}
+	before = [
+		row
+		for row in (readings or [])
+		if str(row.get("reading_datetime") or "") and str(row["reading_datetime"]) <= str(when)
+	]
+	if not before:
+		return {}
+	temps = [row.get("temp_f") for row in before if row.get("temp_f") not in (None, "")]
+	indices = [row.get("heat_index_f") for row in before if row.get("heat_index_f") not in (None, "")]
+	crossed = next(
+		(
+			str(row["reading_datetime"])
+			for row in before
+			if _float(row.get("heat_index_f")) >= HEAT_THRESHOLD_F
+		),
+		"",
+	)
+	out = {
+		"peak_temp_f": max(temps) if temps else None,
+		"peak_heat_index_f": max(indices) if indices else None,
+		"threshold_crossed_at": crossed or None,
+		# The SOURCE OF THE READING CURRENT AT THE BREAK, not of the peak. The
+		# provenance question a reader asks is "where did the numbers on this row
+		# come from", and the row's own snapshot is the number they are looking
+		# at when they ask.
+		"weather_source": str(before[-1].get("source") or "") or None,
+	}
+	return out
 
 
 def describe_event_row(row: dict) -> dict:
@@ -583,7 +803,15 @@ def describe_event_row(row: dict) -> dict:
 		"producer_record_doctype": producer or None,
 		"producer_record_name": name or None,
 		"temp_f": row.get("weather_snapshot_temp_f"),
+		# v0.98.0. THE SAME NUMBER UNDER THE NAME iOS ASKS FOR. `temp_f` has been
+		# this key since v0.19.4 and is not going anywhere — every existing reader
+		# uses it — but the handset's heat-break payload calls it `ambient_temp_f`,
+		# and a server answering with one name while the client reads the other is
+		# the exact class of failure v0.96.0 was seven instances of. Both, from
+		# one column, so they cannot drift.
+		"ambient_temp_f": row.get("weather_snapshot_temp_f"),
 		"heat_index_f": row.get("weather_snapshot_heat_index_f"),
+		"weather_source": row.get("weather_source") or None,
 		"evidence_attached": bool(row.get("evidence_file")),
 	}
 	break_kind = row.get("break_kind") or ""
@@ -594,6 +822,11 @@ def describe_event_row(row: dict) -> dict:
 		out["duration_source"] = row.get("duration_source") or "Scheduled"
 		out["applies_to"] = row.get("applies_to") or "Crew"
 		out["employee"] = row.get("employee") or None
+		out["heat_obligation"] = compat.checked(row.get("heat_obligation"))
+		if out["heat_obligation"]:
+			out["peak_temp_f"] = row.get("peak_temp_f")
+			out["peak_heat_index_f"] = row.get("peak_heat_index_f")
+			out["threshold_crossed_at"] = str(row.get("threshold_crossed_at") or "") or None
 	return out
 
 
@@ -638,9 +871,19 @@ def describe(row: dict, with_children: bool = False, clock=None) -> dict:
 	crew = crew_of(name)
 	events = events_of(name)
 	readings = weather_of(name)
+	# v0.98.0. WHO ON THIS CREW IS UNDER EIGHTEEN, resolved once for the whole
+	# roster and answered as of the SHIFT'S OWN DAY. The described rows carry it
+	# so the handset can put the purple "Minor's schedule" badge on the crew
+	# screen, and `_break_summary` carries it so their entitlement is computed
+	# from the minor schedule rather than the adult one — two readers, one query,
+	# one answer they cannot disagree about.
+	flags = minor_flags([entry.get("employee") for entry in crew], str(row.get("start_datetime") or ""))
+	for entry in crew:
+		entry.update(flags.get(str(entry.get("employee") or "")) or {})
 	out["crew"] = [describe_crew_row(entry, end or "") for entry in crew]
 	out["crew_size"] = len(crew)
 	out["still_on_shift"] = len([entry for entry in crew if not entry.get("left_at")])
+	out["minors_on_crew"] = len([entry for entry in crew if entry.get("is_minor")])
 	out["compliance_events"] = [describe_event_row(entry) for entry in events]
 	out["compliance_event_count"] = len(events)
 	out["weather_timeline"] = readings

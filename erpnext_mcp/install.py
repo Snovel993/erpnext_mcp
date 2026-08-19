@@ -1664,6 +1664,15 @@ _PRECIOUS_DOCTYPES = (
 		"packer actually returns more per bin'",
 	),
 	(
+		"Bin Seal",
+		"the bin register — every bin closed in the field, with the tag that travels with it, "
+		"the block and the shift it was filled on, and the names of the workers whose buckets "
+		"are in it. IT CANNOT BE RECONSTRUCTED FROM ANYTHING: once the trailer has gone the "
+		"buckets are tipped and mixed, the badge scans are on a handset, and the tag points at "
+		"nothing. It is what answers a residue detection, a piece-rate dispute and a "
+		"food-safety hold alike",
+	),
+	(
 		"Shift Location Log",
 		"the crew tracks — every GPS fix the phones posted during a shift, with the time "
 		"each one was taken. It is the only record of where anybody actually went, which "

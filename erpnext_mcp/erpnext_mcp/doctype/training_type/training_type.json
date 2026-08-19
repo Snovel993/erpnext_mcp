@@ -14,6 +14,7 @@
   "retention_years",
   "delivery_method",
   "duration_minutes",
+  "group_training",
   "coverage_section",
   "regimes",
   "curriculum_section",
@@ -66,6 +67,14 @@
    "fieldname": "duration_minutes",
    "fieldtype": "Int",
    "label": "Duration (minutes)"
+  },
+  {
+   "default": "0",
+   "description": "Whether this curriculum is delivered to a CREW at once rather than to one person at a time. It decides what a compliance alert becomes: ticked, several people whose training is lapsing produce ONE Training Session with all of them as attendees; unticked, each produces its own Farm Task. Heat-illness prevention, WPS worker training and a harvest-hygiene refresher are all group deliveries — a trainer, a room, a language and forty minutes — and raising eleven separate tasks for one afternoon's work is eleven cards nobody closes and no attendance sheet at the end of it. A one-to-one item (an applicator licence, a forklift certification) stays unticked.",
+   "fieldname": "group_training",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Delivered as a Group Session"
   },
   {
    "fieldname": "coverage_section",

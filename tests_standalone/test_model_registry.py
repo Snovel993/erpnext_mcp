@@ -843,9 +843,9 @@ class ToolRegistration(unittest.TestCase):
 		# model registry changed; the totals moved because the catalogue did.
 		# v0.93.0 adds ONE write as well: `recover_mobile_access`, the lost-phone
 		# path — revoke, re-mint, verify by badge, and never touch the Employee.
-		self.assertEqual(len(self.registry.TOOLS), 744)
-		self.assertEqual(len(self.registry.READ_TOOLS), 371)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 373)
+		self.assertEqual(len(self.registry.TOOLS), 748)
+		self.assertEqual(len(self.registry.READ_TOOLS), 374)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 374)
 
 
 if __name__ == "__main__":

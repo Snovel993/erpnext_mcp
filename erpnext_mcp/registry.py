@@ -55,6 +55,7 @@ from .tools import (
 	badges,
 	banking,
 	banking_bridge,
+	binseals,
 	blocklifecycle,
 	breakeven,
 	bucket_log,
@@ -17967,6 +17968,142 @@ TOOLS = {
 		title="Reconcile bucket entries against payroll",
 		available=_needs_doctype("Bucket Log Entry"),
 		requires="the Bucket Log Entry DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── v0.98.0: bin sealing — the chain from a pack line back to a crew ───
+	#
+	# FOUR TOOLS AND ONE OF THEM IS THE POINT. `trace_bin` takes the TAG, which
+	# is the only identifier that leaves the orchard on the trailer, and answers
+	# with the people whose buckets are inside. The other three write and read the
+	# register it draws from. See `tools/binseals.py` for why none of it is
+	# reconstructable after the crew has gone home.
+	"seal_bin": _tool(
+		binseals.seal_bin,
+		"MUTATING (default OFF). Close one bin in the field and record whose "
+		"buckets are in it. THE ONLY MOMENT THAT ANSWER EXISTS: after the trailer "
+		"leaves, a bin is a tag, the buckets are tipped and mixed, and the badge "
+		"scans are on a handset.\n\n"
+		"IDEMPOTENT ON `client_event_id`, which is the handset's own identifier "
+		"for one sealing action. A phone that sealed a bin and did not hear the "
+		"answer sends the same call again — over a funnel, in a canyon, on a dying "
+		"battery this is the ordinary case — and a second record of one bin is a "
+		"doubled count at the pack line and a doubled piece rate on somebody's "
+		"cheque. A retry gets the same seal back with `already_sealed: true`.\n\n"
+		"`bucket_count` IS THE TALLY AND THE CONTRIBUTORS ARE THE SCANS, and the "
+		"two are never reconciled. A bucket tipped by somebody whose badge did not "
+		"scan is in the bin and not in the rows — which is the fact a piece-rate "
+		"dispute turns on — so `unattributed_buckets` names the difference instead "
+		"of hiding it.\n\n"
+		"A badge that resolves to nobody is REPORTED AND THE BIN IS STILL SEALED. "
+		"A record with a gap in it is worth more than no record, and a bin refused "
+		"over an unregistered card is a bin nothing can trace at all.",
+		{
+			"bin_tag": _field(
+				_STRING,
+				"REQUIRED. What is on the bin — the QR value the checker scanned, or "
+				"MANUAL-XXXX where there was no tag to scan. NOT unique on this site and "
+				"not made so: tags are reused between seasons and between growers, and a "
+				"uniqueness constraint would refuse the second TRUE record.",
+			),
+			"bucket_count": _field(
+				_INTEGER,
+				"REQUIRED. Buckets in the bin when it was closed, as the checker's tally "
+				"read. Zero is a legitimate answer and is not the same as omitting it.",
+			),
+			"contributors": _field(
+				{"type": "array"},
+				"The workers whose badges were scanned into this bin since the last seal. "
+				"Employee docnames, badge ids, or objects carrying "
+				"{employee|badge_id, buckets_contributed, first_scan_at, last_scan_at} — "
+				"all three shapes land on one row. Duplicates are MERGED rather than "
+				"refused: somebody who came back with a second bucket is one row.",
+			),
+			"shift": _field(_STRING, "The Farm Shift the picking happened on. It is what joins a bin to the crew, the weather timeline and the break log."),
+			"field": _field(_STRING, "The Field docname. A Link because a residue trace runs bin → block → spray application."),
+			"block": _field(_STRING, "The block as the CREW calls it, where that is not a Field on the register."),
+			"crop": _field(_STRING, "What is in it, as the checker said."),
+			"bucket_session": _field(_STRING, "Bucket Log Session docname or session_uuid, where the phone was running one."),
+			"gps_lat": _field(_NUMBER, "Decimal degrees, -90 to 90. Where the bin stood when it was closed."),
+			"gps_lon": _field(_NUMBER, "Decimal degrees, -180 to 180. Negative in the western hemisphere."),
+			"gps_accuracy_meters": _field(_NUMBER, "What the phone reported. Kept, never used as a gate."),
+			"h3_hex": _field(_STRING, "Optional. Derived from the coordinates where this site has h3; pass one only to override."),
+			"sealed_at": _field(_STRING, "When the bin was closed, not when the call arrived. Defaults to now."),
+			"sealed_by": _field(_STRING, "The checker who closed it — an Employee docname or number."),
+			"company": _COMPANY,
+			"client_event_id": _field(_STRING, "The handset's identifier for this sealing action. What makes a retry safe."),
+			"nostr_event_id": _field(_STRING, "The kind-4004 event id, where the handset published one."),
+			"source": _field(_STRING, "iOS, Manual or Import. Defaults to iOS."),
+			"notes": _field(_STRING, "Anything the checker wants on the record."),
+		},
+		required=("bin_tag", "bucket_count"),
+		mutating=True,
+		title="Seal a bin",
+		available=_needs_doctype("Bin Seal"),
+		requires="the Bin Seal DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"get_bin_seal": _tool(
+		binseals.get_bin_seal,
+		"One bin seal in full, including every contributor with the buckets "
+		"attributed to them and the window their badge was scanning. "
+		"`unattributed_buckets` is the tally minus the scans and is REPORTED "
+		"rather than reconciled — see seal_bin. Read-only.",
+		{
+			"name": _field(_STRING, "The Bin Seal docname, e.g. BIN-2026-00017."),
+			"bin_seal": _field(_STRING, "Alias for name."),
+			"seal": _field(_STRING, "Alias for name."),
+		},
+		required=("name",),
+		title="Get a bin seal",
+		available=_needs_doctype("Bin Seal"),
+		requires="the Bin Seal DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"list_bin_seals": _tool(
+		binseals.list_bin_seals,
+		"The bin register — by shift, field, block, tag, bucket session, checker "
+		"or day, newest first. Contributors are NOT on this answer: one bin's "
+		"crew is a child table and forty bins would be forty reads of it. "
+		"get_bin_seal has one seal in full. Read-only.",
+		{
+			"shift": _field(_STRING, "Every bin sealed on one Farm Shift."),
+			"field": _field(_STRING, "Every bin from one Field."),
+			"block": _field(_STRING, "Every bin whose block was recorded with this name."),
+			"bin_tag": _field(_STRING, "Every seal carrying one tag. trace_bin is the richer answer to the same question."),
+			"bucket_session": _field(_STRING, "Every bin a session tipped into."),
+			"sealed_by": _field(_STRING, "Every bin one checker closed."),
+			"company": _COMPANY,
+			"from_date": _field(_STRING, "Earliest sealing date, YYYY-MM-DD."),
+			"to_date": _field(_STRING, "Latest sealing date, YYYY-MM-DD."),
+			"limit": _LIMIT,
+		},
+		title="List bin seals",
+		available=_needs_doctype("Bin Seal"),
+		requires="the Bin Seal DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"trace_bin": _tool(
+		binseals.trace_bin,
+		"GIVEN A BIN TAG AT THE PACKING HOUSE, WHO PUT BUCKETS INTO IT — and "
+		"which block, which shift and which checker. Read-only.\n\n"
+		"This is the accountability chain from the pack line back to the field, "
+		"and it is the read the whole bin-sealing feature exists for. It takes "
+		"the TAG rather than a docname, because nobody standing at a pack line "
+		"has a docname.\n\n"
+		"IT ANSWERS WITH EVERY SEAL CARRYING THE TAG, newest first, and `matches` "
+		"says how many. Bin tags are reused between seasons and between growers; "
+		"a tool that answered with one seal would answer confidently about "
+		"possibly the wrong afternoon. Where there is more than one, `ambiguous` "
+		"lists them all with their dates and blocks.\n\n"
+		"A tag with no seal behind it is a REFUSAL that says so plainly: it is a "
+		"break in the chain rather than a lookup failure, because nothing records "
+		"which block that bin came from and nothing can reconstruct it now.",
+		{
+			"bin_tag": _field(_STRING, "REQUIRED. The tag on the bin, exactly as it reads."),
+			"tag": _field(_STRING, "Alias for bin_tag."),
+			"bin": _field(_STRING, "Alias for bin_tag."),
+			"company": _COMPANY,
+		},
+		required=("bin_tag",),
+		title="Trace a bin to the workers who filled it",
+		available=_needs_doctype("Bin Seal"),
+		requires="the Bin Seal DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 	# ── v0.68.0: Container-Agnostic Fill Pipeline ──────────────────────────
 	"get_fill_determination": _tool(
