@@ -1675,6 +1675,187 @@ def get_break_policy(args: dict) -> ToolResult:
 	)
 
 
+#: How long a shift nobody has closed is assumed to run, in hours.
+#:
+#: THE ENTITLEMENT BANDS ARE KEYED ON THE LENGTH OF THE SHIFT, NOT ON HOURS
+#: WORKED SO FAR, which is why an open shift needs an assumption rather than a
+#: measurement: six hours owes a meal period and four does not, so computing
+#: against elapsed time would make the meal APPEAR on the schedule at the
+#: four-hour mark — three hours after the crew needed to know it was coming, and
+#: with the countdown already showing it as overdue the moment it arrived.
+#:
+#: EIGHT BECAUSE THAT IS THE DAY THIS IS FOR, and a caller who knows better says
+#: so: `planned_hours` overrides it, and a shift that has been CLOSED is measured
+#: end to end and never guessed at. Eight is also the conservative direction —
+#: it owes the meal period a seven-hour day owes and a five-hour day does not,
+#: and a break offered and not needed costs ten minutes where one needed and not
+#: offered is a wage claim.
+PLANNED_SHIFT_HOURS = 8.0
+
+
+def _break_schedule_for(row: dict, planned_hours=None, now: str = "") -> dict:
+	"""The timed break schedule for one shift. The computation, without the gates.
+
+	Split from `get_break_schedule` below so the resolution, the role check and
+	the company scope live in one place and this stays a function of a shift row
+	— which is what lets `get_shift` grow a schedule later without either of them
+	forking the arithmetic.
+
+	THE POLICY IS THE SHIFT'S OWN FIRST AND THE STATE'S SECOND. A `Farm Shift`
+	carries `break_policy`, stamped when the shift was started, and that is the
+	one to honour: a policy amended in October must not retroactively change what
+	August's crew was owed. Where the column is empty — every shift started
+	before v0.58.0, and any started on a site that had no policy yet — the
+	enabled policy for the shift's `work_state` is read the same way
+	`get_break_policy` reads it, and the answer SAYS which of the two happened.
+	An app that cannot tell "this is your farm's policy" from "this is the
+	state's default" cannot print the sentence `BreakSchedule` prints.
+	"""
+	policy = _break_policy_dict(row)
+	resolved_from = "shift" if row.get("break_policy") and policy else ""
+	if not policy:
+		fallback = _enabled_policy_for(str(row.get("work_state") or ""))
+		if fallback:
+			policy, resolved_from = fallback, "work_state"
+
+	start = str(row.get("start_datetime") or "")
+	end = str(row.get("end_datetime") or "")
+	if planned_hours not in (None, ""):
+		hours = as_float(planned_hours, "planned_hours")
+	elif end:
+		# A CLOSED SHIFT IS MEASURED, NEVER ASSUMED. Its length is a fact by
+		# then, and the schedule this returns is what a payroll reconciliation
+		# and an inspector read rather than what a countdown bar draws.
+		hours = breaks_mod._hours_between(start, end)
+	else:
+		hours = PLANNED_SHIFT_HOURS
+
+	readings = [dict(entry) for entry in (row.get("weather_timeline") or [])]
+	if not readings and row.get("name"):
+		readings = [dict(entry) for entry in (shifts.weather_of(str(row["name"])) or [])]
+	heat_index = None
+	measured = [
+		breaks_mod._as_float(entry.get("heat_index_f"))
+		for entry in readings
+		if entry.get("heat_index_f") not in (None, "")
+	]
+	if measured:
+		heat_index = max(measured)
+
+	events = [dict(entry) for entry in shifts.events_of(str(row.get("name") or "")) if entry.get("break_kind")]
+	rows = breaks_mod.schedule(
+		start,
+		policy,
+		hours=hours,
+		events=events,
+		now=now or frappe.utils.now(),
+		heat_index=heat_index,
+	)
+
+	owed = [entry for entry in rows if not entry["taken"]]
+	return {
+		"shift": row.get("name"),
+		"company": row.get("company") or None,
+		"work_state": row.get("work_state") or None,
+		"shift_start": start or None,
+		"shift_end": end or None,
+		"hours": round(hours, 2),
+		"hours_are_planned": not end and planned_hours in (None, ""),
+		"policy": policy.get("policy") if policy else None,
+		"policy_source": resolved_from or None,
+		"policy_approved": bool(policy.get("approved")) if policy else False,
+		"regulation_citations": policy.get("regulation_citations") if policy else None,
+		"heat_index": heat_index,
+		"breaks": rows,
+		"count": len(rows),
+		"outstanding": len(owed),
+		"next_due": next((entry["due_at"] for entry in owed), None),
+		# THE ONE SENTENCE THE HANDSET PRINTS UNDER THE COUNTDOWN. `BreakSchedule`
+		# already prints which source it used, every time, because a countdown
+		# that looks authoritative and is really the app's own reading of OAR
+		# 839-020-0050 is the kind of thing somebody quotes in a wage claim. This
+		# is that sentence written where the fact is.
+		"note": _schedule_note(policy, resolved_from),
+	}
+
+
+def _schedule_note(policy: dict, resolved_from: str) -> str:
+	if not policy:
+		return (
+			"No enabled break policy for this shift or its work state, so nothing is scheduled. "
+			"The handset falls back to the statutory minimum it carries and must say so."
+		)
+	if resolved_from == "shift":
+		return (
+			f"Computed from {policy.get('policy')}, the policy stamped on this shift when it "
+			"started. Amending the policy now does not change what this crew was owed."
+		)
+	return (
+		f"This shift names no break policy, so {policy.get('policy')} — the enabled policy for "
+		f"{policy.get('work_state') or 'this state'} — was used. Shifts started before v0.58.0 "
+		"carry no stamp."
+	)
+
+
+def _enabled_policy_for(work_state: str) -> dict:
+	"""The enabled policy for one state, as a dict, or `{}`.
+
+	The same lookup `get_break_policy` makes, factored out rather than repeated,
+	so the schedule and the policy read can never answer from different records.
+	"""
+	if not compat.doctype_exists(BREAK_POLICY_DOCTYPE):
+		return {}
+	filters = {"enabled": 1}
+	if work_state:
+		filters["work_state"] = work_state
+	found = frappe.db.get_all(
+		BREAK_POLICY_DOCTYPE,
+		filters=filters,
+		fields=["name"],
+		order_by="effective_from desc",
+		limit_page_length=1,
+	)
+	if not found:
+		return {}
+	try:
+		return _describe_break_policy(dict(frappe.get_doc(BREAK_POLICY_DOCTYPE, found[0]["name"]).as_dict()))
+	except Exception:  # pragma: no cover - deleted between the query and the read
+		return {}
+
+
+def get_break_schedule(args: dict) -> ToolResult:
+	"""Every break one shift owes, and the clock time each falls due.
+
+	v0.98.0, ITEM 14, AND THE POINT IS THAT ONE MACHINE COMPUTES IT. Breaks
+	should be scheduled from the shift's start against the state's rules, not
+	logged from memory when somebody remembers, and a schedule each handset works
+	out for itself drifts by whatever the phones disagree about — the start time,
+	the device clock, and which policy the app managed to fetch before it lost
+	signal. This returns INSTANTS rather than durations, so seven phones on one
+	crew show the same 10:05 whether they asked at the tailgate or an hour later.
+
+	`get_break_policy` IS STILL THE OTHER HALF AND IS NOT REPLACED. That answers
+	what the rules ARE — the bands, the citations, whether a human approved them
+	— for a screen that shows the policy. This answers what THIS shift owes and
+	when, which is a different question with a shift in it, and the handset needs
+	both: the countdown, and the sentence under it saying where the countdown
+	came from.
+	"""
+	_require()
+	actor = employee_tool.require_shift_role()
+	row = _resolve_shift(args)
+	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
+
+	data = _break_schedule_for(row, planned_hours=args.get("planned_hours"), now=as_str(args, "now"))
+	return ToolResult(
+		data=data,
+		summary=(
+			f"{data['shift']}: {data['count']} break(s) scheduled, {data['outstanding']} outstanding"
+			+ (f", next at {data['next_due']}" if data["next_due"] else "")
+		),
+	)
+
+
 def _describe_break_policy(row: dict) -> dict:
 	approved_by = row.get("human_approved_by") or None
 	return {

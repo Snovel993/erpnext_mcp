@@ -98,7 +98,7 @@ import json
 
 import frappe
 
-from .. import bucket_bridge, compat, datetimes, timezones
+from .. import bucket_bridge, compat, datetimes, locations, timezones
 from .. import pay_stub_pdf
 from .. import shifts as shift_records
 from .. import training as training_register
@@ -114,10 +114,12 @@ from ..tools import dimensions as dimension_tools
 from ..tools import docvalidation
 from ..tools import employee as personnel
 from ..tools import expenses as expense_tools
+from ..tools import farm as farm_tools
 from ..tools import housing as housing_tools
 from ..tools import masters as master_tools
 from ..tools import ml_model as ml_model_tools
 from ..tools import mobile as mobile_tools
+from ..tools import realestate as realestate_tools
 from ..tools import receipts as receipt_tools
 from ..tools import training as training_tools
 from ..tools import training_sessions as training_session_tools
@@ -718,6 +720,31 @@ def _previous_assignment(employee: str, allowed: list) -> dict | None:
 #: would be refusing the thing this feature is for. The two personnel registers
 #: are HR's, and the accident register is open to write because the person who
 #: finds somebody on the ground is whoever finds them.
+#: The handset's word for a report's direction, mapped onto the column's own.
+#:
+#: v0.98.0, ITEM 12. `Farm Incident Record.report_direction` has carried
+#: `Supervisor Report` / `Worker Report` since v0.94.0 and the tool has enforced
+#: every rule that follows from it — a Worker Report takes no `discipline_type`,
+#: gets no rung on the escalation chain, and is NOT refused after a termination,
+#: which is the one report that must never be refused on those grounds. None of
+#: that was reachable in the app's vocabulary, so a grievance was being filed as
+#: `create_discipline_record` at the lowest step with `DISPUTE RAISED BY …`
+#: typed into the description. That record IS a warning: it sits on a
+#: progressive-discipline chain, in the file of the person who complained.
+#:
+#: TWO WORDS FOR ONE COLUMN RATHER THAN A SECOND COLUMN. The plan allowed either
+#: a `direction` field or a `create_dispute`; a second Select saying the same
+#: thing in different words is the table sprawl this codebase is built against,
+#: and would leave two columns to disagree about one record. The stored value
+#: stays the doctype's, so the Desk, the chain query and every report already
+#: written keep reading one vocabulary.
+REPORT_DIRECTIONS = {
+	"disciplinary": discipline_tools.SUPERVISOR_REPORT,
+	"grievance": discipline_tools.WORKER_REPORT,
+	"dispute": discipline_tools.WORKER_REPORT,
+}
+
+
 NARRATIVE_TARGETS = {
 	FARM_TASK: None,
 	"Accident Report": None,
@@ -746,6 +773,33 @@ def _narrative_target(user: str, doctype, name, task, allowed: list) -> tuple:
 	if NARRATIVE_TARGETS[target] == "hr":
 		personnel.require_hr_role()
 	return target, guard.require_scoped_doc(target, docname, "name", allowed)
+
+
+def _report_direction(given, label: str = "report_direction") -> str:
+	"""One `report_direction` value, from either vocabulary, or "".
+
+	ACCEPTS THE COLUMN'S OWN WORDS AND THE HANDSET'S, case-insensitively, and
+	refuses anything else BY NAME with both lists in the sentence. A refusal that
+	only says "invalid" leaves a client author guessing between four spellings,
+	which is how `DISPUTE RAISED BY …` got typed into a description in the first
+	place.
+	"""
+	wanted = str(given or "").strip()
+	if not wanted:
+		return ""
+	folded = wanted.lower()
+	if folded in REPORT_DIRECTIONS:
+		return REPORT_DIRECTIONS[folded]
+	for option in discipline_tools.DIRECTIONS:
+		if option.lower() == folded:
+			return option
+	frappe.throw(
+		f"{label} {wanted!r} is not one this surface knows. The stored values are "
+		f"{' and '.join(discipline_tools.DIRECTIONS)}; "
+		f"{', '.join(sorted(REPORT_DIRECTIONS))} are accepted as spellings of them. "
+		"Nothing was created.",
+		frappe.ValidationError,
+	)
 
 
 def _caller_language(user: str, employee: str = "") -> str:
@@ -1140,8 +1194,27 @@ def report_field_task(
 	description=None,
 	photo_file_token=None,
 	asset=None,
+	affected_asset=None,
+	affected_block=None,
+	observed_at=None,
+	estimated_duration_minutes=None,
 ) -> dict:
 	"""A worker in the field flags a problem on the spot.
+
+	THE FOUR STRUCTURED ARGUMENTS AND THE ESTIMATE ARE v0.98.0, ITEM 5, and each
+	is declared here because this transport's argument filter delivers only what
+	a signature names — a key the wrapper omits is not passed through, it is
+	dropped, and the report is filed without it and says nothing about the loss.
+
+	`affected_asset` is `asset` under the name the app's form uses;
+	`affected_block` is a `Field` docname that fills the location pair when no
+	explicit pair was sent; `observed_at` is when the thing was SEEN, which is
+	its own column and is not `reported_at` — see `_structured_report`.
+
+	`reported_by` IS STILL NOT ON THIS SIGNATURE. It is the authenticated caller,
+	and the whole reason is in the paragraph below. `create_farm_task` accepts one
+	because a foreman raising work is recording somebody else's observation; a
+	worker reporting is recording their own.
 
 	THE FIELD REPORT IS THE WORK ORDER. The worker taps, snaps a photo,
 	describes the problem, and the task is in the pool — one act, not a
@@ -1175,8 +1248,20 @@ def report_field_task(
 		inner["description"] = str(description).strip()
 	if photo_file_token:
 		inner["photo_file_token"] = str(photo_file_token).strip()
-	if asset:
-		inner["asset"] = str(asset).strip()
+	named_asset, _ = _one_spelling(affected_asset, asset, "affected_asset", "asset")
+	if named_asset:
+		inner["asset"] = named_asset
+	for key, value in (
+		("affected_block", affected_block),
+		("observed_at", observed_at),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	if estimated_duration_minutes is not None:
+		# UNPARSED, like every other number on this surface: `as_int` is what
+		# parses it inside the tool, and an `int()` here would 500 on a body that
+		# sent "twenty" instead of refusing it in a sentence.
+		inner["estimated_duration_minutes"] = estimated_duration_minutes
 
 	company = guard.require_company(user, inner.get("company"), allowed) if inner.get("company") else ""
 	if not company and allowed:
@@ -4510,6 +4595,59 @@ def get_break_policy(user: str, company=None, work_state=None) -> dict:
 	return result.data
 
 
+# ── 41b. get_break_schedule ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_break_schedule", limit=guard.READ_LIMIT)
+def get_break_schedule(user: str, shift=None, farm_shift=None, planned_hours=None) -> dict:
+	"""Every break this shift owes, and the clock time each one falls due.
+
+	v0.98.0, ITEM 14. THE WHOLE VALUE IS THAT ONE MACHINE DOES THE ARITHMETIC.
+	`BreakSchedule` on the handset computes its countdown from the shift's start
+	against the farm's policy when `get_break_policy` answers and against the
+	state statutory minimum when it does not — Oregon and Washington are encoded
+	in Swift, adult and minor, with the citations in the source. That is honest
+	and it is not synchronised: seven phones in an orchard each work out their
+	own instants from their own idea of when the shift began, and they disagree
+	by whatever the clocks and the last sync disagree by. `SERVER_CHANGES.md` §14
+	states the requirement as every phone counting down to the same second, and
+	the only version of that which works is one computation and seven readers.
+
+	IT ANSWERS WITH INSTANTS, NOT DURATIONS. A phone that fetches the schedule an
+	hour into the shift shows the same 10:05 as the one that fetched it at the
+	tailgate — a duration would have to be re-based against a device clock, which
+	is the drift this exists to remove.
+
+	`farm_shift` IS ACCEPTED ALONGSIDE `shift`, which is v0.96.0's item 1 applied
+	before it can bite again: `DispatchAPI` sends the first spelling and the
+	shift methods here declare the second, and this transport's argument filter
+	drops what a signature does not name — so a body carrying only `farm_shift`
+	would have arrived with no shift in it and been refused for the argument it
+	had actually sent.
+
+	`planned_hours` IS AN OVERRIDE AND USUALLY ABSENT. An open shift is assumed
+	to run `shifts.PLANNED_SHIFT_HOURS`, because the entitlement bands are keyed
+	on how long the shift IS and not on how long it has been — computing against
+	elapsed time would make the meal period appear four hours in, which is three
+	hours after the crew needed to know it was coming. A closed shift is measured
+	end to end and this argument does not enter into it.
+
+	THE ROLE GATE IS THE SHIFT ROLE, INSIDE THE TOOL, and the scope is the
+	caller's own entities: a break schedule names no worker, but it names a
+	shift, and which crews are working today is not a fact for an account that
+	cannot reach the entity running them.
+	"""
+	allowed = guard.require_scope(user)
+	named, label = _one_spelling(shift, farm_shift, "shift", "farm_shift")
+	docname = guard.require_scoped_doc(FARM_SHIFT, named, label, allowed)
+
+	inner = {"shift": docname}
+	if planned_hours is not None:
+		# Unparsed: `as_float` inside the tool is what refuses "eight" in a
+		# sentence, where a `float()` here would answer the same body with a 500.
+		inner["planned_hours"] = planned_hours
+	return shifts.get_break_schedule(inner).data
+
+
 # ── 42. clock_out_worker ──────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("clock_out_worker", mutating=True, limit=guard.WRITE_LIMIT)
@@ -5101,6 +5239,26 @@ ATTACHMENT_PARENTS = {
 	# the accounts that hold those roles and does not manufacture a permission
 	# for anybody else.
 	discipline_tools.DISCIPLINE: True,
+	# v0.98.0. The SOP a standing job carries, readable by whoever is doing the
+	# job. `False` — no HR gate — because a Farm Task Template is not a fact
+	# about a person: it is what this farm does when it cleans a cabin, and the
+	# picker holding the phone in front of the cabin is exactly who the document
+	# was written for.
+	#
+	# IT IS THE ONLY PARENT ON THIS LIST THAT IS A DEFINITION RATHER THAN AN
+	# EVENT. Everything else here is a record of something that happened to
+	# somebody — a shift, an inspection, a warning, a payroll run — and is
+	# scoped to the caller's entities by `_attachment_parent` on that basis. A
+	# template belongs to the OPERATION rather than to an entity and may carry no
+	# company at all, which `require_scoped_doc` reads as reachable, the same way
+	# `list_farm_task_templates` and `create_task_from_template` already do.
+	#
+	# READ-ONLY IN PRACTICE AND NOT BY DECLARATION. Nothing on this surface
+	# writes a template — `create_farm_task_template` and
+	# `update_farm_task_template` are deliberately absent from `routes.py`,
+	# which says why — so the folder behind this entry is filled at a desk and
+	# read in an orchard, which is the whole shape of item 2.
+	FARM_TASK_TEMPLATE: False,
 }
 
 
@@ -6676,8 +6834,27 @@ def create_farm_task(
 	farm_shift=None,
 	override_phi=None,
 	phi_override_reason=None,
+	affected_asset=None,
+	asset=None,
+	affected_block=None,
+	observed_at=None,
+	reported_by=None,
 ) -> dict:
 	"""Raise one piece of work on the spot, with its evidence contract. v0.72.0.
+
+	THE FIVE STRUCTURED ARGUMENTS ARE v0.98.0, ITEM 5. `SERVER_CHANGES.md` §5:
+	everything below the first line of the handset's description is prose the app
+	composes and the server keeps as one blob, so the affected asset, the
+	affected block, when it was seen and who saw it were greppable and not
+	queryable. Each lands in a column — `asset`, the location pair, `observed_at`
+	and `reported_by` — and only `observed_at` is new.
+
+	`reported_by` IS ACCEPTED HERE AND REFUSED ON `report_field_task`, and the
+	difference is who is speaking. This door is a foreman raising work about
+	something a picker told them at the tailgate, and recording whose observation
+	it was is the point of the field. There the reporter IS the caller, and a
+	body that could name somebody else would put a stranger's name on a report
+	they never made.
 
 	`report_field_task` IS THE OTHER DOOR ONTO THIS DOCTYPE AND IS NOT THIS ONE.
 	A worker reports a problem and the server decides the shape of the work; a
@@ -6735,6 +6912,18 @@ def create_farm_task(
 		inner["override_phi"] = override_phi
 	if phi_override_reason is not None:
 		inner["phi_override_reason"] = phi_override_reason
+
+	named_asset, _ = _one_spelling(affected_asset, asset, "affected_asset", "asset")
+	if named_asset:
+		inner["asset"] = named_asset
+	for key, value in (("affected_block", affected_block), ("observed_at", observed_at)):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	# SCOPED LIKE EVERY OTHER EMPLOYEE ARGUMENT HERE. `_employee_argument`
+	# refuses a docname outside the caller's own entities, so naming the observer
+	# cannot become a way to read whether somebody exists on another farm.
+	if reported_by not in (None, ""):
+		inner["reported_by"] = _employee_argument(reported_by, allowed, "reported_by")
 
 	result = dispatch.create_farm_task(inner)
 	data = result.data
@@ -6873,6 +7062,628 @@ def create_task_from_template(
 	if data.get("warnings"):
 		out["warnings"] = data["warnings"]
 	return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v0.98.0 — ITEM 11. THE FOUR REGISTERS A TASK CAN BE ROUTED TO.
+#
+# THE LARGEST GAP ON `SERVER_CHANGES.md` AND THE ONE THAT DEGRADED EVERY OTHER
+# FEATURE. The handset's "Where is it" picker showed one option — "No location"
+# — because nothing on this surface listed a place and nothing created one.
+# Probed 2026-08-18, both namespaces: `create_field`, `create_irrigation_zone`,
+# `create_parcel`, `create_housing_unit`, `create_location`,
+# `create_farm_location`, `list_farm_locations`, `list_fields`,
+# `list_irrigation_zones` and `list_parcels` were ten 404s. The two published
+# reads the app scavenged — `list_available_housing` and
+# `list_org_reference_data` — cover cabins and parcels only, which on a farm
+# whose work happens in BLOCKS is close to nothing, and so a shift's location
+# ended up as the typed note "Test 1" that no task could ever be routed against.
+#
+# EVERY TOOL BEHIND THESE ROUTES ALREADY EXISTED. `list_fields`,
+# `list_irrigation_zones`, `list_parcels`, `list_housing_units` and the four
+# creates have been MCP tools since v0.12.0 and earlier, reachable from a Desk
+# and from an AI console and from nowhere a foreman stands. This is a transport
+# gap, not a feature, which is why it is six routes and no new doctype.
+#
+# ONE LIST AND FIVE DOORS ONTO ONE WRITE. `create_farm_location` is the
+# polymorphic one the plan named; `create_field`, `create_irrigation_zone`,
+# `create_parcel` and `create_housing_unit` are the four names
+# `LocationRegistryAPI.route(for:)` already prints in its own refusal text and
+# already builds requests for. All five run `_create_one_location`, so there is
+# ONE gate, ONE argument map and ONE set of refusals — a rename cannot open a
+# fifth way in, and the four named doors are not a fifth implementation to keep
+# in step.
+#
+# IT IS NOT THE DISPATCHER THIS TRANSPORT REFUSES. `routes.py` opens by saying
+# there is no method-name argument and no forwarding; `create_farm_location`
+# takes no method name. It takes a DOCTYPE, matched against a closed four-entry
+# table in this module, and calls one of four named functions — exactly what
+# `attach_file_to_document` already does with its allowlist of parents, and what
+# `_attachment_parent` does with `ATTACHMENT_PARENTS`.
+# ══════════════════════════════════════════════════════════════════════════════
+
+#: Most locations one list call returns, across all four registers together.
+#: Each register is separately capped by its own tool at `REGISTER_CAP`; this is
+#: what a phone gets after they are merged, because a picker with four thousand
+#: rows in it is a picker nobody scrolls.
+LOCATION_LIMIT = 400
+
+#: What each register calls the things `create_farm_location` is given, and
+#: which of them it will refuse without.
+#:
+#: THE FOUR REGISTERS GENUINELY DISAGREE AND NOTHING HERE PRETENDS OTHERWISE. A
+#: block is named `field_name` and hangs off a `parcel`; a zone is named
+#: `zone_name` and hangs off a `field`, NOT a parcel, because a zone waters a
+#: block; a parcel is named `parcel_name` and hangs off nothing at all, being
+#: the top of the tree; a cabin is named `unit_name` and hangs off a `parcel`.
+#: The handset collects one `name` and one optional `parcel` for all four, so
+#: this table is where that uniform sheet becomes four different documents.
+#:
+#: `acres` IS THE ODD ONE AND `Irrigation Zone` IS WHY. Three registers take an
+#: acreage directly; `create_irrigation_zone` REFUSES `area_acres` by name,
+#: because `area_acres` is COMPUTED from `area_sq_ft` by the controller and two
+#: independently settable figures are two figures that will disagree. So a zone's
+#: acres are converted to square feet here — one figure, still, set once — and
+#: `SQ_FT_PER_ACRE` is the exact definition rather than a rounding.
+SQ_FT_PER_ACRE = 43560
+
+LOCATION_REGISTERS = {
+	"Field": {
+		"tool": "create_field",
+		"name_argument": "field_name",
+		"parent_argument": "parcel",
+		"parent_doctype": "Parcel",
+		"acres_argument": "acreage",
+	},
+	"Irrigation Zone": {
+		"tool": "create_irrigation_zone",
+		"name_argument": "zone_name",
+		"parent_argument": "field",
+		"parent_doctype": "Field",
+		"acres_argument": "area_sq_ft",
+		"acres_factor": SQ_FT_PER_ACRE,
+	},
+	"Parcel": {
+		"tool": "create_parcel",
+		"name_argument": "parcel_name",
+		"parent_argument": None,
+		"parent_doctype": None,
+		"acres_argument": "acreage",
+	},
+	"Housing Unit": {
+		"tool": "create_housing_unit",
+		"name_argument": "unit_name",
+		"parent_argument": "parcel",
+		"parent_doctype": "Parcel",
+		"acres_argument": None,
+	},
+}
+
+
+def _scoped_location(doctype: str, name, label: str, allowed: list) -> str:
+	"""A location docname that exists AND belongs to an entity the caller may reach.
+
+	`guard.require_scoped_doc` CANNOT DO THIS JOB AND WOULD HAVE PASSED
+	EVERYTHING. It reads a column called `company`, and ALL FOUR of these
+	registers call theirs `owning_entity` — so the lookup returns None, the
+	`if company and …` guard is skipped, and a docname from another farm on the
+	same bench is accepted. `_attachment_parent` above hit the identical trap on
+	`Housing Unit` and makes the identical hand-made check; this is that check
+	for four doctypes rather than one, and the reason it is worth its own
+	function is that a Farm Manager on one entity filing a block under another
+	entity's parcel is a permanent, unmergeable row in somebody else's register.
+
+	A ROW WITH NO OWNING ENTITY IS REACHABLE, which is the same rule
+	`guard.scoped` applies to a task and a template with no company: ground that
+	names no entity belongs to the operation rather than to one of its companies,
+	and refusing it would make a single-entity farm's own parcels unusable.
+
+	NOT FOUND RATHER THAN REFUSED, so a caller cannot map another entity's
+	docnames by watching which error comes back.
+	"""
+	docname = guard.require_docname(doctype, name, label)
+	owner = str(frappe.db.get_value(doctype, docname, "owning_entity") or "")
+	if owner and owner not in set(allowed or []):
+		frappe.throw(f"{label} {docname} was not found.", frappe.DoesNotExistError)
+	return docname
+
+
+def _location_register(doctype, label: str = "doctype") -> str:
+	"""One of the four registers, or a refusal naming all four.
+
+	CASE-INSENSITIVE ON THE WAY IN AND EXACT ON THE WAY OUT, so `field` and
+	`Field` both work and what is stored is the doctype's own spelling — the same
+	call `args.as_choice` makes about a Select, for the same reason: what is
+	written has to match what a filter on the list view will look for.
+	"""
+	wanted = str(doctype or "").strip()
+	if not wanted:
+		frappe.throw(
+			f"{label} is required. A place without its register is not a place — pass one of: "
+			+ ", ".join(locations.REGISTERS)
+			+ ". Nothing was created.",
+			frappe.ValidationError,
+		)
+	for register in locations.REGISTERS:
+		if register.lower() == wanted.lower():
+			return register
+	frappe.throw(
+		f"{wanted} is not a register this surface creates locations in. The ones it does are: "
+		+ ", ".join(locations.REGISTERS)
+		+ ". Nothing was created.",
+		frappe.PermissionError,
+	)
+
+
+def _location_rows(register: str, entity: str, allowed: list) -> list:
+	"""One register's rows, as location options, scoped to the caller.
+
+	EACH REGISTER IS READ THROUGH ITS OWN TOOL rather than off the table, which
+	is what keeps the derivations. A Field's county is read through its parcel on
+	every call and stored nowhere; a Housing Unit's occupancy is counted from
+	live assignments. A second reader going straight to `frappe.db.get_all` would
+	have been faster and would have quietly dropped both.
+
+	A REGISTER THIS SITE HAS NOT INSTALLED CONTRIBUTES NOTHING RATHER THAN
+	FAILING THE CALL. The four tools each refuse a missing doctype by name, which
+	is right on a console and wrong here: a farm with no irrigation zones
+	registered should get a picker with three sections in it, not an error.
+	"""
+	if not compat.doctype_exists(register):
+		return []
+	inner = {"limit": farm_tools.REGISTER_CAP}
+	if entity:
+		inner["company"] = entity
+	try:
+		if register == "Field":
+			rows = farm_tools.list_fields(inner).data.get("fields") or []
+		elif register == "Irrigation Zone":
+			rows = farm_tools.list_irrigation_zones(inner).data.get("zones") or []
+		elif register == "Parcel":
+			rows = realestate_tools.list_parcels(inner).data.get("parcels") or []
+		else:
+			rows = housing_tools.list_housing_units(inner).data.get("units") or []
+	except ToolError:
+		# `list_parcels` REQUIRES a company and the other three do not, so an
+		# account with no entity at all reaches this. Three empty sections and a
+		# populated fourth is a worse answer than four empty ones, and neither is
+		# an error the person holding the phone can act on.
+		return []
+	return [locations.option(register, dict(row)) for row in rows]
+
+
+# ── 71b. list_farm_locations ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_farm_locations", limit=guard.READ_LIMIT)
+def list_farm_locations(user: str, company=None, doctype=None, register=None, limit=None) -> dict:
+	"""Every place this farm can route work to, from all four registers, in one call.
+
+	THE READ THAT MAKES THE PICKER A PICKER. It is deliberately the FIRST thing
+	in item 11 and the one that fixes the screen on its own: every farm whose
+	blocks already exist gets a populated picker out of this route alone, with no
+	create and no new role. `SERVER_CHANGES.md` had it as a "Server TODO" under
+	§26.2 before any of the rest of this was written up.
+
+	OPEN ON ENROLMENT ALONE, AND THAT IS DELIBERATE RATHER THAN LEFT OVER. The
+	write below is Farm Manager; this is every picker on the crew, because
+	`report_field_task` is open to every enrolled worker and TAKES A LOCATION. A
+	read gated on the dispatch role would have left the one call a field worker
+	makes about a place unable to name one — which is the bug, restated.
+
+	FOUR REGISTERS, ONE ROW SHAPE, AND NEITHER MERGED NOR FLATTENED. Each row
+	carries its own docname and its own `doctype`, because `location` without
+	`location_doctype` is the refusal all three task-raising tools open with and
+	the reason `TaskLocationOption` has a failable initialiser. `location_type`
+	is the same string a third time, matching `shape.task`, so a caller decoding
+	a task and a caller decoding this list read one key. See
+	`erpnext_mcp/locations.py` for the row and for why the zones are grouped by
+	parcel rather than by block.
+
+	SCOPED TWICE AND ON PURPOSE. `company` narrows the query on the way in, and
+	`guard.scoped` runs on the merged answer either way — the four tools spell
+	the owning entity two different ways (`owning_entity` and `company`) and
+	`locations.option` reconciles them, so the outbound check has one key to look
+	at rather than two to remember.
+	"""
+	allowed = guard.require_scope(user)
+	entity = _company(user, company, allowed)
+
+	wanted, label = _one_spelling(doctype, register, "doctype", "register")
+	registers = [_location_register(wanted, label)] if wanted else list(locations.REGISTERS)
+
+	rows = []
+	for name in registers:
+		rows.extend(_location_rows(name, entity, allowed))
+	rows = guard.scoped(rows, allowed)
+	rows.sort(key=locations.sort_key)
+
+	cap = LOCATION_LIMIT
+	if limit not in (None, ""):
+		try:
+			cap = max(1, min(int(limit), LOCATION_LIMIT))
+		except (TypeError, ValueError):
+			frappe.throw(f"limit must be a whole number, got {limit!r}.", frappe.ValidationError)
+	truncated = len(rows) > cap
+
+	by_register = {name: 0 for name in locations.REGISTERS}
+	for row in rows[:cap]:
+		by_register[row["doctype"]] = by_register.get(row["doctype"], 0) + 1
+
+	return {
+		"company": entity or None,
+		"locations": rows[:cap],
+		"count": len(rows[:cap]),
+		"total": len(rows),
+		"truncated": truncated,
+		"by_register": by_register,
+		# What the picker draws its sections from, INCLUDING the empty ones. A
+		# farm with no irrigation zones registered should see the section and
+		# learn that zones are a thing this app has, rather than see three
+		# sections and conclude the fourth does not exist.
+		"registers": [name for name in locations.REGISTERS if compat.doctype_exists(name)],
+		# Whether the caller may add to them. The handset gates its "Add a place"
+		# button on its own role list, calls that a courtesy, and asks for the
+		# real answer — this is the real answer, from the same function the write
+		# below actually uses, so the button and the door cannot disagree.
+		"can_create": bool(guard.roles_held(user) & guard.LOCATION_ROLES),
+		"create_roles": sorted(guard.LOCATION_ROLES),
+	}
+
+
+def _create_one_location(user: str, register: str, arguments: dict) -> dict:
+	"""The one write behind all five create routes. Gate, map, delegate.
+
+	ONE IMPLEMENTATION SO A RENAME CANNOT OPEN A FIFTH WAY IN. The four named
+	routes exist because `LocationRegistryAPI.route(for:)` already names them and
+	the app already builds their requests; they are spellings of this, not
+	copies of it, which is the same call v0.62.0 made for the housing pair and
+	v0.57.0 made for `submit_form_signature`.
+
+	THE GATE RUNS BEFORE ANYTHING IS READ, and it is `require_location_role`
+	rather than `require_dispatch_role` — see `guard.LOCATION_ROLES` for why
+	adding a place is harder than sending somebody to one, and for the answer to
+	§11's question about which role name is real.
+
+	THE PARENT IS SCOPE-CHECKED, NOT MERELY EXISTENCE-CHECKED. A parcel belonging
+	to an entity this account cannot reach reads as not found — the same refusal
+	`require_scoped_doc` gives everywhere else — so this cannot become a way to
+	discover which parcels another farm on the same bench has by watching which
+	error comes back.
+	"""
+	guard.require_location_role(user, f"Adding a {register} to the location register")
+	allowed = guard.require_scope(user)
+	spec = LOCATION_REGISTERS[register]
+
+	given = str(arguments.get("name") or arguments.get(spec["name_argument"]) or "").strip()
+	if not given:
+		frappe.throw(
+			f"name is required — a {register} with no name is a docname nobody can pick from a "
+			f"list. This register calls it {spec['name_argument']}; either spelling is accepted. "
+			"Nothing was created.",
+			frappe.ValidationError,
+		)
+
+	entity = guard.require_company(user, arguments.get("company"), allowed) or (
+		allowed[0] if allowed else ""
+	)
+	inner = {spec["name_argument"]: given}
+	if entity:
+		inner["company"] = entity
+
+	parent_argument = spec["parent_argument"]
+	if parent_argument:
+		parent = str(arguments.get(parent_argument) or arguments.get("parent") or "").strip()
+		if not parent and parent_argument != "parcel":
+			# A ZONE'S PARENT IS A FIELD AND THE HANDSET SENDS A PARCEL. Named in
+			# the refusal rather than guessed at: a parcel usually holds several
+			# blocks and picking one of them for somebody would put a zone on
+			# ground it does not water.
+			parent = str(arguments.get("parcel") or "").strip()
+			if parent:
+				frappe.throw(
+					f"a {register} hangs off a {spec['parent_doctype']}, not a Parcel — it waters "
+					"one block rather than a whole title. Send "
+					f"{parent_argument}=<{spec['parent_doctype']} docname>; list_farm_locations "
+					f"has the {spec['parent_doctype']} register. Nothing was created.",
+					frappe.ValidationError,
+				)
+		if not parent:
+			frappe.throw(
+				f"{parent_argument} is required — a {register} is filed under a "
+				f"{spec['parent_doctype']} and its docname is built from it, so one created "
+				f"without a {spec['parent_doctype']} would have nowhere to live. "
+				"list_farm_locations has the register. Nothing was created.",
+				frappe.ValidationError,
+			)
+		inner[parent_argument] = _scoped_location(
+			spec["parent_doctype"], parent, parent_argument, allowed
+		)
+
+	acres = arguments.get("acres")
+	if acres in (None, ""):
+		acres = arguments.get(spec["acres_argument"] or "") if spec["acres_argument"] else None
+	if acres not in (None, "") and spec["acres_argument"]:
+		try:
+			measured = float(acres)
+		except (TypeError, ValueError):
+			frappe.throw(
+				f"acres must be a number, got {acres!r}. Nothing was created.", frappe.ValidationError
+			)
+		if measured < 0:
+			frappe.throw(
+				f"acres must be zero or more, got {measured}. Nothing was created.",
+				frappe.ValidationError,
+			)
+		inner[spec["acres_argument"]] = round(measured * spec.get("acres_factor", 1), 4)
+
+	for key in ("notes", "unit_type", "capacity", "crop", "variety", "block_number", "county", "state"):
+		value = arguments.get(key)
+		if value not in (None, ""):
+			inner[key] = value
+
+	result = getattr(_LOCATION_TOOLS[register], spec["tool"])(inner)
+	data = dict(result.data)
+	# THE ANSWER IS A LOCATION OPTION AS WELL AS THE RECORD. The screen that
+	# posted this is a picker, and the next thing it does is select what it just
+	# made — so it is handed the pair it will send back as `location_doctype` and
+	# `location`, rather than being left to work out which of the register's
+	# fourteen keys is the docname.
+	return {
+		**data,
+		"doctype": register,
+		"location_type": register,
+		"location": data.get("name"),
+		"option": locations.option(register, data),
+	}
+
+
+#: Which module holds each register's create tool. A table rather than four
+#: imports at each call site, so the four named routes below stay one line each.
+_LOCATION_TOOLS = {
+	"Field": farm_tools,
+	"Irrigation Zone": farm_tools,
+	"Parcel": realestate_tools,
+	"Housing Unit": housing_tools,
+}
+
+
+# ── 71c. create_farm_location ────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_farm_location", mutating=True, limit=guard.WRITE_LIMIT)
+def create_farm_location(
+	user: str,
+	name=None,
+	doctype=None,
+	register=None,
+	company=None,
+	parcel=None,
+	field=None,
+	parent=None,
+	acres=None,
+	notes=None,
+	unit_type=None,
+	capacity=None,
+	crop=None,
+	variety=None,
+	block_number=None,
+	county=None,
+	state=None,
+) -> dict:
+	"""Add one place to one of the four registers. The polymorphic door.
+
+	THE SHEET THE HANDSET ACTUALLY COLLECTS. `CreateLocationSheet` asks for a
+	name, a register and — where the register has a parent — a parcel, plus
+	acres; `LocationRegistryAPI.create` builds exactly `{name, company, parcel,
+	acres}` and then throws before touching the network. This takes that body
+	unchanged, which is why it is one method with a `doctype` rather than four
+	with four different argument sets.
+
+	THE FOUR NAMED ROUTES BELOW ARE THE SAME WRITE and exist because the app
+	already prints their names in its own refusal. Nothing is duplicated: all
+	five call `_create_one_location`, where the gate and the argument map live.
+
+	`doctype` IS NOT A METHOD NAME AND THIS IS NOT THE DISPATCHER `routes.py`
+	REFUSES. It is matched against `LOCATION_REGISTERS`, a closed four-entry
+	table in this file, and resolves to one of four named functions — the same
+	shape `attach_file_to_document` has had since v0.78.0.
+
+	THE OPTIONAL ARGUMENTS ARE THE ONES A PERSON AT A TAILGATE HAS AN OPINION
+	ABOUT: what it is called, where it hangs, how big it is, what is planted on
+	it, how many it sleeps, and a note. EVERYTHING ELSE THE FOUR TOOLS ACCEPT IS
+	ABSENT FROM THIS SIGNATURE and therefore unreachable, because `routes.bind`
+	delivers only what is declared — `title_holder`, `appraised_value`,
+	`related_asset`, `external_farm_app_id`, `water_right_id`, the organic
+	certification block and the boundary geometry are all desk work with a
+	document open, and several of them are the kind of number that ends up in a
+	financial statement.
+	"""
+	return _create_one_location(
+		user,
+		_location_register(*_one_spelling(doctype, register, "doctype", "register")),
+		{
+			"name": name,
+			"company": company,
+			"parcel": parcel,
+			"field": field,
+			"parent": parent,
+			"acres": acres,
+			"notes": notes,
+			"unit_type": unit_type,
+			"capacity": capacity,
+			"crop": crop,
+			"variety": variety,
+			"block_number": block_number,
+			"county": county,
+			"state": state,
+		},
+	)
+
+
+# ── 71d. create_field ────────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_field", mutating=True, limit=guard.WRITE_LIMIT)
+def create_field(
+	user: str,
+	name=None,
+	field_name=None,
+	parcel=None,
+	company=None,
+	acres=None,
+	acreage=None,
+	crop=None,
+	variety=None,
+	block_number=None,
+	notes=None,
+) -> dict:
+	"""Register one planted block under a parcel. `LocationRegistryAPI`'s own name.
+
+	A SPELLING OF `create_farm_location`, NOT A SECOND IMPLEMENTATION — see the
+	block that opens this set. `field_name` is the register's word and `name` is
+	the handset's; `acreage` is the register's and `acres` is the handset's. Both
+	of each, because `routes.bind` drops what a signature does not name and a
+	method that took one of them would be a silent empty column for whichever
+	caller guessed wrong.
+	"""
+	return _create_one_location(
+		user,
+		"Field",
+		{
+			"name": name or field_name,
+			"parcel": parcel,
+			"company": company,
+			"acres": acres if acres not in (None, "") else acreage,
+			"crop": crop,
+			"variety": variety,
+			"block_number": block_number,
+			"notes": notes,
+		},
+	)
+
+
+# ── 71e. create_irrigation_zone ──────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_irrigation_zone", mutating=True, limit=guard.WRITE_LIMIT)
+def create_irrigation_zone(
+	user: str,
+	name=None,
+	zone_name=None,
+	field=None,
+	parcel=None,
+	company=None,
+	acres=None,
+	area_sq_ft=None,
+	notes=None,
+) -> dict:
+	"""Register one irrigation zone under a block.
+
+	`field` AND NOT `parcel`, WHICH IS THE ONE PLACE THE FOUR REGISTERS DIVERGE
+	IN A WAY THE HANDSET'S UNIFORM SHEET CANNOT SEE. A zone waters a block, not a
+	whole title; `parcel` is declared here anyway so that a body carrying it gets
+	the sentence explaining the difference rather than "field is required" about
+	an argument it never heard of.
+
+	`acres` BECOMES SQUARE FEET ON THE WAY IN. `create_irrigation_zone` refuses
+	`area_acres` by name — the controller computes it from `area_sq_ft`, and two
+	independently settable figures are two figures that will disagree — so this
+	converts rather than sets a second one. `area_sq_ft` is accepted directly for
+	a caller who measured it that way.
+	"""
+	return _create_one_location(
+		user,
+		"Irrigation Zone",
+		{
+			"name": name or zone_name,
+			"field": field,
+			"parcel": parcel,
+			"company": company,
+			# The converted figure goes in as `acres`; a caller who sent square
+			# feet outright has already done the conversion, so it is passed
+			# under the register's own key and skips the factor.
+			"acres": acres,
+			"area_sq_ft": area_sq_ft,
+			"notes": notes,
+		},
+	)
+
+
+# ── 71f. create_parcel ───────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_parcel", mutating=True, limit=guard.WRITE_LIMIT)
+def create_parcel(
+	user: str,
+	name=None,
+	parcel_name=None,
+	company=None,
+	acres=None,
+	acreage=None,
+	county=None,
+	state=None,
+	notes=None,
+) -> dict:
+	"""Register one parcel: the title the rest of the ground hangs off.
+
+	NO PARENT, because a parcel is the top of the tree — which is why
+	`LOCATION_REGISTERS["Parcel"]["parent_argument"]` is None and why a picker
+	draws it as a heading rather than as a child of anything.
+
+	`title_holder`, `appraised_value`, `appraiser` AND `appraisal_document` ARE
+	ABSENT FROM THIS SIGNATURE, so `bind` drops them. What a piece of ground is
+	worth and who holds the deed are figures that reach a financial statement,
+	and they are settled at a desk with the paperwork open — `update_parcel` on
+	the MCP surface is where they live.
+	"""
+	return _create_one_location(
+		user,
+		"Parcel",
+		{
+			"name": name or parcel_name,
+			"company": company,
+			"acres": acres if acres not in (None, "") else acreage,
+			"county": county,
+			"state": state,
+			"notes": notes,
+		},
+	)
+
+
+# ── 71g. create_housing_unit ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_housing_unit", mutating=True, limit=guard.WRITE_LIMIT)
+def create_housing_unit(
+	user: str,
+	name=None,
+	unit_name=None,
+	parcel=None,
+	company=None,
+	unit_type=None,
+	capacity=None,
+	notes=None,
+) -> dict:
+	"""Register one building on a camp.
+
+	NO ACREAGE — a cabin is measured in beds and square feet, not acres, and
+	`LOCATION_REGISTERS["Housing Unit"]["acres_argument"]` is None so an `acres`
+	sent by the handset's uniform sheet is ignored rather than written somewhere
+	it would be wrong.
+
+	THE HABITABILITY BLOCK IS DELIBERATELY ABSENT. `or_housing_law_compliant`,
+	the two detector test dates and `last_habitability_inspection` are what an
+	inspection FINDS, and a route that let them be asserted at creation would let
+	a cabin be registered as already compliant by whoever registered it.
+	`create_housing_inspection` is how those columns move.
+	"""
+	return _create_one_location(
+		user,
+		"Housing Unit",
+		{
+			"name": name or unit_name,
+			"parcel": parcel,
+			"company": company,
+			"unit_type": unit_type,
+			"capacity": capacity,
+			"notes": notes,
+		},
+	)
 
 
 # ── 72. list_cost_centers ───────────────────────────────────────────────────
@@ -7446,6 +8257,86 @@ def add_task_note_via_mobile(
 	return narrative_tools.add_task_note(inner).data
 
 
+# ── 78b. add_task_note ───────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("add_task_note", mutating=True, limit=guard.WRITE_LIMIT)
+def add_task_note(
+	user: str,
+	doctype=None,
+	name=None,
+	task=None,
+	note=None,
+	narrative=None,
+	language=None,
+	source_language=None,
+	audio_file_token=None,
+	audio_file=None,
+	audio_duration_seconds=None,
+	note_type=None,
+) -> dict:
+	"""The same write as `add_task_note_via_mobile`, under the name the app calls.
+
+	v0.98.0, ITEM 12, AND THE WHOLE BUG IS THE SUFFIX. `add_task_note_via_mobile`
+	has been mounted since v0.79.0 and `Route` builds every path off the
+	wrapper's own name, so the published path carried `_via_mobile` on it. The
+	handset asks for `add_task_note` — the MCP tool's name, which is what every
+	brief and every reader would predict — and got a 404, then tried
+	`add_narrative`, `append_note`, `create_task_note`, `add_note`,
+	`create_narrative_note` and `log_task_note` and got six more. `list_task_notes`
+	IS published under its plain name, so a record's narrative could be read and
+	not written: a foreman's field note stayed in `LocalNarrativeStore` on one
+	phone, labelled "on this phone only", which is where every one of them still
+	is.
+
+	THE OLDER SPELLING KEEPS ITS ROUTE. A handset already in an orchard is not
+	asked to change to get an answer — the same promise `submit_form_signature`
+	kept for `collect_signature` and `list_org_reference_data` kept for
+	`list_onboarding_reference_data`.
+
+	IT DECLARES BOTH VOCABULARIES BECAUSE THIS TRANSPORT'S ARGUMENT FILTER IS
+	UNFORGIVING. `routes.bind` keeps only the keys a signature names, so a method
+	declaring `narrative` at a caller sending `note` is not a rename that half
+	works — it is an empty note, written and stored, with nothing in the answer
+	saying the words were dropped. `note`/`narrative` and `language`/
+	`source_language` are the same argument twice, and either may be sent.
+
+	`audio_file_token` IS THE HANDSET'S SPELLING OF A `File` DOCNAME, the one
+	`finalize_staged_file` hands back — the same string `set_employee_photo` and
+	`attach_onboarding_document` call `file_token`. SENDING ONE MAKES THIS A
+	VOICE NOTE: the words go down as the transcription and the recording is
+	linked, which is `attach_audio_note`'s job and is delegated to it rather than
+	reimplemented, so a dictated note and a typed one land in one register with
+	one set of rules. Without it this is the plain written entry.
+	"""
+	allowed = guard.require_scope(user)
+	employee = _employee(user)
+	target, docname = _narrative_target(user, doctype, name, task, allowed)
+
+	words, _ = _one_spelling(note, narrative, "note", "narrative")
+	tongue, _ = _one_spelling(language, source_language, "language", "source_language")
+	recording, _ = _one_spelling(audio_file_token, audio_file, "audio_file_token", "audio_file")
+
+	inner = {
+		"doctype": target,
+		"name": docname,
+		"author": employee,
+		"author_name": _employee_identity(employee).get("employee_name") or employee,
+		"source_language": str(tongue or "").strip() or _caller_language(user, employee),
+	}
+	if note_type:
+		inner["note_type"] = str(note_type).strip()
+
+	if not recording:
+		inner["narrative"] = str(words or "").strip()
+		return narrative_tools.add_task_note(inner).data
+
+	inner["transcription"] = str(words or "").strip()
+	inner["audio_file"] = str(recording).strip()
+	if audio_duration_seconds is not None:
+		inner["audio_duration_seconds"] = audio_duration_seconds
+	return narrative_tools.attach_audio_note(inner).data
+
+
 # ── 79. attach_audio_note ────────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST"])
 @guard.endpoint("attach_audio_note", mutating=True, limit=guard.WRITE_LIMIT)
@@ -7557,9 +8448,16 @@ def create_discipline_record(
 	suspension_end=None,
 	company=None,
 	report_direction=None,
+	direction=None,
 	evidence_files=None,
 ) -> dict:
 	"""Report one incident, from a handset — the farm's direction or the worker's.
+
+	`direction` IS THE HANDSET'S SPELLING OF `report_direction`, v0.98.0, and it
+	takes `disciplinary` / `grievance` as well as the column's own two words —
+	see `REPORT_DIRECTIONS` for why one column and not two. `create_dispute`
+	below is this method with the direction fixed, for the caller who does not
+	want to know that a grievance and a warning share a register.
 
 	SHIFT ROLE SINCE v0.94.0, AND THE RECLASSIFICATION IS THE POINT. This used to
 	read "HR ROLE, NOT THE FIELD ROLE. A discipline record is a personnel
@@ -7628,11 +8526,122 @@ def create_discipline_record(
 		("narrative", narrative),
 		("suspension_start", suspension_start),
 		("suspension_end", suspension_end),
-		("report_direction", report_direction),
 	):
 		if value not in (None, ""):
 			inner[key] = str(value).strip()
+	# NORMALISED BEFORE THEY ARE COMPARED, which `_one_spelling` alone could not
+	# do: `report_direction="Worker Report"` and `direction="grievance"` are the
+	# same instruction in two vocabularies, and a body carrying both would be
+	# refused as a contradiction on the raw strings. Two directions that really
+	# do differ are still refused, by the same helper, on the resolved values.
+	settled = _one_spelling(
+		_report_direction(report_direction),
+		_report_direction(direction, "direction"),
+		"report_direction",
+		"direction",
+	)[0]
+	if settled:
+		inner["report_direction"] = settled
 	inner["source_language"] = _caller_language(user, issuer)
+	evidence = _evidence(evidence_files)
+	if evidence:
+		inner["evidence_files"] = evidence
+
+	return discipline_tools.create_incident_record(inner).data
+
+
+# ── 81b. create_dispute ──────────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("create_dispute", mutating=True, limit=guard.WRITE_LIMIT)
+def create_dispute(
+	user: str,
+	employee=None,
+	description=None,
+	incident_description=None,
+	incident_date=None,
+	policy_violated=None,
+	witnesses=None,
+	employee_statement=None,
+	narrative=None,
+	company=None,
+	evidence_files=None,
+) -> dict:
+	"""A worker raises something. Their words, their direction, no rung on a chain.
+
+	v0.98.0, ITEM 12. THE REGISTER AND EVERY RULE ALREADY EXISTED AND THE NAME
+	DID NOT, which is why this is thirty lines rather than a doctype.
+	`Farm Incident Record` was built to carry both directions — v0.94.0 added
+	`report_direction` and the four behaviours that hang off it — and no route
+	and no argument on this surface could reach the worker's half. So the app
+	filed a grievance through `create_discipline_record` at the lowest step with
+	`DISPUTE RAISED BY …` typed into the description, and what that produces is a
+	WARNING: a step on a progressive-discipline chain, in the file of the person
+	who complained, escalating from nothing and escalated from by whatever comes
+	next. `SERVER_CHANGES.md` says in as many words that it works and is not
+	right.
+
+	FOUR THINGS ARE DIFFERENT ABOUT A WORKER REPORT AND THE TOOL ENFORCES ALL
+	FOUR. It carries no `discipline_type` — a warning level on somebody's own
+	report files it as a step against them, and the tool refuses one by name. It
+	gets no `prior_record` and no `step_number`, so it neither escalates from the
+	last warning nor becomes the thing the next one escalates from. And it is NOT
+	refused after a termination: a worker disputing the termination itself is
+	precisely the report that must not come back "there is no step after the end
+	of employment."
+
+	`discipline_type` IS NOT ON THIS SIGNATURE AT ALL, so this transport's
+	argument filter is what makes it unreachable rather than merely refused. The
+	tool's refusal is the second lock and stays where it is.
+
+	THE GATE IS THE SHIFT ROLE, the same one `create_discipline_record` has held
+	since v0.94.0, and the argument is stronger here than there: the person who
+	needs to raise a complaint is whoever has one, and a server that refused it
+	because they hold a picker's credential is a server that receives no
+	complaints and concludes there are none. READING the register is a different
+	question and stays on `HR_ROLES` — `get_discipline_record` and
+	`list_discipline_history` are unchanged.
+
+	`employee` DEFAULTS TO THE CALLER, which is the ordinary case: somebody
+	raising their own grievance on their own phone. Naming another employee is
+	how a crew leader files on behalf of a picker who does not have the app or
+	the words, and it is scoped by `_employee_argument` like every other employee
+	argument here. `reported_by` is resolved server-side by the tool from the
+	authenticated session either way, so who TYPED it is recorded whoever it is
+	about.
+	"""
+	personnel.require_shift_role()
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed)
+	author = _employee(user)
+
+	subject = str(employee or "").strip()
+	inner = {
+		"employee": _employee_argument(subject, allowed, "employee") if subject else author,
+		"report_direction": discipline_tools.WORKER_REPORT,
+		"issued_by": author,
+		"issued_by_name": _employee_identity(author).get("employee_name") or author,
+	}
+	if entity:
+		inner["company"] = entity
+
+	# `description` IS THE APP'S SPELLING and `incident_description` is the
+	# tool's; the tool reads either, and both are declared here because `bind`
+	# delivers only what a signature names.
+	account, _ = _one_spelling(
+		description, incident_description, "description", "incident_description"
+	)
+	if account:
+		inner["incident_description"] = account
+	for key, value in (
+		("incident_date", incident_date),
+		("policy_violated", policy_violated),
+		("witnesses", witnesses),
+		("employee_statement", employee_statement),
+		("narrative", narrative),
+	):
+		if value not in (None, ""):
+			inner[key] = str(value).strip()
+	inner["source_language"] = _caller_language(user, author)
 	evidence = _evidence(evidence_files)
 	if evidence:
 		inner["evidence_files"] = evidence

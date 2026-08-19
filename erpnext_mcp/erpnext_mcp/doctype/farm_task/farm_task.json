@@ -37,6 +37,7 @@
   "field_report_section",
   "reported_by",
   "reported_at",
+  "observed_at",
   "field_report_col",
   "report_photo",
   "hierarchy_section",
@@ -287,6 +288,12 @@
    "fieldname": "reported_at",
    "fieldtype": "Datetime",
    "label": "Reported At"
+  },
+  {
+   "description": "When the thing being reported was actually SEEN, where that is not when it was filed. A picker who notices a broken line at first light and reports it at the tailgate two hours later has one fact and two times, and until this column existed the earlier one was prose inside the description. DELIBERATELY NOT reported_at: that stamp is the moment the report reached the server, it is the column report_field_task's five-per-hour rate limit counts on, and a caller who could set it could file a hundred reports dated an hour ago. So this one is caller-settable and that one never is.",
+   "fieldname": "observed_at",
+   "fieldtype": "Datetime",
+   "label": "Observed At"
   },
   {
    "fieldname": "field_report_col",

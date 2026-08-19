@@ -29,6 +29,10 @@
   "creates_record_data",
   "instructions_section",
   "instructions",
+  "sop_section",
+  "sop_document_en",
+  "sop_col",
+  "sop_document_es",
   "checklist_section",
   "checklist",
   "regime_section",
@@ -180,6 +184,27 @@
    "fieldname": "instructions",
    "fieldtype": "Text",
    "label": "Instructions"
+  },
+  {
+   "fieldname": "sop_section",
+   "fieldtype": "Section Break",
+   "label": "Standard Operating Procedure"
+  },
+  {
+   "description": "The written procedure for this job, in English. THE LANGUAGE IS THIS COLUMN AND NOT THE FILENAME. A handset used to read the language off the file name (`..._es.pdf`, `..._spanish.pdf`), which works while the office follows the convention and fails silently when it does not — a document it cannot place is offered with no language badge, so a Spanish-speaking picker is shown an unlabelled button. It is NOT copied onto the tasks this template raises: a task carries a `template` link and reads the current document through it, so replacing a procedure updates every open task instead of leaving last season's PDF attached to work still on the board.",
+   "fieldname": "sop_document_en",
+   "fieldtype": "Attach",
+   "label": "SOP (English)"
+  },
+  {
+   "fieldname": "sop_col",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The same procedure in Spanish. SEPARATE FIELD RATHER THAN A SECOND ATTACHMENT because which language a document is in is a fact worth declaring, and a crew that reads Spanish should be handed the Spanish one without anybody guessing. Either may be empty: a template with only the English procedure reports the Spanish one as missing, which is a gap somebody can close rather than a badge that quietly lies.",
+   "fieldname": "sop_document_es",
+   "fieldtype": "Attach",
+   "label": "SOP (Espanol)"
   },
   {
    "fieldname": "checklist_section",

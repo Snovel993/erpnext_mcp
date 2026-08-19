@@ -47,7 +47,8 @@ from __future__ import annotations
 
 import frappe
 
-from .. import compat, timezones
+from .. import compat, locations, task_templates, timezones
+from ..args import select_options
 from .. import roles as role_lib
 from . import rectify
 
@@ -192,6 +193,15 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 	# without a second call per row.
 	out["parent_task"] = row.get("parent_task") or None
 	out["merged_into"] = row.get("merged_into") or None
+	# v0.98.0, item 5. WHEN IT WAS SEEN, and this shaper is exactly why it needed
+	# saying: `dispatch._describe_task` reports the column and this function
+	# rebuilds its payload key by key, so a fact the tool knows is dropped on the
+	# way to the handset unless it is named here. That is the same mechanism that
+	# lost `template` until v0.96.0 — see the block below — and the app posting
+	# `observed_at` and never reading it back is how a client author concludes
+	# the server ignored it. Present only where somebody said so.
+	if row.get("observed_at"):
+		out["observed_at"] = str(row["observed_at"])
 
 	# v0.96.0. THE TEMPLATE A TASK CAME FROM, AND THE CHECKLIST IT SNAPSHOTTED.
 	# `dispatch._describe_task` has reported both since v0.41.0 and this shaper
@@ -207,6 +217,22 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 	# the rows that came off a template.
 	if row.get("template"):
 		out["template"] = row["template"]
+		# v0.98.0. THE PROCEDURE ITSELF, NOT ONLY THE NAME OF THE RECORD THAT
+		# HOLDS IT. v0.96.0 put the template's docname in the answer, which told
+		# the app which record to ask for and left it a second round trip away
+		# from the document — on a tethered handset at a cabin door, with a
+		# picker waiting. These two are read THROUGH the link rather than copied
+		# onto the task, which is the whole reason `task_templates.snapshot` does
+		# not carry them: an SOP replaced at the office reaches every open task,
+		# where a snapshotted one would leave last season's PDF attached to work
+		# still on the board.
+		#
+		# ABSENT WHERE THERE IS NO DOCUMENT, like `template` itself. A key that
+		# was always there and usually null would put two permanent nulls on
+		# every templated row to serve the ones with a procedure filed.
+		for field, url in task_templates.sop_documents(row["template"]).items():
+			if url:
+				out[f"sop_document_{field}"] = url
 	if row.get("checklist"):
 		out["checklist"] = row["checklist"]
 		out["checklist_done"] = row.get("checklist_done")
@@ -458,7 +484,72 @@ def user_context(data: dict, user: str) -> dict:
 		# a phone that cannot act on a fact is a phone that should not be told it
 		# — the operator reads it in `list_mobile_users`, which is where the
 		# person who can re-issue a token is looking.
+		#
+		# v0.98.0, item 5. The vocabularies this site will accept, read off its
+		# own meta at the one call every handset makes at login. See `taxonomy`.
+		"taxonomy": taxonomy(),
 	}
+
+
+#: The Select fields whose options a handset needs before it can offer a picker,
+#: as `{key in the answer: (doctype, fieldname)}`.
+#:
+#: v0.98.0, ITEM 5. THE APP HAD TRANSCRIBED THE FIRST OF THESE INTO SWIFT.
+#: `FarmTaskType.all` is a hand-copied list of the eleven options
+#: `Farm Task.task_type` shipped with, and the server's own refusal names them
+#: — "task_type must be one of: Inspection, Test, Spray, …" — which is what let
+#: the app offer a grid instead of a text box in the first place. The cost of
+#: the copy is that a site which CUSTOMISES the Select, which is a supported
+#: thing to do and needs no code release on this side, gets a picker missing its
+#: own options until the app ships again. Reading it beats transcribing it.
+#:
+#: FOLDED INTO `get_current_user_context` RATHER THAN GIVEN A ROUTE, which is
+#: what the plan allowed and is the cheaper half of it: this is the call the app
+#: already makes at login and on every manual refresh, so the taxonomy arrives
+#: exactly as often as it can change and costs no extra request on a tethered
+#: connection in an orchard.
+#:
+#: THE LOCATION REGISTERS ARE HERE TOO AND ARE NOT A SELECT. `location_doctype`
+#: is a Link to DocType and its four legal values live in a sentence inside
+#: three separate tool refusals; `TaskLocationRegister` transcribed them from
+#: that sentence. `list_farm_locations` answers with rows FROM those registers,
+#: and this says what the registers are — which is what a picker needs to draw
+#: its four sections before any of them has a row in it.
+TAXONOMY_SELECTS = {
+	"task_types": ("Farm Task", "task_type"),
+	"task_urgencies": ("Farm Task", "urgency"),
+	"dispatch_modes": ("Farm Task", "dispatch_mode"),
+	"break_kinds": ("Farm Shift Compliance Event", "break_kind"),
+	"report_directions": ("Farm Incident Record", "report_direction"),
+	"discipline_types": ("Farm Incident Record", "discipline_type"),
+}
+
+
+def taxonomy() -> dict:
+	"""What this site's Select fields actually offer, so nothing is transcribed.
+
+	READ OFF META, NEVER HARDCODED, which is the whole point — a constant here
+	would be the same copy `FarmTaskType.all` already is, one layer further from
+	the client and just as stale. `args.select_options` returns the options in
+	the doctype's own casing and drops the leading blank, so what comes back is
+	exactly what `as_choice` will match against.
+
+	A DOCTYPE THIS SITE HAS NOT MIGRATED CONTRIBUTES AN EMPTY LIST rather than
+	taking the login call down with it. An empty list is honest — the app falls
+	back to what it has and the operator can see which register is missing — and
+	`get_current_user_context` doubles as credential validation, so a failure
+	here would read on the handset as "this token is dead, sign out".
+	"""
+	out = {}
+	for key, (doctype, fieldname) in TAXONOMY_SELECTS.items():
+		try:
+			out[key] = select_options(doctype, fieldname) if compat.doctype_exists(doctype) else []
+		except Exception:  # pragma: no cover - a half-migrated site, not one of ours
+			out[key] = []
+	out["location_registers"] = [
+		register for register in locations.REGISTERS if compat.doctype_exists(register)
+	]
+	return out
 
 
 def company_abbr(name) -> str | None:

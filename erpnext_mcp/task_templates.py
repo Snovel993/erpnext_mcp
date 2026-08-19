@@ -106,6 +106,49 @@ TEMPLATE_FIELDS = (
 )
 
 
+#: The SOP attachment on a template, per language. `{fieldname: language tag}`.
+#:
+#: v0.98.0, AND THE LANGUAGE IS THE COLUMN RATHER THAN THE FILENAME. The handset
+#: read it off the file name until now — `..._es.pdf`, `..._spanish.pdf` — which
+#: is a convention rather than a fact: it works while the office follows it and
+#: fails SILENTLY when they do not, because a document the app cannot place is
+#: offered with no language badge at all. A Spanish-speaking picker is then shown
+#: an unlabelled button and has to open it to find out. Two declared fields make
+#: the answer a fact, and make "there is no Spanish version of this procedure" a
+#: gap somebody can see and close.
+#:
+#: DELIBERATELY NOT IN `TEMPLATE_FIELDS` AND DELIBERATELY NOT IN `snapshot`. That
+#: tuple is what a task COPIES, and copying a procedure onto every task raised
+#: would freeze last season's PDF onto work still on the board. A task carries a
+#: `template` link (v0.96.0, item 7) and reads the current document through it,
+#: so replacing the procedure reaches every open task at once — which is the
+#: behaviour an SOP actually needs and the opposite of the snapshot rule the
+#: checklist and the evidence contract need.
+SOP_DOCUMENT_FIELDS = (("sop_document_en", "en"), ("sop_document_es", "es"))
+
+
+def sop_documents(name: str) -> dict:
+	"""`{"en": url|None, "es": url|None}` for one template.
+
+	READ DEFENSIVELY, one field at a time, because this is the newest thing on
+	the record: a site that has the app and has not yet run `bench migrate` has
+	the doctype and not these two columns, and a register read that raised there
+	would take the whole template list down over an attachment nobody had filed
+	yet. A missing column and an empty one report the same thing — no procedure
+	on file — which is the honest answer in both cases.
+	"""
+	out = {tag: None for _, tag in SOP_DOCUMENT_FIELDS}
+	if not name or not compat.doctype_exists(TEMPLATE_DOCTYPE):
+		return out
+	wanted = [field for field, _ in SOP_DOCUMENT_FIELDS if compat.has_field(TEMPLATE_DOCTYPE, field)]
+	if not wanted:
+		return out
+	row = dict(frappe.db.get_value(TEMPLATE_DOCTYPE, name, wanted, as_dict=True) or {})
+	for field, tag in SOP_DOCUMENT_FIELDS:
+		out[tag] = str(row.get(field) or "").strip() or None
+	return out
+
+
 def template_row(name: str) -> dict:
 	"""One template as a plain dict, or {}."""
 	if not compat.doctype_exists(TEMPLATE_DOCTYPE) or not name:
@@ -204,6 +247,17 @@ def describe(name: str, with_checklist: bool = False) -> dict:
 		"checklist_item_count": len(checklist),
 		"required_checklist_item_count": len([item for item in checklist if item.get("required")]),
 	}
+	# v0.98.0. The two procedure attachments, under BOTH the shapes a caller
+	# might read: the flat `sop_document_en` / `sop_document_es` the iOS
+	# `FarmTaskTemplate` decodes by name, and one `sop_documents` map for a
+	# caller choosing by the language it holds rather than by writing an if.
+	# Same two values twice rather than a rename in either direction, which is
+	# the call `list_attachments` already made about `content_type`/`mime_type`.
+	sop = sop_documents(described["name"])
+	described["sop_documents"] = sop
+	for field, tag in SOP_DOCUMENT_FIELDS:
+		described[field] = sop.get(tag)
+	described["sop_languages"] = [tag for _, tag in SOP_DOCUMENT_FIELDS if sop.get(tag)]
 	if with_checklist:
 		described["checklist"] = checklist
 	return described
