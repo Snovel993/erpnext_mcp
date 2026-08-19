@@ -1601,7 +1601,22 @@ def get_break_policy(args: dict) -> ToolResult:
 		"The Labor Break Policy DocType ships with erpnext_mcp v0.58.0 — run `bench migrate`.",
 	)
 	actor = employee_tool.require_shift_role()
-	company = resolve_company(args, actor)
+	# THE CALL USED TO BE `resolve_company(args, actor)`, WHICH IS NOT THIS
+	# FUNCTION'S SIGNATURE. `args.resolve_company` takes (company, required) —
+	# so the dict went in where the docname belongs, `(company or "").strip()`
+	# raised AttributeError on it, and EVERY call to this endpoint answered
+	# HTTP 500. A handset asking for a company's break policy is the ordinary
+	# case, so the ordinary case was the one that crashed; the only bodies that
+	# survived were the ones that named nothing at all.
+	#
+	# THE COMPANY IS VALIDATED AND NOT FILTERED ON, which is deliberate rather
+	# than left over: `Labor Break Policy` has no company column. A policy is a
+	# STATE's rule — OAR 437-004-1131 is Oregon's whoever employs you — so the
+	# register is keyed on `work_state` and an entity filter would be a filter on
+	# a column that is not there. Resolving it still earns its place: a body
+	# naming a company this site does not have gets told so, by name, instead of
+	# being handed another entity's schedule.
+	company = resolve_company(as_str(args, "company"), required=False)
 	work_state = as_str(args, "work_state") or ""
 
 	filters = {"enabled": 1}
@@ -1617,12 +1632,20 @@ def get_break_policy(args: dict) -> ToolResult:
 	)
 	if not policies:
 		return ToolResult(
-			data={"policy": None, "note": "No enabled break policy found for this state."},
+			data={
+				"policy": None,
+				"company": company,
+				"note": "No enabled break policy found for this state.",
+			},
 			summary="no break policy found",
 		)
 
 	doc = frappe.get_doc(BREAK_POLICY_DOCTYPE, policies[0]["name"])
 	policy_dict = _describe_break_policy(dict(doc.as_dict()))
+	# The entity the body asked about, echoed back. The policy itself is the
+	# state's and carries no company, so this is the one key that says which
+	# farm the question was asked on behalf of.
+	policy_dict["company"] = company
 
 	return ToolResult(
 		data=policy_dict,
