@@ -46,6 +46,22 @@ def _hours_between(start, end) -> float:
     return max((b - a).total_seconds() / 3600, 0.0)
 
 
+#: The break kinds that discharge a HEAT obligation rather than a wage-and-hour
+#: one. v0.96.0 — `Water Break` and `Shade Break` joined `Cool-Down` on the
+#: `break_kind` Select in the same release, and every place that used to test
+#: `== "Cool-Down"` tests membership here instead.
+#:
+#: THE THREE ARE ONE COUNTER HERE AND THREE RECORDS ON THE TIMELINE, which is
+#: the split the regulation asks for. OAR 437-004-1131 and WAC 296-307-097 make
+#: shade, drinking water and cool-down separately REQUIRED — so the log has to
+#: keep them apart — while the cool-down CYCLE they satisfy is one clock: a crew
+#: sent to the shade at the top of the hour has had its relief for that hour
+#: whichever of the three words the foreman tapped. Counting them separately
+#: would tell a crew that had just come out of the shade that a cool-down was
+#: overdue.
+HEAT_RELIEF_KINDS = ("Cool-Down", "Water Break", "Shade Break")
+
+
 def _schedule_rows(policy: dict, key: str) -> list[dict]:
     return policy.get(key) or []
 
@@ -202,7 +218,7 @@ def worker_breaks(segment: dict, events: list[dict], policy: dict) -> dict:
         elif kind == "Unpaid Meal":
             unpaid_minutes += mins
             meal_taken += 1
-        elif kind == "Cool-Down":
+        elif kind in HEAT_RELIEF_KINDS:
             cool_down_minutes += mins
 
     # Cool-down concurrent logic: if the policy says cool-downs run concurrently
@@ -322,7 +338,7 @@ def next_break_due(
                 every = _as_float(row.get("every_hours"), 2.0)
                 last_cd_dt = None
                 for ev in break_events:
-                    if ev.get("break_kind") == "Cool-Down":
+                    if ev.get("break_kind") in HEAT_RELIEF_KINDS:
                         dt = _parse_dt(ev.get("event_datetime"))
                         if dt and (last_cd_dt is None or dt > last_cd_dt):
                             last_cd_dt = dt

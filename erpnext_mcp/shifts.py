@@ -668,6 +668,15 @@ def _break_summary(shift_row: dict, crew: list, events: list) -> dict | None:
 	rest_logged = sum(1 for e in break_events if e.get("break_kind") == "Paid Rest")
 	meal_logged = sum(1 for e in break_events if e.get("break_kind") == "Unpaid Meal")
 	cool_down_logged = sum(1 for e in break_events if e.get("break_kind") == "Cool-Down")
+	# v0.96.0. THE TWO HEAT PROVISIONS THAT ARE ASKED ABOUT BY NAME. `break_kind`
+	# gained Water Break and Shade Break in this release, and counting them into
+	# `cool_down_logged` would have kept the summary's arithmetic right and
+	# thrown away the only thing the new values were added for: OAR
+	# 437-004-1131 asks whether SHADE was provided, and "three cool-downs" is
+	# not an answer to it. `cool_down_logged` still counts Cool-Down alone, so
+	# nothing already reading it changed meaning.
+	water_break_logged = sum(1 for e in break_events if e.get("break_kind") == "Water Break")
+	shade_break_logged = sum(1 for e in break_events if e.get("break_kind") == "Shade Break")
 	scheduled_not_observed = [
 		{
 			"name": e.get("name"),
@@ -686,6 +695,11 @@ def _break_summary(shift_row: dict, crew: list, events: list) -> dict | None:
 			"rest_logged": rest_logged,
 			"meal_logged": meal_logged,
 			"cool_down_logged": cool_down_logged,
+			"water_break_logged": water_break_logged,
+			"shade_break_logged": shade_break_logged,
+			# The cool-down CYCLE all three discharge, as one number — the clock
+			# `breaks.next_break_due` counts from. See `breaks.HEAT_RELIEF_KINDS`.
+			"heat_relief_logged": cool_down_logged + water_break_logged + shade_break_logged,
 		},
 		"workers_short": recon.get("workers_short", []),
 		"breaks_scheduled_not_observed": scheduled_not_observed,

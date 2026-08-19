@@ -4397,14 +4397,23 @@ def log_shift_break(
 	employee=None,
 	description=None,
 ) -> dict:
-	"""Start a break on a shift — rest, meal or cool-down.
+	"""Start a break on a shift — rest, meal, cool-down, water or shade.
 
 	`break_kind` IS NOT `event_type` AND THE TWO ARE NOT THE SAME FIELD.
-	`break_kind` is the payroll classification (Paid Rest, Unpaid Meal, Cool-Down);
-	`event_type` is derived from it and is never taken from the body. A phone that
-	could set event_type directly could write a Rest Period with no break_kind,
-	which would log on the compliance timeline and reach nothing in payroll —
-	exactly the gap this method exists to close.
+	`break_kind` is the payroll classification (Paid Rest, Unpaid Meal, Cool-Down,
+	Water Break, Shade Break); `event_type` is derived from it and is never taken
+	from the body. A phone that could set event_type directly could write a Rest
+	Period with no break_kind, which would log on the compliance timeline and
+	reach nothing in payroll — exactly the gap this method exists to close.
+
+	v0.96.0 ADDED WATER BREAK AND SHADE BREAK, and the release note is a failure
+	report rather than a feature: the two kinds the heat rules are written about
+	were the two this method refused. A handset sending `Water Break` got
+	"break_kind must be one of Paid Rest, Unpaid Meal, Cool-Down", the app kept
+	the break locally, and the break log — which under OAR 437-004-1131 IS the
+	evidence that heat relief was provided — was silently not created for exactly
+	the events an inspector opens it to find. See `shifts.BREAK_KINDS` for why
+	they are three records and one cool-down clock.
 	"""
 	allowed = guard.require_scope(user)
 	name = guard.require_scoped_doc(FARM_SHIFT, shift, "shift", allowed)

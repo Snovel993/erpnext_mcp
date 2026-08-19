@@ -1422,10 +1422,27 @@ def _track_gaps(points: list) -> list:
 
 # ── 9. log_shift_break ────────────────────────────────────────────────────
 
+#: The payroll classification a break is logged under, and the compliance event
+#: type each one produces. `event_type` is DERIVED from this map and is never
+#: taken from a caller's body — see `log_shift_break`.
+#:
+#: v0.96.0 ADDED WATER BREAK AND SHADE BREAK, and they are not decoration on
+#: Cool-Down. OAR 437-004-1131 and WAC 296-307-097 make drinking water, shade
+#: and a cool-down rest period THREE separately required provisions, and the
+#: question an inspector asks after a heat event is whether SHADE was provided —
+#: a register that recorded all three as "Cool-Down" cannot answer it. Both event
+#: types have been on the Farm Shift Compliance Event doctype since it shipped
+#: (`CARE_EVENTS` has counted them per worker since v0.64.0); what was missing was
+#: the payroll classification that lets `log_shift_break` reach them, so a handset
+#: sending `Water Break` was refused and the break went unlogged. For PAYROLL all
+#: three are paid rest, which is why they share `paid: True` — the distinction
+#: they carry is a compliance one.
 BREAK_KINDS = {
 	"Paid Rest": {"event_type": "Rest Period", "paid": True},
 	"Unpaid Meal": {"event_type": "Meal Period", "paid": False},
 	"Cool-Down": {"event_type": "Cool-Down", "paid": True},
+	"Water Break": {"event_type": "Water Break", "paid": True},
+	"Shade Break": {"event_type": "Shade Break", "paid": True},
 }
 
 VALID_APPLIES_TO = ("Crew", "Individual")

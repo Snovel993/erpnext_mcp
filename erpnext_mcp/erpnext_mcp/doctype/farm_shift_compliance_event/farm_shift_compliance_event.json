@@ -81,14 +81,14 @@
    "fieldname": "break_section",
    "fieldtype": "Section Break",
    "label": "Break",
-   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down'], doc.event_type)"
+   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down','Water Break','Shade Break'], doc.event_type)"
   },
   {
-   "description": "The payroll classification. Blank on every non-break event, which is every event that existed before v0.58.0. Paid Rest stays inside total_hours and is paid at the average piece rate; Unpaid Meal comes off the span; Cool-Down is paid rest for payroll and a distinct compliance record.",
+   "description": "The payroll classification. Blank on every non-break event, which is every event that existed before v0.58.0. Paid Rest stays inside total_hours and is paid at the average piece rate; Unpaid Meal comes off the span; Cool-Down, Water Break and Shade Break are paid rest for payroll and three DISTINCT compliance records. v0.96.0 added the last two, and the distinction is the regulation's rather than payroll's: OAR 437-004-1131 and WAC 296-307-097 make shade, drinking water and cool-down separately required provisions, and an inspector after a heat event asks whether SHADE was provided, not whether a cool-down was. Folding all three onto Cool-Down loses the only column that could answer.",
    "fieldname": "break_kind",
    "fieldtype": "Select",
    "label": "Break Kind",
-   "options": "\nPaid Rest\nUnpaid Meal\nCool-Down"
+   "options": "\nPaid Rest\nUnpaid Meal\nCool-Down\nWater Break\nShade Break"
   },
   {
    "description": "When the break ended. Rest taken, not offered — a break with a start and an end is a claim about what happened; a break with only a scheduled duration is a claim about what was intended.",
@@ -120,7 +120,7 @@
    "fieldname": "break_scope_section",
    "fieldtype": "Section Break",
    "label": "Break Scope",
-   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down'], doc.event_type)"
+   "depends_on": "eval:in_list(['Rest Period','Meal Period','Cool-Down','Water Break','Shade Break'], doc.event_type)"
   },
   {
    "default": "Crew",

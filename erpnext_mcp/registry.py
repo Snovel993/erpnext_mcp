@@ -15474,11 +15474,12 @@ TOOLS = {
 	),
 	"log_shift_break": _tool(
 		shifts.log_shift_break,
-		"MUTATING (default OFF). Start a break on a shift — rest, meal or cool-down.\n\n"
+		"MUTATING (default OFF). Start a break on a shift — rest, meal, cool-down, "
+		"water or shade.\n\n"
 		"A thin, opinionated wrapper over `log_shift_event` that validates the "
 		"break-specific fields together. An Individual break must name an employee; "
-		"a Crew break must not; and `break_kind` must be Paid Rest, Unpaid Meal or "
-		"Cool-Down.\n\n"
+		"a Crew break must not; and `break_kind` must be Paid Rest, Unpaid Meal, "
+		"Cool-Down, Water Break or Shade Break.\n\n"
 		"Returns the shift with children, plus a break tally and how many workers "
 		"the break covers (the crew on shift at the time, for a Crew break).",
 		{
@@ -15486,8 +15487,11 @@ TOOLS = {
 			"name": _field(_STRING, "Alias for shift."),
 			"break_kind": _field(
 				_STRING,
-				"Paid Rest, Unpaid Meal or Cool-Down. The payroll classification — NOT "
-				"the event_type, which is derived.",
+				"Paid Rest, Unpaid Meal, Cool-Down, Water Break or Shade Break. The payroll "
+				"classification — NOT the event_type, which is derived. All but Unpaid Meal "
+				"are paid; the last three are one cool-down cycle for the countdown and three "
+				"distinct records on the timeline, because OAR 437-004-1131 and WAC "
+				"296-307-097 make water, shade and cool-down separately required.",
 			),
 			"started_at": _field(
 				_STRING,
