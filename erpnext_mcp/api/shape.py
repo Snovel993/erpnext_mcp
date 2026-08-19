@@ -193,6 +193,25 @@ def task(row: dict, assignment: dict | None = None, clock=None) -> dict:
 	out["parent_task"] = row.get("parent_task") or None
 	out["merged_into"] = row.get("merged_into") or None
 
+	# v0.96.0. THE TEMPLATE A TASK CAME FROM, AND THE CHECKLIST IT SNAPSHOTTED.
+	# `dispatch._describe_task` has reported both since v0.41.0 and this shaper
+	# rebuilds its payload key by key, so both were dropped on the way to the
+	# handset — `get_task` answered with thirty-two fields and none of them named
+	# the template. The consequence is not cosmetic: a worker holding a task had
+	# no way to reach the template's SOP, its instructions or its checklist,
+	# because there was nothing in the answer saying which template to ask for.
+	#
+	# PRESENT ONLY WHERE THERE IS ONE, which is the rule `_describe_task` already
+	# follows: most tasks are raised by hand and have neither, and a payload that
+	# grew two permanent nulls for them would be a change to every row to serve
+	# the rows that came off a template.
+	if row.get("template"):
+		out["template"] = row["template"]
+	if row.get("checklist"):
+		out["checklist"] = row["checklist"]
+		out["checklist_done"] = row.get("checklist_done")
+		out["checklist_outstanding_required"] = row.get("checklist_outstanding_required")
+
 	# v0.77.0. WHICH six o'clock a job was claimed, started and finished. The
 	# three existing keys are untouched and still naive — `FrappeDate.parse` on
 	# the handset reads them and would fail the whole row on a shape it has not
