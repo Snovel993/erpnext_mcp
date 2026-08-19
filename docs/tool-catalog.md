@@ -1,6 +1,6 @@
 # Tool catalogue
 
-All 752 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
+All 757 tools `erpnext_mcp` exposes, with arguments, return shape and a worked
 example. The authoritative definitions live in `erpnext_mcp/registry.py`; this
 document explains them.
 
@@ -72,7 +72,7 @@ ledger.
 
 # Read-only tools
 
-All 375 read tools are **on** by default and can be switched off individually. A
+All 377 read tools are **on** by default and can be switched off individually. A
 tool that is off does not appear in `tools/list` at all, and neither does one
 whose site prerequisite is missing.
 
@@ -16008,6 +16008,124 @@ period after service, and the gap between an envelope opened in a yard and
 somebody reaching a Desk is a gap with a liability in it. `employee` and `company`
 are absent from `update_payroll_deduction`'s mobile signature entirely, so the
 argument filter makes that refusal unreachable rather than merely enforced.
+
+## Garnishment compliance — the order behind the withholding
+
+Five tools over the `Farm Garnishment` DocType. `list_garnishments` and
+`get_garnishment` are read-only and **on** by default; `create_garnishment`,
+`update_garnishment` and `render_garnishment_response` are mutating and default
+**off**.
+
+### Why the order is a separate record from the deduction
+
+A `Farm Payroll Deduction` is a standing *instruction* — take this much, from this
+date, under this ceiling. That is everything a payroll run needs and nothing a
+court needs. When a child support agency writes to ask why withholding stopped in
+March, the answer is a **case number, a date of service, a balance and a letter**,
+none of which belongs on a row whose job is to be read forty times a year by an
+arithmetic engine.
+
+So the order is one record and the instruction is another, and the order **owns**
+the instruction: filing a garnishment creates the deduction, and satisfying or
+terminating the garnishment stops it.
+
+### Federal priority is derived, not entered
+
+| Type | Priority | Ceiling on disposable earnings | Authority |
+|---|---|---|---|
+| Child Support | **1** | 50 / 55 / 60 / 65% by the two facts on the order | 15 U.S.C. §1673(b)(2) |
+| Tax Levy | **2** | none — Title III does not apply | 29 CFR §870.11(b)(2) |
+| Student Loan | **3** | 15%, inside the ordinary 25% pool | 20 U.S.C. §1095a(a)(1) |
+| Creditor | **4** | lesser of 25% or the amount over 30× minimum wage | 15 U.S.C. §1673(a) |
+
+The `priority` field is **read-only and recomputed from the type on every save**.
+It is what the law says, not what an employer decides, and a field somebody could
+type into would eventually hold an opinion.
+
+**It is not the payroll engine's queue number.** The engine orders by the
+*deduction's* category — 10, 20, 30, 40 — and `create_garnishment` deliberately
+passes **no** priority across. Pushing 1–4 into that column would sort a creditor
+order at 4 ahead of a support order at 10 and invert the exact precedence the
+field exists to record. The two sequences agree about the order and disagree about
+the integers.
+
+### `create_garnishment`
+
+Files the order **and** creates its deduction, through `create_payroll_deduction`
+— the same writer, the same allowlist, the same duplicate refusal, the same
+category-to-law mapping. A second deduction writer here would be a second place
+for the CCPA ceilings to be got wrong.
+
+**One switch governs both halves**, `allow_create_garnishment`. An operator who
+enabled the first and got a record that withholds nothing would have a garnishment
+on the file that the payroll run cannot see. If the deduction cannot be created
+the whole call rolls back and no order is left behind.
+
+**Refuses** a second active order on the same case number against the same worker
+(filing it twice withholds it twice), a withholding amount of zero, a percentage
+over 100, a stated ceiling over 100, and an employee name matching more than one
+person. The same case number against a *different* worker is allowed — a
+multi-defendant judgment is one number and two orders.
+
+**Reports the competing orders** it now sits alongside. An employer served with a
+creditor judgment against somebody who already has a support order does not get a
+fresh 25% pool: 29 CFR §870.11(b)(1) gives the ordinary garnishment only what is
+**left** after support, frequently nothing, and that is the correct answer rather
+than a failure to collect.
+
+### `update_garnishment`
+
+Posting what payroll withheld is what moves the balance. Pass `add_withheld` with
+what a run actually took — an **increment**, because a payroll run knows its
+period and not the running total, and making every caller read the sum and write
+it back is a lost update the moment two runs post together. The lost update is
+money that was taken and is not on the balance.
+
+**Reaching zero satisfies the order and stops the money.** When `total_withheld`
+meets `total_owed` the status becomes `Satisfied`, `satisfied_on` is stamped, and
+the linked deduction is retired to `Completed`. Withholding past a satisfied
+judgment is money taken under an authority that has expired, and it is the
+employer that took it.
+
+**A `total_owed` of zero is an absence, not a paid-off debt.** Every Currency
+field is 0 on a row nobody filled in, and every child support order is one — an
+ongoing obligation with no principal to run down. The arithmetic runs only where a
+balance exists; reading 0 as "satisfied" would mark a support order Satisfied on
+the day it was filed and stop the withholding.
+
+Changing the amount or type **carries onto the deduction**, reported as
+`deduction_changes`: an order that says $200 and a run that takes $150 is not a
+discrepancy anybody notices, because both figures look deliberate. Status is not
+mirrored blindly — a deduction a court has *stayed* stays `Suspended`.
+
+`employee` and `company` are refused by name, and nothing deletes. `Terminated` is
+for an order the issuer released.
+
+### `render_garnishment_response`
+
+Draws the employer's acknowledgment back to the issuing court or agency — that the
+order was received, that this employer employs the worker named, what will be
+withheld and from which date, what else already stands against the same wages, and
+what the employer undertakes to do next — and attaches the PDF **privately** to the
+garnishment.
+
+What an employer owes on being served is an **answer**, and failing to give one is
+what gets an employer defaulted rather than merely audited: a federal Income
+Withholding for Support order requires the employer to begin within a stated
+number of days, a state writ normally requires a sworn answer within twenty or
+thirty, and an administrative wage garnishment asks for an employer certification.
+
+**It is the employer's own letter and the page says so.** Where the issuer
+prescribes its own answer form this accompanies that form and does not replace it,
+and it does not imitate one — drawing something that looked like a court's own form
+would be the one page in this app that lies about what it is.
+
+**No figure on it is a prediction.** Disposable earnings belong to a pay period
+that has not happened, so the page prints what the order *directs* and which
+ceiling governs it, never a computed dollar figure a later run could contradict.
+The competing orders are printed with the shared-pool rule beside them for the same
+reason. A second render refuses without `overwrite` — the likeliest thing already
+in that field is the copy that was posted to the court.
 
 ## v0.92.0 — what is owed, and when it has to be there
 

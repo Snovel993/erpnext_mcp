@@ -1504,6 +1504,11 @@ APP_DOCTYPES = {
 	"Mobile Push Token": "mobile_push_token",
 	"Farm Salary Structure": "farm_salary_structure",
 	"Farm Payroll Deduction": "farm_payroll_deduction",
+	# The court order the deduction above exists under. Separate because a
+	# payroll run should not have to parse a court order, and because a case
+	# number, a balance and a date of service are what answers a court — none of
+	# which belongs on a row read forty times a year by an arithmetic engine.
+	"Farm Garnishment": "farm_garnishment",
 	"Farm Payroll Entry": "farm_payroll_entry",
 	"Farm Payroll Slip": "farm_payroll_slip",
 	# v0.40.0. Payroll to the general ledger: which accounts a company's payroll

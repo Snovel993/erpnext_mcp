@@ -1,0 +1,301 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-19 09:00:00.000000",
+ "description": "One court order or agency notice compelling this employer to withhold from one worker's wages, as the employer received it: the case number, who issued it, what it says to take, and what has been taken so far. It is the ANSWER TO THE COURT — a Farm Payroll Deduction says what to withhold each period and this says which order that withholding exists under, how much of the debt is left, and when the employer acknowledged service. Garnishments rank in the order federal law gives them (child support first, then a tax levy, then a student loan, then an ordinary creditor); the ceilings themselves live on the deduction and in erpnext_mcp.payroll_deductions.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "employee",
+  "employee_name",
+  "company",
+  "col_break_1",
+  "garnishment_type",
+  "priority",
+  "status",
+  "order_section",
+  "case_number",
+  "issuing_court_or_agency",
+  "col_break_order",
+  "received_date",
+  "effective_date",
+  "withholding_section",
+  "withholding_type",
+  "withholding_amount",
+  "col_break_withholding",
+  "max_disposable_earnings_percentage",
+  "payroll_deduction",
+  "balance_section",
+  "total_owed",
+  "total_withheld",
+  "col_break_balance",
+  "remaining_balance",
+  "satisfied_on",
+  "response_section",
+  "response_letter",
+  "response_letter_on",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "GARN-.YYYY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "GARN-.YYYY.-.####",
+   "read_only": 1
+  },
+  {
+   "description": "The worker the order is made against. Not changeable once filed: an order moved to another person would apply a court's finding about one worker to somebody else, and the audit trail would read as though it had always been theirs.",
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What kind of debt this order collects, which is the single fact that decides everything else about it: the rank below, the ceiling that governs the withholding, and which deduction category the payroll engine processes it under. Child Support is an ongoing obligation with no balance to run down; Creditor is an ordinary judgment; Tax Levy is a federal or state levy, which the Consumer Credit Protection Act does not limit at all; Student Loan is administrative wage garnishment under 20 U.S.C. 1095a.",
+   "fieldname": "garnishment_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Garnishment Type",
+   "options": "Child Support\nCreditor\nTax Levy\nStudent Loan",
+   "reqd": 1
+  },
+  {
+   "description": "Federal precedence, lowest first: child support 1, tax levy 2, student loan 3, creditor 4. DERIVED FROM THE TYPE AND NOT ENTERED — it is what the law says, not what an employer decides, and a field somebody could type into would eventually hold somebody's opinion. Child support outranks everything because 15 U.S.C. 1673(b) gives it its own and much higher ceiling and 29 CFR 870.11(b)(1) makes an ordinary garnishment take only what is left of the 25% pool after support has come out. NOTE this is the RANK AMONG ORDERS, not the payroll engine's queue number: the engine orders by the deduction's category (child support 10, tax levy 20, student loan 30, other garnishments 40), which is the same sequence a decade apart.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Federal Priority",
+   "read_only": 1
+  },
+  {
+   "default": "Active",
+   "description": "Only an Active order is withheld. Satisfied means the debt has been paid off and is set automatically when the remaining balance reaches zero; Terminated means the issuing court or agency released the order. NEITHER IS A DELETION. An order removed from the file cannot answer the court that asks why withholding stopped, and a satisfied order is the record proving it was paid.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nSatisfied\nTerminated",
+   "reqd": 1
+  },
+  {
+   "fieldname": "order_section",
+   "fieldtype": "Section Break",
+   "label": "The Order"
+  },
+  {
+   "description": "The case, docket or notice number printed on the order. THE FIELD THAT MAKES THE WITHHOLDING DEFENSIBLE — an employer served with an order answers for what it withheld, and this is what ties every dollar taken to the paper that authorised taking it. It is also what tells a genuine second order from the same order entered twice.",
+   "fieldname": "case_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Case Number",
+   "reqd": 1
+  },
+  {
+   "description": "Who issued it and who the employer answers to: the court, the state child support agency, the IRS, the Department of Education or its servicer. Printed on the acknowledgment letter as the addressee, which is why it is the whole name rather than an abbreviation.",
+   "fieldname": "issuing_court_or_agency",
+   "fieldtype": "Data",
+   "label": "Issuing Court or Agency"
+  },
+  {
+   "fieldname": "col_break_order",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The day the employer was served. THE CLOCK STARTS HERE, not on the effective date: most withholding orders give the employer a fixed number of days from service to answer and to begin withholding, and an employer that cannot say when it was served cannot show it answered in time.",
+   "fieldname": "received_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Received Date"
+  },
+  {
+   "description": "The first day withholding applies — the date the acknowledgment letter tells the court the employer began. Defaults to the received date.",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "withholding_section",
+   "fieldtype": "Section Break",
+   "label": "Withholding"
+  },
+  {
+   "default": "Fixed Amount",
+   "description": "Fixed Amount is a dollar figure per pay period. Percentage of Disposable is a share of DISPOSABLE EARNINGS — gross less the withholding the law requires (29 CFR 870.10), which is the base every court order is written against and is not the same as net pay: a worker's own 401(k) or health election does not reduce it, or an employee could shrink a court order by raising their contribution rate.",
+   "fieldname": "withholding_type",
+   "fieldtype": "Select",
+   "label": "Withholding Type",
+   "options": "Fixed Amount\nPercentage of Disposable",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "The dollars per pay period, or the percentage — 15 means 15%, not 0.15. This is what the ORDER ASKS FOR. What a run actually takes may be less, because the CCPA ceilings are measured against that period's pay; the difference is reported on the pay slip as a shortfall and is not carried forward here.",
+   "fieldname": "withholding_amount",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Withholding Amount",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_withholding",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "The ceiling this particular order states, as a percentage of disposable earnings. Zero means the order stated none and the statutory ceiling for the type applies instead — 25% for an ordinary creditor garnishment (15 U.S.C. 1673(a)), 50 to 65% for child support (1673(b)(2)), 15% for a student loan (20 U.S.C. 1095a(a)(1)), and no CCPA ceiling at all for a tax levy, which is bounded instead by the exempt amount the notice leaves the worker. An order may state a ceiling LOWER than the statute; it cannot lawfully raise one, and a figure above the statutory maximum for the type is saved with a warning rather than silently honoured.",
+   "fieldname": "max_disposable_earnings_percentage",
+   "fieldtype": "Float",
+   "label": "Max Disposable Earnings %",
+   "precision": "2"
+  },
+  {
+   "description": "The standing instruction this order produced. One Farm Garnishment is the ORDER — the paper, the case number, the balance owed; the deduction is the INSTRUCTION a payroll run reads each period. They are separate because a payroll run should not have to parse a court order, and because an order that is satisfied or released has to stop the withholding without erasing the evidence that it existed.",
+   "fieldname": "payroll_deduction",
+   "fieldtype": "Link",
+   "label": "Payroll Deduction",
+   "options": "Farm Payroll Deduction",
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_section",
+   "fieldtype": "Section Break",
+   "label": "Balance"
+  },
+  {
+   "default": "0",
+   "description": "The total debt the order is collecting, where it collects a finite one — a creditor judgment, a levy for a fixed assessment, a defaulted student loan balance. ZERO MEANS THERE IS NO FIXED BALANCE, not a debt of nothing. A child support order is an ongoing obligation with no principal to run down, so it is left at zero and never becomes Satisfied by arithmetic; only the issuing agency ends it, and that is a Terminated status.",
+   "fieldname": "total_owed",
+   "fieldtype": "Currency",
+   "label": "Total Owed"
+  },
+  {
+   "default": "0",
+   "description": "The running sum of what payroll has actually withheld and remitted under this order. Written by the payroll side as runs are processed, not typed. It is what was TAKEN, which is less than what the order asked for on any period where a CCPA ceiling bound.",
+   "fieldname": "total_withheld",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Withheld",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_balance",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Total owed less total withheld, floored at zero. Computed on every save and never entered. Where there is no fixed balance to run down it stays at zero and means nothing — read total_owed first, which is the field that says whether this number is an answer or an absence.",
+   "fieldname": "remaining_balance",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Remaining Balance",
+   "read_only": 1
+  },
+  {
+   "description": "The day the balance reached zero and the status became Satisfied. Stamped once, by the save that satisfied it.",
+   "fieldname": "satisfied_on",
+   "fieldtype": "Date",
+   "label": "Satisfied On",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "response_section",
+   "fieldtype": "Section Break",
+   "label": "Employer Response"
+  },
+  {
+   "description": "The acknowledgment letter back to the issuing court or agency: that the order was received, that this employer employs the worker named, what it will withhold and from which date. The employer's own letter — NOT a substitute for a mandated answer form where the issuing state prescribes one.",
+   "fieldname": "response_letter",
+   "fieldtype": "Attach",
+   "label": "Response Letter",
+   "read_only": 1
+  },
+  {
+   "fieldname": "response_letter_on",
+   "fieldtype": "Datetime",
+   "label": "Response Letter Drawn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-19 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext MCP",
+ "name": "Farm Garnishment",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "HR Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "HR User",
+   "write": 1
+  }
+ ],
+ "search_fields": "employee_name,case_number,garnishment_type,status",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "employee_name",
+ "track_changes": 1
+}

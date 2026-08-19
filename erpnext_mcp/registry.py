@@ -83,6 +83,7 @@ from .tools import (
 	fill_pipeline,
 	fiscal,
 	funnel,
+	garnishments,
 	governance,
 	heat,
 	housing,
@@ -503,6 +504,16 @@ _TAX_FORM_PDF_REQUIRES = (
 #: over a different doctype: `pay_stub_pdf` borrows `form_pdf_renderer`'s sheet,
 #: so a bench without reportlab loses this tool by name and keeps every payroll
 #: figure readable through `get_payroll_entry` and `get_payroll_register`.
+_GARNISHMENT_REQUIRES = (
+	"the Farm Garnishment DocType, which ships with erpnext_mcp — run `bench migrate`"
+)
+
+_GARNISHMENT_PDF_REQUIRES = (
+	"the Farm Garnishment DocType (run `bench migrate`) and the reportlab Python package, "
+	"which this app declares as a dependency — install it into the bench's environment with "
+	"`./env/bin/pip install 'reportlab>=4.0'` and restart"
+)
+
 _PAY_STUB_PDF_REQUIRES = (
 	"the Farm Payroll Entry DocType (run `bench migrate`) and the reportlab Python package, "
 	"which this app declares as a dependency — install it into the bench's environment with "
@@ -26660,6 +26671,315 @@ TOOLS = {
 		title="Update a payroll deduction",
 		available=_needs_doctype("Farm Payroll Deduction"),
 		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── garnishments: the court orders the deductions above exist under ─────
+	#
+	# A Farm Payroll Deduction is a standing instruction; a Farm Garnishment is
+	# the ORDER — the case number, the issuer, the date of service, the balance,
+	# and the letter that went back. `tools/garnishments.py` says why they are
+	# two records, and why the order's federal priority (1..4) is deliberately
+	# NOT pushed into the engine's queue field (10/20/30/40).
+	"list_garnishments": _tool(
+		garnishments.list_garnishments,
+		"The file of court orders and agency notices this employer has been served "
+		"with: child support, creditor judgments, tax levies and student loans, with "
+		"who issued each one, when the employer was served, what has been collected "
+		"and what is left. Filter by employee, company, status, type or case number. "
+		"Read-only.\n\n"
+		"RANKED AS FEDERAL LAW RANKS THEM within each worker — child support 1, tax "
+		"levy 2, student loan 3, creditor 4 — so the list reads as the order the money "
+		"comes out in rather than as rows somebody has to sort. `employees_with_"
+		"competing_orders` names the workers with two or more live orders, which is "
+		"where 29 CFR 870.11(b)(1) bites: an ordinary garnishment competing with "
+		"support gets only what is LEFT of the 25% pool, frequently nothing.\n\n"
+		"`unremitted_balance` sums what the active orders still have to collect, and "
+		"counts only the orders that HAVE a balance — a child support order is an "
+		"ongoing obligation with no principal to run down, so its zero is an absence "
+		"rather than a debt of nothing. Every row carries `has_balance` saying which "
+		"it is.",
+		{
+			"company": _COMPANY,
+			"employee": _field(_STRING, "Only this employee's orders. Docname or name."),
+			"garnishment_type": _field(_STRING, "Child Support, Creditor, Tax Levy or Student Loan."),
+			"status": _field(_STRING, "Active, Satisfied or Terminated."),
+			"case_number": _field(_STRING, "Substring of the case, docket or notice number."),
+			"limit": _LIMIT,
+		},
+		title="List garnishments",
+		available=_needs_doctype("Farm Garnishment"),
+		requires=_GARNISHMENT_REQUIRES,
+	),
+	"get_garnishment": _tool(
+		garnishments.get_garnishment,
+		"One order in full — what it directs, who issued it, what has been withheld "
+		"under it, and WHAT ELSE COMPETES WITH IT against the same wages, ranked. "
+		"Takes the docname or a case number that is unique; an ambiguous case number "
+		"is refused rather than resolved, because the same number against two workers "
+		"is exactly the shape a multi-defendant judgment takes. Read-only.\n\n"
+		"CARRIES THE DERIVED FACTS, not just the stored ones: the federal priority, "
+		"the Farm Payroll Deduction category the payroll engine will process it under, "
+		"the statutory ceiling for its type, and whether it has a balance at all.\n\n"
+		"WARNS about a stated ceiling above the statutory maximum for the type (an "
+		"order may set one lower, never higher), a percentage ceiling on a tax levy "
+		"(which the CCPA does not reach at all), a creditor or levy order with no "
+		"total_owed so it can never be satisfied by arithmetic, withholding dated "
+		"before service, a missing issuer, and — the one with money in it — an order "
+		"with no linked deduction, under which nothing is being withheld.",
+		{
+			"garnishment": _field(
+				_STRING, "The Farm Garnishment docname ('GARN-2026-0001'), or the case number.",
+			),
+		},
+		required=("garnishment",),
+		title="Get a garnishment",
+		available=_needs_doctype("Farm Garnishment"),
+		requires=_GARNISHMENT_REQUIRES,
+	),
+	"create_garnishment": _tool(
+		garnishments.create_garnishment,
+		"MUTATING (default OFF). File one court order or agency notice against a "
+		"worker's wages AND put the withholding it commands into payroll. Two records, "
+		"one act: the order is inserted, then its Farm Payroll Deduction is created "
+		"THROUGH create_payroll_deduction — the same writer, the same duplicate "
+		"refusal, the same category-to-law mapping — and the deduction's docname is "
+		"stored back on the order.\n\n"
+		"ONE SWITCH GOVERNS BOTH HALVES, this one. Filing an order that withholds "
+		"nothing would be a garnishment the payroll run cannot see, which is the "
+		"failure this doctype exists to prevent. If the deduction cannot be created "
+		"the whole call is rolled back and no order is left behind.\n\n"
+		"THE TYPE DECIDES THE LAW. Child support ranks 1 and carries its own 50-65% "
+		"ceiling; a tax levy ranks 2 and is outside the CCPA entirely; a student loan "
+		"ranks 3 at 15%; a creditor judgment ranks 4 inside the ordinary 25% pool. The "
+		"priority field is DERIVED and read-only — it is what the law says, not what an "
+		"employer decides.\n\n"
+		"REFUSES a second active order on the same case number against the same "
+		"worker, because filing it twice withholds it twice; a withholding amount of "
+		"zero; a percentage over 100; a stated ceiling over 100; an employee name "
+		"matching more than one person.\n\n"
+		"REPORTS THE COMPETING ORDERS it now sits alongside. An employer served with a "
+		"creditor judgment against somebody who already has a support order does not "
+		"get a fresh 25% pool — 29 CFR 870.11(b)(1) gives the ordinary one what is "
+		"LEFT after support, frequently nothing.",
+		{
+			"employee": _field(_STRING, "The employee. Docname, or a name that matches exactly one."),
+			"company": _COMPANY,
+			"garnishment_type": _field(
+				_STRING,
+				"Child Support, Creditor, Tax Levy or Student Loan. Decides the federal "
+				"priority, the ceiling, and the deduction category payroll processes it under.",
+			),
+			"case_number": _field(
+				_STRING,
+				"The case, docket or notice number printed on the order. WHAT MAKES THE "
+				"WITHHOLDING DEFENSIBLE — it ties every dollar taken to the paper that "
+				"authorised taking it.",
+			),
+			"issuing_court_or_agency": _field(
+				_STRING,
+				"Who issued it: the court, the state child support agency, the IRS, the "
+				"Department of Education or its servicer. Who the response letter is "
+				"addressed to, and who the employer answers when withholding stops.",
+			),
+			"withholding_type": _field(
+				_STRING,
+				"Fixed Amount (dollars per period) or Percentage of Disposable. Default "
+				"Fixed Amount. Disposable earnings is gross less what the law requires "
+				"withheld (29 CFR 870.10) — not net pay, and not reduced by the worker's "
+				"own pre-tax elections.",
+			),
+			"withholding_amount": _field(
+				_NUMBER, "Dollars per pay period, or the percentage — 15 means 15%, not 0.15.",
+			),
+			"max_disposable_earnings_percentage": _field(
+				_NUMBER,
+				"The ceiling THIS order states, if it states one. Zero uses the statutory "
+				"ceiling for the type. An order may set a ceiling lower than the statute; "
+				"it cannot raise one, and a higher figure is saved with a warning.",
+			),
+			"received_date": _field(
+				_STRING,
+				"YYYY-MM-DD, the day the employer was served. THE CLOCK STARTS HERE — most "
+				"orders give a fixed number of days from service to answer and to begin. "
+				"Defaults to today.",
+			),
+			"effective_date": _field(
+				_STRING,
+				"YYYY-MM-DD, the first day withholding applies and the date the response "
+				"letter states to the court. Defaults to the received date.",
+			),
+			"total_owed": _field(
+				_NUMBER,
+				"The whole debt this order collects, where it collects a finite one. ZERO "
+				"MEANS THERE IS NO FIXED BALANCE rather than a debt of nothing: a child "
+				"support order is ongoing and is never satisfied by arithmetic.",
+			),
+			"total_withheld": _field(
+				_NUMBER,
+				"What has ALREADY been collected under this order before it reached this "
+				"app. For an order served months ago and only now being filed — without it "
+				"the balance restarts and the worker pays the debt twice.",
+			),
+			"status": _field(_STRING, "Active, Satisfied or Terminated. Default Active."),
+			"pay_stub_label": _field(
+				_STRING,
+				"What the withholding line is called on the worker's pay stub. Blank uses "
+				"the deduction category's own name.",
+			),
+			"supports_other_dependents": _field(
+				_BOOLEAN,
+				"Child support only. Does this employee support another spouse or dependent "
+				"child? Sets the ceiling at 50% of disposable earnings rather than 60% "
+				"(15 U.S.C. 1673(b)(2)). Lands on the deduction, where the engine reads it.",
+			),
+			"arrears_over_12_weeks": _field(
+				_BOOLEAN,
+				"Child support only. Adds 5 points to the ceiling, so 50 becomes 55 and 60 "
+				"becomes 65.",
+			),
+			"exempt_amount": _field(
+				_NUMBER,
+				"Tax levy only. What the levy notice leaves the employee per period, from "
+				"IRS Publication 1494. A levy is not limited by the CCPA; this is what "
+				"bounds it instead.",
+			),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("employee", "garnishment_type", "case_number", "withholding_amount"),
+		mutating=True,
+		title="File a garnishment",
+		available=_needs_doctype("Farm Garnishment", "Farm Payroll Deduction"),
+		requires=_GARNISHMENT_REQUIRES,
+	),
+	"update_garnishment": _tool(
+		garnishments.update_garnishment,
+		"MUTATING (default OFF). Change a filed order — its terms, its dates, its "
+		"balance, or its status. Every change is echoed back as before → after.\n\n"
+		"POSTING WHAT PAYROLL WITHHELD IS WHAT MOVES THE BALANCE. Pass `add_withheld` "
+		"with the amount a run actually took; it is an INCREMENT because a payroll run "
+		"knows its period and not the running total, and making every caller read the "
+		"sum and write it back is a lost update the moment two runs post together — "
+		"and the lost update is money that was taken and is not on the balance.\n\n"
+		"REACHING ZERO SATISFIES THE ORDER AND STOPS THE MONEY. When total_withheld "
+		"meets total_owed the status becomes Satisfied, satisfied_on is stamped, and "
+		"the linked deduction is retired to Completed. Withholding past a satisfied "
+		"judgment is money taken under an authority that has expired, and it is the "
+		"employer that took it. An order with no total_owed has no balance to reach, "
+		"and a child support order is one of those by design.\n\n"
+		"CHANGING THE AMOUNT OR TYPE CARRIES ONTO THE DEDUCTION, because an order that "
+		"says $200 and a run that takes $150 is not a discrepancy anybody notices — "
+		"both figures look deliberate. The mirrored writes are reported as "
+		"`deduction_changes`.\n\n"
+		"CANNOT RE-KEY IT. `employee` and `company` are refused by name: an order "
+		"moved to another worker would apply a court's finding about one person to "
+		"somebody else. Terminate this one and file a new one — nothing here deletes, "
+		"because an order removed from the file cannot answer the court that asks why "
+		"withholding stopped.",
+		{
+			"garnishment": _field(
+				_STRING, "The Farm Garnishment docname, or a case number that is unique.",
+			),
+			"add_withheld": _field(
+				_NUMBER,
+				"Add this to total_withheld — what one payroll run actually took under "
+				"this order. Cannot be negative; a correction is a total_withheld written "
+				"outright, so it reads as a correction rather than a refund nobody made.",
+			),
+			"total_withheld": _field(
+				_NUMBER, "Set the running total outright. For corrections and for opening balances.",
+			),
+			"total_owed": _field(_NUMBER, "The whole debt. Zero means there is no fixed balance."),
+			"status": _field(
+				_STRING,
+				"Active, Satisfied or Terminated. Terminated is for an order the issuer "
+				"released; Satisfied sets itself when the balance reaches zero. Either one "
+				"retires the linked deduction so the withholding actually stops.",
+			),
+			"garnishment_type": _field(
+				_STRING,
+				"Child Support, Creditor, Tax Levy or Student Loan. Re-derives the federal "
+				"priority.",
+			),
+			"case_number": _field(_STRING, "The case, docket or notice number."),
+			"issuing_court_or_agency": _field(_STRING, "Who issued it."),
+			"withholding_type": _field(
+				_STRING, "Fixed Amount or Percentage of Disposable. Carried onto the deduction.",
+			),
+			"withholding_amount": _field(_NUMBER, "Dollars per period, or the percentage. Carried onto the deduction."),
+			"max_disposable_earnings_percentage": _field(
+				_NUMBER, "The ceiling this order states. Zero uses the statutory one.",
+			),
+			"received_date": _field(_STRING, "YYYY-MM-DD, the day the employer was served."),
+			"effective_date": _field(_STRING, "YYYY-MM-DD, the first day withholding applies."),
+			"notes": _field(_STRING, "Anything the fields cannot hold."),
+		},
+		required=("garnishment",),
+		mutating=True,
+		title="Update a garnishment",
+		available=_needs_doctype("Farm Garnishment"),
+		requires=_GARNISHMENT_REQUIRES,
+	),
+	"render_garnishment_response": _tool(
+		garnishments.render_garnishment_response,
+		"MUTATING (default OFF). Draw the employer's acknowledgment back to the "
+		"issuing court or agency — that the order was received, that this employer "
+		"employs the worker named, what will be withheld and from which date, what "
+		"other orders already stand against the same wages, and what the employer "
+		"undertakes to do next — and attach the PDF privately to the garnishment.\n\n"
+		"WHAT AN EMPLOYER OWES ON BEING SERVED IS AN ANSWER. A federal Income "
+		"Withholding for Support order tells the employer to begin within a stated "
+		"number of days; a state writ normally requires a sworn answer within twenty "
+		"or thirty; an administrative wage garnishment asks for an employer "
+		"certification. The failure to answer is what gets an employer defaulted "
+		"rather than merely audited.\n\n"
+		"IT IS THE EMPLOYER'S OWN LETTER AND THE PAGE SAYS SO. Where the issuer "
+		"prescribes its own answer form this accompanies that form and does not "
+		"replace it, and it does not imitate one — drawing something that looked like "
+		"a court's own form would be the one page in this app that lies about what it "
+		"is.\n\n"
+		"NO FIGURE ON IT IS A PREDICTION. Disposable earnings belong to a pay period "
+		"that has not happened, so the page prints what the ORDER directs and which "
+		"ceiling governs it, and never a computed dollar figure a later run could "
+		"contradict. The competing orders are printed with the shared-pool rule "
+		"beside them for the same reason.\n\n"
+		"REFUSES a second render unless overwrite is passed — the likeliest thing "
+		"already in that field is the copy that was posted to the court. The existing "
+		"File stays attached either way.",
+		{
+			"garnishment": _field(
+				_STRING, "The Farm Garnishment docname, or a case number that is unique.",
+			),
+			"company_address": _field(
+				_STRING,
+				"The employer address to print in the From block. ERPNext keeps no address "
+				"on Company, and a letter to a court is expected to carry one. "
+				"`employer_address` is an alias.",
+			),
+			"employer_address": _field(_STRING, "Alias for company_address."),
+			"signatory_name": _field(
+				_STRING,
+				"Who this employer authorised to answer. Printed beside a ruled signature "
+				"line; the page is signed on paper, not by having been generated. Defaults "
+				"to the calling principal.",
+			),
+			"signatory_title": _field(
+				_STRING, "Their title. Default 'Authorized Representative'.",
+			),
+			"pay_frequency": _field(
+				_STRING,
+				"Weekly, Biweekly, Semimonthly or Monthly, to state the period the order is "
+				"applied against. Omitted rather than guessed if not given.",
+			),
+			"overwrite": _field(
+				_BOOLEAN,
+				"Draw a fresh letter even though one is already attached, and repoint the "
+				"field. The File that was there stays attached to the record.",
+			),
+		},
+		required=("garnishment",),
+		mutating=True,
+		title="Render garnishment response letter",
+		available=_pdf_form_ready("Farm Garnishment"),
+		requires=_GARNISHMENT_PDF_REQUIRES,
 	),
 	# ── push notifications: where a break horn is delivered ─────────────────
 	"list_push_tokens": _tool(

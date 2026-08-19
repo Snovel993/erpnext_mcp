@@ -415,6 +415,13 @@
   "payroll_deduction_col",
   "allow_create_payroll_deduction",
   "allow_update_payroll_deduction",
+  "garnishment_section",
+  "allow_list_garnishments",
+  "allow_get_garnishment",
+  "garnishment_col",
+  "allow_create_garnishment",
+  "allow_update_garnishment",
+  "allow_render_garnishment_response",
   "push_notification_section",
   "allow_list_push_tokens",
   "push_notification_col",
@@ -3649,6 +3656,51 @@
    "fieldname": "allow_update_payroll_deduction",
    "fieldtype": "Check",
    "label": "Update Payroll Deduction"
+  },
+  {
+   "fieldname": "garnishment_section",
+   "fieldtype": "Section Break",
+   "label": "Garnishments"
+  },
+  {
+   "default": "1",
+   "description": "READ. The file of court orders and agency notices this employer has been served with, ranked as federal law ranks them: child support 1, tax levy 2, student loan 3, creditor 4. Names the workers carrying two or more live orders, which is where the shared 25% pool bites.",
+   "fieldname": "allow_list_garnishments",
+   "fieldtype": "Check",
+   "label": "List Garnishments"
+  },
+  {
+   "default": "1",
+   "description": "READ. One order in full, with the derived facts and what else competes with it against the same wages. Warns about a stated ceiling above the statutory maximum, an order that can never be satisfied by arithmetic, and an order with no linked deduction, under which nothing is being withheld.",
+   "fieldname": "allow_get_garnishment",
+   "fieldtype": "Check",
+   "label": "Get Garnishment"
+  },
+  {
+   "fieldname": "garnishment_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. File a court order against a worker's wages AND create the payroll deduction that honours it, in one act. This switch governs both halves: an order that withheld nothing would be a garnishment the payroll run cannot see. OFF by default.",
+   "fieldname": "allow_create_garnishment",
+   "fieldtype": "Check",
+   "label": "Create Garnishment"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Change a filed order, post what payroll withheld against its balance, or retire it as Satisfied or Terminated — which also retires the linked deduction, so the withholding actually stops. OFF by default.",
+   "fieldname": "allow_update_garnishment",
+   "fieldtype": "Check",
+   "label": "Update Garnishment"
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Draw the employer's acknowledgment back to the issuing court or agency and attach the PDF privately to the order. The employer's own letter — it accompanies any answer form the issuer prescribes and does not replace it. OFF by default.",
+   "fieldname": "allow_render_garnishment_response",
+   "fieldtype": "Check",
+   "label": "Render Garnishment Response"
   },
   {
    "fieldname": "push_notification_section",

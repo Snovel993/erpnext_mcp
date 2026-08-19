@@ -1086,10 +1086,17 @@ class Catalogue(SeededTestCase):
 		`create_break_policy` writes a new Labor Break Policy and
 		`update_break_policy` amends an existing one. Both are writes, so the
 		mutating count moves by two and the read count stays.
+
+		v0.101.0 ALSO ADDS GARNISHMENT COMPLIANCE, five tools over the new Farm
+		Garnishment doctype: `list_garnishments` and `get_garnishment` read the
+		file of court orders, `create_garnishment` files one AND creates the
+		payroll deduction that honours it, `update_garnishment` posts what was
+		withheld against the balance, and `render_garnishment_response` draws the
+		employer's answer back to the issuing court. Two reads and three writes.
 		"""
-		self.assertEqual(len(registry.TOOLS), 752)
-		self.assertEqual(len(registry.READ_TOOLS), 375)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 377)
+		self.assertEqual(len(registry.TOOLS), 757)
+		self.assertEqual(len(registry.READ_TOOLS), 377)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 380)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says

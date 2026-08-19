@@ -846,9 +846,14 @@ class ToolRegistration(unittest.TestCase):
 		# v0.101.0 adds two writes: `create_break_policy` and
 		# `update_break_policy` — the break schedule for a state is now writeable
 		# through the MCP surface.
-		self.assertEqual(len(self.registry.TOOLS), 752)
-		self.assertEqual(len(self.registry.READ_TOOLS), 375)
-		self.assertEqual(len(self.registry.MUTATING_TOOLS), 377)
+		# v0.101.0 also adds garnishment compliance: two reads
+		# (`list_garnishments`, `get_garnishment`) and three writes
+		# (`create_garnishment`, `update_garnishment`,
+		# `render_garnishment_response`) over the new Farm Garnishment doctype —
+		# the court order the payroll deduction exists under.
+		self.assertEqual(len(self.registry.TOOLS), 757)
+		self.assertEqual(len(self.registry.READ_TOOLS), 377)
+		self.assertEqual(len(self.registry.MUTATING_TOOLS), 380)
 
 
 if __name__ == "__main__":
