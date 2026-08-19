@@ -628,6 +628,21 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_employee_deductions",
 		"create_payroll_deduction",
 		"update_payroll_deduction",
+		# v0.99.0. Where a break horn is delivered. `MobileAPI.swift` names
+		# neither yet — `SERVER_CHANGES.md` item 16 asks for `register_push_token`
+		# and the iOS half is the client change that follows this one — so they
+		# sit here rather than in `MOBILE`, and `test_ios_contract` transcribes
+		# no mirror for a Codable that does not exist.
+		#
+		# NEITHER TAKES A SUBJECT FROM THE BODY, which is the property to check
+		# if either ever appears in an app build. A phone enrols ITSELF: `user`
+		# and `employee` are resolved from the caller's own login, so `bind` has
+		# nothing to drop and no body can point a registration at somebody else
+		# and have their break horns, heat alerts and dispatch pings delivered to
+		# a handset of its choosing. The same shape the three direct-deposit
+		# methods have, for the same reason.
+		"register_push_token",
+		"unregister_push_token",
 		# v0.91.0. Direct deposit, entered by the worker whose wages it is.
 		# `MobileAPI.swift` names none of the three yet — the handset half is
 		# separate work — so they sit here rather than in `MOBILE`.

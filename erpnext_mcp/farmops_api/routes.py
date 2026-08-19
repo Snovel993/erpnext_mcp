@@ -862,6 +862,25 @@ ROUTES = (
 	# crew; the second would let a handset disguise a typed record as a scanned
 	# one, and the register has to be able to tell those apart.
 	Route("/mobile", mobile_api.seal_bin),
+	# v0.99.0. WHERE A BREAK HORN IS DELIVERED. The two routes that make
+	# `log_shift_break` reach the crew's phones rather than only the foreman's:
+	# the handset enrols its APNs device token on login, and retires it on
+	# logout.
+	#
+	# NEITHER DECLARES `user` OR `employee`, which is the whole of their
+	# security. Both are resolved from the caller's own login, so `bind` has
+	# nothing to drop and no body can enrol a device against somebody else's
+	# name — which would be a way to have another worker's break horns and
+	# dispatch pings delivered to a phone of your choosing. The same property
+	# the three direct-deposit routes above have, for the same reason.
+	#
+	# `unregister_push_token` DOES NOT DECLARE `token` either, and that absence
+	# is load-bearing rather than tidy: the device is the identity, and a logout
+	# that had to present the current token would fail exactly when it matters —
+	# a phone whose token Apple rotated between login and logout would go on
+	# receiving another shift's break horns forever.
+	Route("/mobile", mobile_api.register_push_token),
+	Route("/mobile", mobile_api.unregister_push_token),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

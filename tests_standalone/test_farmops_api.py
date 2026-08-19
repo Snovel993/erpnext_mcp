@@ -575,6 +575,15 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# crew; the second would let a handset pass a typed record off as a
 		# scanned one, and the register has to tell those apart.
 		"/mobile/seal_bin",
+		# v0.99.0. The push register: the handset enrols its APNs device token
+		# on login and retires it on logout. `unregister_push_token` is the one
+		# whose ABSENT argument matters — `token` is on the tool and not on the
+		# wrapper, so `bind` drops it and a logout cannot be made to fail because
+		# Apple rotated the token since the phone signed in. Neither declares
+		# `user` or `employee`, so no body can enrol a device against another
+		# worker's name.
+		"/mobile/register_push_token",
+		"/mobile/unregister_push_token",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

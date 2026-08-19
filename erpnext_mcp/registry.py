@@ -114,6 +114,7 @@ from .tools import (
 	payroll_gl,
 	printing,
 	purchasing,
+	push,
 	read,
 	realestate,
 	receipts,
@@ -26534,6 +26535,67 @@ TOOLS = {
 		title="Update a payroll deduction",
 		available=_needs_doctype("Farm Payroll Deduction"),
 		requires="the Farm Payroll Deduction DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	# ── push notifications: where a break horn is delivered ─────────────────
+	"list_push_tokens": _tool(
+		push.list_push_tokens,
+		"Every handset enrolled for push notifications, and whether it is still worth "
+		"sending to. Filter by employee, login, platform or active state. THE READ "
+		"BEHIND 'WHY DOES THEIR PHONE NEVER BUZZ' — a break called by a foreman is "
+		"pushed to every worker on the shift, and a worker whose handset never "
+		"registered, or whose token Apple retired when the app was reinstalled, is a "
+		"worker the horn silently does not reach. Read-only.\n\n"
+		"IT REPORTS THE SITE'S APNs CONFIGURATION ALONGSIDE THE ROWS, because the "
+		"commonest answer to that question is not on any row: a site with no signing "
+		"key has a perfect register and sends nothing at all. `apns.configured` false "
+		"means no push has ever left this bench, whatever the tokens say, and "
+		"`apns.requires` names the four site_config keys that fix it.\n\n"
+		"`last_error` is Apple's own word for why the last send failed. Unregistered "
+		"and BadDeviceToken mean the app was deleted or the token is stale, and the "
+		"row was deactivated on the spot; anything else is about this farm's "
+		"configuration rather than that phone.",
+		{
+			"employee": _field(_STRING, "Only this worker's handsets. Docname, employee number, name or login."),
+			"user": _field(_STRING, "Only handsets registered by this login."),
+			"platform": _field(_STRING, "ios or android."),
+			"is_active": _field(
+				_BOOLEAN,
+				"true for handsets still being sent to, false for retired ones. Omit for both — "
+				"the retired rows are the interesting half when somebody reports a silent phone.",
+			),
+			"limit": _LIMIT,
+		},
+		title="List push tokens",
+		available=_needs_doctype("Mobile Push Token"),
+		requires="the Mobile Push Token DocType, which ships with erpnext_mcp — run `bench migrate`",
+	),
+	"send_test_push": _tool(
+		push.send_test_push,
+		"MUTATING (default OFF). Send one notification to every handset one worker has "
+		"enrolled, to prove the pipeline before a real break depends on it. Plays the "
+		"break-start tone at the time-sensitive interruption level, so it is a genuine "
+		"end-to-end test of the thing a crew will hear rather than a silent ping.\n\n"
+		"MUTATING BECAUSE IT MAKES A PHONE IN SOMEBODY'S POCKET RING. It writes almost "
+		"nothing; what an operator is switching on here is the ability to interrupt a "
+		"person at work.\n\n"
+		"AN UNCONFIGURED SITE IS REPORTED, NOT REFUSED. 'This bench has no p8 key' is "
+		"exactly what somebody running this tool is trying to find out, so it comes "
+		"back as `result.reason: not_configured` with the missing keys named, on an "
+		"answer that also says how many handsets WOULD have been reached.",
+		{
+			"employee": _field(_STRING, "The worker. Docname, employee number, name or login."),
+			"message": _field(
+				_STRING,
+				"The notification body. Defaults to a plain test sentence. Say who sent it and "
+				"why — a phone that rings through the silent switch with no explanation on it "
+				"is alarming rather than informative.",
+			),
+		},
+		required=("employee",),
+		mutating=True,
+		title="Send a test push",
+		available=_needs_doctype("Mobile Push Token"),
+		requires="the Mobile Push Token DocType, which ships with erpnext_mcp — run `bench migrate`",
 	),
 }
 

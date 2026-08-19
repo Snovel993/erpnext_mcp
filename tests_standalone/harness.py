@@ -1496,6 +1496,12 @@ APP_DOCTYPES = {
 	"State Tax Configuration": "state_tax_configuration",
 	"State Tax Table": "state_tax_table",
 	# v0.30.0. Salary Structures + Payroll.
+	# v0.99.0. Where a break horn is delivered. Registered here rather than
+	# seeded per-test because it is on the BREAK path: `log_shift_break` looks
+	# up the crew's handsets on every crew break, and a double without the
+	# register would make every one of those a silently-empty lookup rather
+	# than a real query.
+	"Mobile Push Token": "mobile_push_token",
 	"Farm Salary Structure": "farm_salary_structure",
 	"Farm Payroll Deduction": "farm_payroll_deduction",
 	"Farm Payroll Entry": "farm_payroll_entry",

@@ -415,6 +415,10 @@
   "payroll_deduction_col",
   "allow_create_payroll_deduction",
   "allow_update_payroll_deduction",
+  "push_notification_section",
+  "allow_list_push_tokens",
+  "push_notification_col",
+  "allow_send_test_push",
   "payroll_gl_section",
   "allow_get_payroll_account_mapping",
   "allow_preview_payroll_gl",
@@ -3643,6 +3647,30 @@
    "fieldname": "allow_update_payroll_deduction",
    "fieldtype": "Check",
    "label": "Update Payroll Deduction"
+  },
+  {
+   "fieldname": "push_notification_section",
+   "fieldtype": "Section Break",
+   "label": "Push Notifications"
+  },
+  {
+   "default": "1",
+   "description": "READ. Every handset enrolled for push notifications and whether it is still worth sending to, with the site's own APNs configuration beside the rows — because a bench with no signing key has a perfect register and sends nothing at all.",
+   "fieldname": "allow_list_push_tokens",
+   "fieldtype": "Check",
+   "label": "List Push Tokens"
+  },
+  {
+   "fieldname": "push_notification_col",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "default": "0",
+   "description": "WRITE. Send one break-tone notification to every handset a worker has enrolled, to prove the pipeline before a real break depends on it. Mutating because it makes a phone in somebody's pocket ring at the time-sensitive interruption level, which rings through Focus.",
+   "fieldname": "allow_send_test_push",
+   "fieldtype": "Check",
+   "label": "Send Test Push"
   },
   {
    "fieldname": "payroll_gl_section",

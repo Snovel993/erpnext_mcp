@@ -129,6 +129,7 @@ from ..tools import discipline as discipline_tools
 from ..tools import narrative as narrative_tools
 from ..tools import payroll as payroll_tools
 from ..tools import payroll_deductions as payroll_deduction_tools
+from ..tools import push as push_tools
 from ..tools import sessions as session_tools
 from ..tools import shadow_log as shadow_log_tools
 from ..tools import stock_inventory as stock_tools
@@ -12512,3 +12513,108 @@ def _bin_contributors(raw, allowed: list) -> list:
 			entry = {**entry, "employee": _employee_argument(entry["employee"], allowed, "contributors")}
 		out.append(entry)
 	return out
+
+
+# ── 150. register_push_token ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("register_push_token", mutating=True, limit=guard.WRITE_LIMIT)
+def register_push_token(
+	user: str,
+	token=None,
+	device_id=None,
+	platform=None,
+	app_version=None,
+	device_model=None,
+) -> dict:
+	"""The handset says where a break horn should be delivered. Called on every login.
+
+	`employee` AND `user` ARE ABSENT FROM THIS SIGNATURE, which is the whole of
+	its security. Both are resolved from the caller's own login, so `routes.bind`
+	has nothing to drop and no body can enrol a device against somebody else's
+	name — which would be a way to have another worker's break horns, heat
+	alerts and dispatch pings delivered to a phone of your choosing. It is the
+	same property `add_my_bank_account` has and for the same reason.
+
+	IDEMPOTENT PER DEVICE, because the app calls it on every launch and Apple
+	rotates the token underneath it. Same device_id and platform updates the row
+	it already has; the register does not grow a row per launch.
+
+	A worker with no Employee record still gets a row. `_employee` would refuse
+	the call, and refusing a registration is worse than storing one that no crew
+	push will reach yet: the handset has already asked the OS for permission and
+	will not ask again, and the row is repaired the moment somebody links the
+	Employee record.
+	"""
+	guard.require_scope(user)
+
+	person = None
+	try:
+		person = _employee(user)
+	except Exception:  # a login with no Employee record yet — see the docstring
+		person = None
+
+	inner = {
+		"user": user,
+		"token": token,
+		"device_id": device_id,
+		"platform": platform or "ios",
+	}
+	if person:
+		inner["employee"] = person
+	for key, value in (("app_version", app_version), ("device_model", device_model)):
+		if value not in (None, ""):
+			inner[key] = value
+
+	answer = push_tools.register_push_token(inner).data
+	row = answer.get("push_token") or {}
+	# THE DEVICE TOKEN IS NOT ECHOED BACK, and the shape is written out here
+	# rather than passed through for that reason. `guard.strip_secrets` removes
+	# every token-shaped key on the way out of this surface — `push_token` and
+	# `token` both trip it — so a pass-through would hand the app a dict with
+	# holes in it whose names depended on a hint list two files away. The handset
+	# does not need the token echoed: it is the thing that just sent it.
+	return {
+		"registered": True,
+		"created": bool(answer.get("created")),
+		"rotated": bool(answer.get("token_rotated")),
+		"device": {
+			"name": row.get("name"),
+			"platform": row.get("platform"),
+			"device_id": row.get("device_id"),
+			"employee": row.get("employee"),
+			"is_active": row.get("is_active"),
+			"registered_at": row.get("registered_at"),
+			"last_used_at": row.get("last_used_at"),
+		},
+		# Whether this bench can actually deliver anything. False means the p8
+		# key has not been configured yet and the app should go on playing its
+		# own local tone rather than expecting one to arrive.
+		"push_enabled": bool((answer.get("apns") or {}).get("configured")),
+	}
+
+
+# ── 151. unregister_push_token ───────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("unregister_push_token", mutating=True, limit=guard.WRITE_LIMIT)
+def unregister_push_token(user: str, device_id=None, platform=None) -> dict:
+	"""Logging out stops the horn reaching this handset. A soft delete.
+
+	`token` IS DELIBERATELY NOT AN ARGUMENT. The device is the identity here, and
+	a logout that had to present the current token would fail exactly when it
+	matters most — a phone whose token Apple rotated between login and logout
+	would go on receiving another shift's break horns forever.
+
+	A device this app has never seen is answered, not refused: a phone logging
+	out on a bad signal before its registration ever landed is a normal thing to
+	happen, and an error dialog on a screen the worker is already leaving helps
+	nobody.
+	"""
+	guard.require_scope(user)
+	answer = push_tools.unregister_push_token(
+		{"user": user, "device_id": device_id, "platform": platform or "ios"}
+	).data
+	return {
+		"deactivated": bool(answer.get("deactivated")),
+		"found": bool(answer.get("found")),
+		"device": {"platform": answer.get("platform"), "device_id": answer.get("device_id")},
+	}

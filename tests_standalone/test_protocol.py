@@ -1082,9 +1082,9 @@ class Catalogue(SeededTestCase):
 		Three reads and one write, which is why the write count moves by one and
 		the read count by three.
 		"""
-		self.assertEqual(len(registry.TOOLS), 748)
-		self.assertEqual(len(registry.READ_TOOLS), 374)
-		self.assertEqual(len(registry.MUTATING_TOOLS), 374)
+		self.assertEqual(len(registry.TOOLS), 750)
+		self.assertEqual(len(registry.READ_TOOLS), 375)
+		self.assertEqual(len(registry.MUTATING_TOOLS), 375)
 
 	def test_every_tool_declares_why_it_might_be_unavailable(self):
 		"""A predicate with no `requires` sentence produces a refusal that says
