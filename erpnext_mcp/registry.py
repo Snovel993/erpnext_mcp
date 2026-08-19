@@ -13378,7 +13378,22 @@ TOOLS = {
 			),
 			"cost_center": _field(
 				_STRING,
-				"Set on every line. Defaults to the one on the company's mapping, if any.",
+				"Set on every line that is not split by cost center. Defaults to the one on "
+				"the company's mapping, if any — and it is also where time the task record "
+				"does not place is booked.",
+			),
+			"split_by_cost_center": _field(
+				_BOOLEAN,
+				"Default TRUE. Splits the EXPENSE lines — gross pay and each employer tax — "
+				"across the cost centers the work was actually done on, from the Farm Tasks "
+				"each employee was assigned in the period: a task names its block, the block "
+				"(a `Field`) names its Cost Center, and the assignment records the minutes. "
+				"Paid time that is not on a block-linked task keeps the blanket `cost_center`, "
+				"so a picker paid for eight hours with two on Block 7 books a quarter of the "
+				"wage there and not all of it. The credits are never split — a withholding "
+				"liability is not a block's cost. `cost_center_allocation` in the result shows "
+				"the minutes behind every share. False, or a run where nobody has task time on "
+				"a block with a Cost Center, posts exactly as this tool did before v0.101.0.",
 			),
 			"include_employer": _field(
 				_BOOLEAN,
@@ -13485,7 +13500,19 @@ TOOLS = {
 			"posting_date": _field(
 				_STRING, "Posting date as YYYY-MM-DD. Defaults to the run's pay period end."
 			),
-			"cost_center": _field(_STRING, "Set on every line. Defaults to the mapping's."),
+			"cost_center": _field(
+				_STRING,
+				"Set on every line that is not split by cost center, and where the "
+				"unattributed remainder of a split lands. Defaults to the mapping's.",
+			),
+			"split_by_cost_center": _field(
+				_BOOLEAN,
+				"Default TRUE. Splits the expense lines across the cost centers the work was "
+				"done on — Farm Task → block → Cost Center, weighted by the minutes each "
+				"assignment recorded and measured against the hours the slip was paid for. "
+				"Preview it with preview_payroll_gl first: the totals and the balance are "
+				"identical either way, but the dimension on the wage expense is not.",
+			),
 			"include_employer": _field(
 				_BOOLEAN,
 				"Default TRUE. False books the wage half only and leaves the employer's own "

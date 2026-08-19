@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import frappe
 
-from .. import payroll_gl
+from .. import compat, payroll_gl
 from ..args import as_bool, as_date, as_str, resolve_account, resolve_company, resolve_cost_center
 from ..errors import ToolError
 from ..result import ToolResult
@@ -51,6 +51,32 @@ PAYROLL_ENTRY = "Farm Payroll Entry"
 GL_POSTING = "Farm Payroll GL Posting"
 JOURNAL_ENTRY = "Journal Entry"
 EMPLOYEE = "Employee"
+
+#: The chain a cost center split walks. A Farm Task Assignment records who and
+#: how long, the Farm Task it points at records WHERE through its
+#: `location_doctype`/`location` pair, and a `Field` — what a farm calls a block —
+#: records the Cost Center that block's costs book to.
+FARM_TASK = "Farm Task"
+FARM_TASK_ASSIGNMENT = "Farm Task Assignment"
+BLOCK = "Field"
+
+#: Most assignments one payroll period will be split from. A biweekly run on a
+#: forty-person crew filing ten tasks a day each is under nine thousand; the cap
+#: is what stops a period somebody typed wrong reading a season into memory.
+ASSIGNMENT_CAP = 20000
+
+#: What the split needs off one assignment. `state` is read for the report
+#: rather than for a filter — see `_labor_allocations` for why no state is
+#: excluded — and `actual_duration_minutes` is the segment sum, not a wall clock.
+_ASSIGNMENT_FIELDS = (
+	"name",
+	"task",
+	"assigned_to",
+	"state",
+	"started_at",
+	"completed_at",
+	"actual_duration_minutes",
+)
 
 #: Statuses a payroll run can be posted from. `Draft` has no computed slips and
 #: `Cancelled` is a run somebody withdrew — booking either into the ledger would
@@ -78,6 +104,10 @@ _SLIP_FIELDS = (
 	"minimum_wage_check",
 	"minimum_wage_makeup",
 	"earned_gross",
+	# v0.101.0. The denominator of the cost center split: what payroll actually
+	# paid this person for. Read off the slip rather than recounted off the shift
+	# register, because this is the figure the gross was computed from.
+	"total_hours",
 )
 
 
@@ -204,6 +234,291 @@ def _live_postings(doc) -> tuple[list[dict], list[dict]]:
 	return live, gone
 
 
+# ── Where the labour actually happened ────────────────────────────────────
+#
+# v0.101.0, item 18. A payroll entry used to carry ONE cost center on every
+# line, so "labour by block" was a question the ledger could not be asked. The
+# farm already answers it: a Farm Task names its block through the
+# `location_doctype`/`location` pair, a `Field` names its Cost Center
+# (`link_field_to_cost_center`), and a Farm Task Assignment records the minutes.
+# This section reads that chain back out, one employee at a time, and hands
+# `payroll_gl` the proportions. The arithmetic — including the largest-remainder
+# rounding that keeps the entry balanced — is over there and is pure.
+
+
+def _assignment_minutes(row) -> float:
+	"""How long one assignment actually took.
+
+	`actual_duration_minutes` FIRST, because since v0.79.0 it is the sum of the
+	closed time segments — start to pause, resume to completion — and the wall
+	clock across an interruption bills the valve repair to the irrigating. The
+	span is the fallback for rows written before segments existed and for rows a
+	Desk edit left without a duration, which is exactly `active_minutes`' own
+	posture in `tools/dispatch.py`.
+	"""
+	minutes = _num(row.get("actual_duration_minutes"))
+	if minutes > 0:
+		return minutes
+	started = row.get("started_at")
+	completed = row.get("completed_at")
+	if not (started and completed):
+		return 0.0
+	try:
+		return max(frappe.utils.time_diff_in_seconds(completed, started) / 60.0, 0.0)
+	except Exception:
+		return 0.0
+
+
+def _postable_cost_center(cost_center: str, company: str) -> str:
+	"""A block's Cost Center, or "" with the reason it cannot carry a posting.
+
+	`link_field_to_cost_center` refuses a group cost center and a disabled one
+	when the link is MADE, which is the right place for it. It is checked again
+	here because a link made through the Desk never met that tool, and a payroll
+	posting is the wrong moment to discover it: ERPNext refuses the whole entry,
+	and forty people's wages fail over one block somebody pointed at a heading.
+	Falling back to the blanket cost center posts the payroll and reports the
+	block, which is the recoverable version of the same fact.
+	"""
+	detail = frappe.db.get_value(
+		"Cost Center",
+		cost_center,
+		["name", "company", "is_group", "disabled"],
+		as_dict=True,
+	)
+	if not detail:
+		return ""
+	if company and detail.get("company") and detail["company"] != company:
+		return ""
+	if compat.checked(detail.get("is_group")) or compat.checked(detail.get("disabled")):
+		return ""
+	return str(detail["name"])
+
+
+def _block_cost_centers(blocks: list[str], company: str) -> tuple[dict, list[dict]]:
+	"""Block docname → the Cost Center its labour books to, plus what was refused."""
+	if not blocks:
+		return {}, []
+
+	rows = frappe.db.get_all(
+		BLOCK,
+		filters={"name": ("in", sorted(set(blocks)))},
+		fields=list(compat.existing_fields(BLOCK, ("name", "cost_center", "owning_entity"))),
+		limit_page_length=0,
+	)
+
+	mapped: dict[str, str] = {}
+	refused: list[dict] = []
+	seen = set()
+	for row in rows or []:
+		block = str(row.get("name") or "")
+		wanted = str(row.get("cost_center") or "").strip()
+		if not wanted:
+			refused.append(
+				{
+					"block": block,
+					"why": (
+						f"{block} has no Cost Center. Its labour cannot be booked to it — "
+						"link_field_to_cost_center points a block at one."
+					),
+				}
+			)
+			continue
+		resolved = mapped.get(wanted)
+		if resolved is None and wanted not in seen:
+			seen.add(wanted)
+			resolved = _postable_cost_center(wanted, company)
+		if not resolved:
+			refused.append(
+				{
+					"block": block,
+					"cost_center": wanted,
+					"why": (
+						f"{block} points at Cost Center {wanted!r}, which is not a leaf on "
+						f"{company or 'this company'}'s own tree, or is disabled. ERPNext will "
+						"not let a posting land on it."
+					),
+				}
+			)
+			continue
+		mapped[block] = resolved
+	return mapped, refused
+
+
+def _labor_allocations(
+	company: str,
+	start: str,
+	end: str,
+	slips: list[dict],
+	fallback_cost_center: str,
+) -> tuple[dict, dict]:
+	"""Each employee's period as the cost center proportions their wage splits by.
+
+	Returns `(allocations, report)`. `allocations` is what
+	`payroll_gl.build_payroll_journal_entries` takes; `report` is the same
+	arithmetic written out, so a preview can show why a block got the share it
+	got rather than asking somebody to trust it.
+
+	THE DENOMINATOR IS THE SLIP'S OWN `total_hours`, not a re-read of the shift
+	register. Those hours are what the gross was computed from — they came off
+	each crew row's own `joined_at`/`left_at` through `payroll_integration`, were
+	bucketed into workweeks for overtime, and were then STORED on the slip. Going
+	back to Farm Shift to recount them would be a second source of truth for a
+	number this run already settled, and the two would disagree the first time
+	somebody corrected a crew row after a payroll was calculated.
+
+	NO STATE FILTER ON THE ASSIGNMENTS, deliberately. A rejected task is time a
+	worker spent walking to a block and looking at it, and a paused one is time
+	spent before the radio went. Both were paid for and both happened on that
+	block. What is excluded excludes itself: a Claimed assignment nobody started
+	has no minutes, and a row with no minutes contributes nothing.
+	"""
+	report: dict = {
+		"available": False,
+		"reason": None,
+		"assignment_count": 0,
+		"task_count": 0,
+		"employees": [],
+		"blocks_without_cost_center": [],
+		"notes": [],
+	}
+
+	missing = [name for name in (FARM_TASK, FARM_TASK_ASSIGNMENT, BLOCK) if not compat.doctype_exists(name)]
+	if missing:
+		report["reason"] = (
+			f"{', '.join(missing)} is not on this site, so there is no record of which block "
+			"any of this labour happened on. The whole wage posts to the mapping's cost center, "
+			"as it did before v0.101.0."
+		)
+		return {}, report
+
+	employees = [str(slip.get("employee") or "") for slip in slips or []]
+	employees = [name for name in employees if name]
+	if not employees:
+		report["reason"] = "This run has no slips with an employee on them."
+		return {}, report
+
+	rows = frappe.db.get_all(
+		FARM_TASK_ASSIGNMENT,
+		filters={
+			"assigned_to": ("in", sorted(set(employees))),
+			"started_at": ("between", [f"{start} 00:00:00", f"{end} 23:59:59"]),
+		},
+		fields=list(compat.existing_fields(FARM_TASK_ASSIGNMENT, _ASSIGNMENT_FIELDS)),
+		limit_page_length=ASSIGNMENT_CAP,
+	)
+	report["assignment_count"] = len(rows or [])
+	if len(rows or []) >= ASSIGNMENT_CAP:
+		report["notes"].append(
+			f"The assignment read stopped at {ASSIGNMENT_CAP} records, so the split below is "
+			"computed from part of the period. Check the dates before posting."
+		)
+
+	worked = [row for row in rows or [] if _assignment_minutes(row) > 0]
+	tasks = sorted({str(row.get("task") or "") for row in worked if row.get("task")})
+	report["task_count"] = len(tasks)
+
+	# Which block each task was raised against. `location` is a Dynamic Link and
+	# `Field` is only one of the registers it can point at — a task on a parcel,
+	# an irrigation zone or a cabin is real work and is simply not block work, so
+	# it is left unattributed rather than forced onto a block it never named.
+	blocks: dict[str, str] = {}
+	if tasks:
+		for row in frappe.db.get_all(
+			FARM_TASK,
+			filters={"name": ("in", tasks)},
+			fields=list(compat.existing_fields(FARM_TASK, ("name", "location_doctype", "location"))),
+			limit_page_length=0,
+		):
+			if str(row.get("location_doctype") or "") != BLOCK:
+				continue
+			location = str(row.get("location") or "").strip()
+			if location:
+				blocks[str(row.get("name"))] = location
+
+	cost_centers, refused = _block_cost_centers(sorted(set(blocks.values())), company)
+	report["blocks_without_cost_center"] = refused
+
+	minutes_by_employee: dict[str, list[dict]] = {}
+	for row in worked:
+		employee = str(row.get("assigned_to") or "")
+		if not employee:
+			continue
+		block = blocks.get(str(row.get("task") or ""), "")
+		minutes_by_employee.setdefault(employee, []).append(
+			{
+				# A task on no block, or on a block with no usable cost center,
+				# lands here with an empty cost center — which `cost_center_shares`
+				# counts as unattributed rather than dropping, so the blocks that
+				# ARE placed do not inherit its share of the wage.
+				"cost_center": cost_centers.get(block, ""),
+				"block": block,
+				"minutes": _assignment_minutes(row),
+				"task_count": 1,
+			}
+		)
+
+	allocations: dict = {}
+	described: list[dict] = []
+	for slip in slips or []:
+		employee = str(slip.get("employee") or "")
+		if not employee:
+			continue
+		rows_for = minutes_by_employee.get(employee) or []
+		computed = payroll_gl.cost_center_shares(
+			rows_for,
+			paid_minutes=_num(slip.get("total_hours")) * 60.0,
+			fallback_cost_center=fallback_cost_center,
+		)
+		placed = [share for share in computed["shares"] if share["blocks"]]
+		if placed:
+			allocations[employee] = computed["shares"]
+		described.append(
+			{
+				"employee": employee,
+				"employee_name": slip.get("employee_name") or employee,
+				"split": bool(placed),
+				"paid_minutes": computed["paid_minutes"],
+				"attributed_minutes": computed["attributed_minutes"],
+				"unattributed_minutes": computed["unattributed_minutes"],
+				"unplaced_minutes": computed["unplaced_minutes"],
+				"coverage": computed["coverage"],
+				"shares": computed["shares"],
+			}
+		)
+
+	report["employees"] = described
+	report["available"] = bool(allocations)
+	report["split_employee_count"] = len(allocations)
+	if not allocations:
+		report["reason"] = (
+			"No employee in this run has task time on a block with a Cost Center, so there is "
+			"nothing to split by. The whole wage posts to the mapping's cost center."
+		)
+	else:
+		thin = [
+			row["employee_name"]
+			for row in described
+			if row["split"] and row["coverage"] is not None and row["coverage"] < 0.5
+		]
+		if thin:
+			report["notes"].append(
+				f"Under half the paid time is on a block for: {', '.join(sorted(thin)[:10])}"
+				+ ("…" if len(thin) > 10 else "")
+				+ ". The rest posts to the mapping's cost center, which is the honest answer — "
+				"but if the farm believes that time WAS block work, the tasks for it were "
+				"never raised."
+			)
+		unplaced = [row["employee_name"] for row in described if row["unplaced_minutes"] > 0]
+		if unplaced:
+			report["notes"].append(
+				f"{len(unplaced)} employee(s) have task time on a block with no usable Cost "
+				"Center, counted as unattributed. See blocks_without_cost_center."
+			)
+
+	return allocations, report
+
+
 # ── Read tools ────────────────────────────────────────────────────────────
 
 
@@ -281,6 +596,7 @@ def preview_payroll_gl(args: dict) -> ToolResult:
 	summary = (
 		f"Payroll GL preview for {doc.name}: {plan['entry_count']} {plan['mode']} "
 		f"journal entry(ies), {plan['total_debit']} debit = {plan['total_credit']} credit"
+		f"{_split_phrase(plan)}"
 	)
 	if blockers:
 		summary += f" — {len(blockers)} blocker(s): {blockers[0]['why']}"
@@ -517,11 +833,20 @@ def post_payroll_to_gl(args: dict) -> ToolResult:
 		summary=(
 			f"{len(created)} draft Journal Entry(ies) created for payroll {doc.name} "
 			f"({mode_label.lower()}): {plan['total_debit']} debit = {plan['total_credit']} "
-			f"credit — {', '.join(row['journal_entry'] for row in created[:5])}"
-			+ ("…" if len(created) > 5 else "")
+			f"credit{_split_phrase(plan)} — "
+			f"{', '.join(row['journal_entry'] for row in created[:5])}" + ("…" if len(created) > 5 else "")
 		),
 		docstatus_delta="none → 0 (draft)",
 	)
+
+
+def _split_phrase(plan: dict) -> str:
+	"""How the summary line says the wage was split, or nothing where it was not."""
+	split = plan.get("cost_center_split") or []
+	if not plan.get("split_by_cost_center") or len(split) < 2:
+		return ""
+	named = ", ".join(f"{row['cost_center']} {row['amount']:,.2f}" for row in split[:3])
+	return f", expense split across {len(split)} cost center(s): {named}" + ("…" if len(split) > 3 else "")
 
 
 # ── Shared: the plan both tools compute ───────────────────────────────────
@@ -560,6 +885,25 @@ def _gl_plan(args: dict) -> tuple:
 	else:
 		cost_center = ""
 
+	# v0.101.0. WHERE THE WAGE WAS EARNED, where the record says. Default TRUE
+	# and safe to leave that way: a site with no task time on a block with a Cost
+	# Center produces no allocations, and no allocations is byte-identical to the
+	# entry this tool built before the split existed. It is an argument at all so
+	# a farm that costs labour some other way can say so, and so a preview can be
+	# taken both ways in one sitting.
+	split_requested = as_bool(args, "split_by_cost_center", default=True)
+	allocations: dict = {}
+	allocation_report: dict = {"available": False, "requested": False, "reason": None}
+	if split_requested:
+		allocations, allocation_report = _labor_allocations(
+			company,
+			str(doc.pay_period_start or ""),
+			str(doc.pay_period_end or ""),
+			slips,
+			cost_center,
+		)
+	allocation_report["requested"] = bool(split_requested)
+
 	plan = payroll_gl.build_payroll_journal_entries(
 		slips,
 		rows,
@@ -570,6 +914,7 @@ def _gl_plan(args: dict) -> tuple:
 		cost_center=cost_center,
 		include_employer=include_employer,
 		slip_names=slip_names,
+		allocations=allocations or None,
 	)
 
 	live, gone = _live_postings(doc)
@@ -584,6 +929,9 @@ def _gl_plan(args: dict) -> tuple:
 		"mode": plan["mode"],
 		"posting_date": posting_date,
 		"cost_center": cost_center,
+		"split_by_cost_center": bool(plan.get("split_by_cost_center")),
+		"cost_center_split": plan["cost_center_split"],
+		"cost_center_allocation": allocation_report,
 		"include_employer": bool(include_employer),
 		"slip_count": len(slips),
 		"mapping_configured": mapping_doc is not None,

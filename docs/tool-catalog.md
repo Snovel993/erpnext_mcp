@@ -10070,7 +10070,8 @@ exactly what somebody calls a preview to find out about.
 | `payroll_entry` | yes | The Farm Payroll Entry docname (`name` is an alias) |
 | `mode` | | `consolidated` (default) or `per_employee` |
 | `posting_date` | | `YYYY-MM-DD`. Defaults to the run's pay period end |
-| `cost_center` | | Set on every line. Defaults to the mapping's |
+| `cost_center` | | Set on every line that is not split. Defaults to the mapping's |
+| `split_by_cost_center` | | Default true. Splits the expense lines across the blocks the work was done on |
 | `include_employer` | | Default true. False books the wage half only |
 
 ### `configure_payroll_accounts`
@@ -10103,7 +10104,8 @@ switch, exactly as it does for `create_journal_entry`.
 | `payroll_entry` | yes | The Farm Payroll Entry docname |
 | `mode` | | `consolidated` (default) or `per_employee` |
 | `posting_date` | | Defaults to the run's pay period end |
-| `cost_center` | | Defaults to the mapping's |
+| `cost_center` | | Defaults to the mapping's. Also where unattributed time lands |
+| `split_by_cost_center` | | Default true. See **Labour by block**, below |
 | `include_employer` | | Default true |
 
 **Five refusals, all reported at once** rather than one per round trip: a
@@ -10116,6 +10118,47 @@ is linked back onto the run's `gl_postings`, and a run with live entries against
 it is refused by name. A run whose drafts were *deleted*, or whose entries were
 *cancelled*, can be posted again — because then there is genuinely nothing in
 the books.
+
+### Labour by block — the cost center split (v0.101.0)
+
+`split_by_cost_center` is **on by default** and splits the **expense** lines of a
+payroll entry across the cost centers the work was actually done on. The chain
+already existed and nothing read it:
+
+```
+Farm Task Assignment   who, and how many minutes (actual_duration_minutes)
+  → Farm Task          where, through location_doctype = "Field" + location
+    → Field            the block, and its cost_center (link_field_to_cost_center)
+      → Cost Center    what the P&L groups by
+```
+
+**Only debits split.** Every component with a debit side is an expense — gross
+pay is the wage expense, each employer component's debit is a tax expense — and
+every credit is a liability: what is withheld, what is owed, what is left to
+pay. A cost center on a liability answers no question anybody asks, so the
+credits keep the blanket `cost_center`.
+
+**Paid time no task placed keeps the blanket cost center.** A picker paid for
+eight hours with two hours dispatched to Block 7 books a quarter of the wage to
+Block 7, not all of it. The denominator is the slip's own `total_hours` — the
+hours the gross was computed from — so the split and the payroll cannot
+disagree. A slip carrying no hours is split by the attributed time alone.
+
+**It is exact.** Each component is split by largest remainder, so a third of
+$1,000.00 three times is $1,000.00 and the entry still balances. Totals, the
+balance check, the entry count and the idempotency rule are all unchanged.
+
+**Nothing is guessed at.** A task raised against a parcel, an irrigation zone or
+a cabin is not block work and is left unattributed. A block with no Cost Center,
+or one pointed at a group or disabled cost center — which ERPNext would reject
+the whole entry over — is reported by name in `cost_center_allocation.
+blocks_without_cost_center` and its time falls to the blanket. **A site that
+dispatches nothing posts exactly what it posted before this release.**
+
+`cost_center_allocation` in the result carries the minutes behind every share,
+per employee, so a preview can be read rather than trusted. Take the preview
+both ways before the first posting: the money is identical, the dimension is
+not.
 
 ### What the payroll engine got out of it
 

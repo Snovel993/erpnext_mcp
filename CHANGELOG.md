@@ -3,6 +3,85 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.101.0 — 2026-08-19 — the wage lands on the block that earned it
+
+Item 18. `post_payroll_to_gl` put one cost center on every line of a payroll
+entry, so a P&L grouped by cost center said the whole fortnight's wages happened
+wherever the company's mapping pointed. Labour is the largest cost a block
+carries and it was the one the ledger knew least about — every other input
+already lands on the block: chemical on a Stock Entry, fuel on a Purchase
+Invoice, depreciation through the asset's own allocation.
+
+The record to fix it with already existed and nothing read it:
+
+```
+Farm Task Assignment   who, and how many minutes   (actual_duration_minutes)
+  → Farm Task          where                       (location_doctype + location)
+    → Field            the block, and its cost center
+      → Cost Center    what the P&L groups by
+```
+
+Each link shipped for its own reason: `actual_duration_minutes` became the sum of
+the closed time segments in v0.79.0, `affected_block` started filling the
+location pair in v0.98.0, and `link_field_to_cost_center` has pointed a block at
+a Cost Center since v0.53.0. This release follows the chain at posting time.
+
+### Only the debits split
+
+Every component with a debit side is an expense — gross pay is the wage expense,
+each employer component's debit is a tax expense — and every credit is a
+liability: what is withheld, what is owed, what is left to pay. A cost center on
+a liability line is a dimension on a balance sheet row that no report groups by,
+so the credits keep the blanket `cost_center` and the entry stays the size it
+was. `EXPENSE_COMPONENTS` is derived from the component table rather than listed,
+because the rule is structural for all eleven.
+
+### Two hours in Block 7 is not a day in Block 7
+
+The denominator is what payroll **paid for**, not what the tasks add up to. A
+picker paid for eight hours who was dispatched to two hours in Block 7 books a
+quarter of the wage there; the rest keeps the blanket cost center, because that
+is the part the record does not place. Splitting by attributed time alone would
+book the whole wage to a block that saw a quarter of it, silently, and worst on
+the farms that dispatch least.
+
+That denominator is the slip's own `total_hours` — the hours the gross was
+computed from, off each crew row's `joined_at`/`left_at` through
+`payroll_integration` — rather than a re-read of the shift register, which would
+be a second source of truth for a number the run already settled. A slip
+carrying no hours is split by its attributed time alone.
+
+### Exact, or the entry does not post
+
+Each component is split by largest remainder, ties broken by position, so a third
+of $1,000.00 three times is $1,000.00 and the same run always produces the same
+entry. A negative slip is split on its magnitude and given its sign back.
+Consolidated mode splits **each slip** and sums the results rather than blending
+the run: FUTA stops at the first $7,000 per worker, so a blend books the FUTA of
+somebody still accruing onto the block worked by somebody who capped out in July.
+
+### Nothing refuses
+
+Five ways the chain can break — a task on a parcel or an irrigation zone rather
+than a block, a block with no Cost Center, and a block pointed at a group, a
+disabled, or another company's cost center — and all five post the payroll and
+report the problem in `cost_center_allocation.blocks_without_cost_center`. A
+refusal here would strand a crew's wages over one block somebody pointed at the
+wrong thing. The last three would make ERPNext reject the whole entry, so they
+are caught before it is built.
+
+### What did not change
+
+The accounts, the amounts, the totals, the balance check, the entry count, the
+five refusals, the idempotency rule and drafts-only are all where they were.
+**A site that dispatches nothing produces byte-identical entries to the ones it
+produced before this release** — that is the fallback path, not a compatibility
+layer bolted on afterwards.
+
+`split_by_cost_center` (default true) on `preview_payroll_gl` and
+`post_payroll_to_gl` turns it off. Preview it both ways before the first posting:
+the money is identical, the dimension is not.
+
 ## 0.100.1 — 2026-08-19 — the folder the owner could not open
 
 Item 17. The farm owner opened an employee's Documents section on the handset

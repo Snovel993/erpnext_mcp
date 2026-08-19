@@ -55,6 +55,47 @@ would drop real money out of the books quietly. Dropping it loudly is not an
 option either; it is a cost the farm has incurred.
 
 ────────────────────────────────────────────────────────────────────────────
+ONE COST CENTER IS A GUESS. THE HOURS ARE A RECORD.
+────────────────────────────────────────────────────────────────────────────
+
+v0.101.0. Until now every line of a payroll entry carried ONE cost center — the
+one on the company's mapping — so a P&L by cost center said the whole fortnight's
+wages happened wherever that mapping pointed. On a farm that is the only number
+on the statement nobody can act on: labour is the largest cost a block carries
+and the one the ledger knew least about.
+
+The farm already records where the work happened. A Farm Task names its block
+through the `location_doctype`/`location` pair, a `Field` names its Cost Center
+(`link_field_to_cost_center`), and a Farm Task Assignment records the minutes.
+So the split is not an estimate the accountant makes afterwards — it is the
+foreman's own dispatch board, read back out.
+
+THE SPLIT LANDS ON DEBITS AND ONLY ON DEBITS. Every component with a debit side
+is an expense — gross pay is the wage expense and each employer component's debit
+is a tax expense — and every credit is a liability: what is withheld, what is
+owed, what is left to pay. A cost center on a liability is a dimension on a
+balance sheet line, which answers no question anybody asks. So the debits split
+and the credits keep the blanket cost center, and the entry still balances
+because the split is exact.
+
+EXACT MEANS LARGEST REMAINDER. Three blocks at a third of $1,000.00 is $333.33
+three times and a cent unaccounted for, and an entry that is a cent out does not
+post. The cent goes to the largest remainder, ties broken by position, so the
+same run always produces the same entry.
+
+WHAT WAS NOT ON A TASK IS NOT ON A BLOCK. An employee paid for eight hours who
+was dispatched to two hours in Block 7 did not spend the day in Block 7, and
+booking the whole wage there would overstate that block's labour by six hours.
+The residual — paid time minus attributed time — goes to the blanket cost center,
+which is the honest answer: this is the part the record does not place. Where a
+slip carries no hours at all there is nothing to measure against, and the split
+is the attributed time alone.
+
+AN EMPLOYEE WITH NO TASK DATA POSTS EXACTLY AS BEFORE. That is the fallback and
+it is also the whole compatibility story: a site that dispatches nothing produces
+byte-identical entries to the ones it produced before this release.
+
+────────────────────────────────────────────────────────────────────────────
 IT BUILDS ENTRIES. IT DOES NOT POST THEM, AND IT CANNOT.
 ────────────────────────────────────────────────────────────────────────────
 
@@ -203,6 +244,13 @@ CORE_COMPONENTS: tuple[str, ...] = tuple(row["component"] for row in COMPONENTS 
 EMPLOYER_COMPONENTS: tuple[str, ...] = tuple(
 	row["component"] for row in COMPONENTS if row["party"] == "Employer"
 )
+
+#: The components a cost center split has anything to say about: the ones with a
+#: DEBIT side. Derived from `COMPONENTS` rather than listed, because the rule is
+#: structural — in this table a debit is an expense and a credit is a liability,
+#: for all eleven — and a hand-written list would go stale the first time a
+#: twelfth component is added.
+EXPENSE_COMPONENTS: tuple[str, ...] = tuple(row["component"] for row in COMPONENTS if "debit" in row["sides"])
 
 #: Posting modes. `per_employee` writes one Journal Entry per slip;
 #: `consolidated` writes one for the whole run.
@@ -440,11 +488,244 @@ def validate_mapping(
 	}
 
 
+# ── Splitting the expense across cost centers ─────────────────────────────
+
+
+def cost_center_shares(
+	block_minutes,
+	paid_minutes: float = 0.0,
+	fallback_cost_center: str = "",
+) -> dict:
+	"""One person's period as the proportions their wage should be split by.
+
+	THE DENOMINATOR IS WHAT PAYROLL PAID FOR, not what the tasks add up to. A
+	picker paid for eight hours with two hours of dispatched work in Block 7
+	spent a quarter of the day in Block 7 and three quarters somewhere the
+	record does not place; splitting by attributed time alone would book the
+	whole wage to a block that saw two hours of it. So the shortfall becomes a
+	share of its own on `fallback_cost_center` — the mapping's blanket cost
+	center, or nothing at all where the mapping has none, which is the same
+	un-dimensioned line this app posted before any of this existed.
+
+	A row with minutes and no cost center is UNATTRIBUTED rather than dropped:
+	a task on a block nobody pointed at a Cost Center is exactly as unplaced as
+	a task nobody raised, and pretending otherwise would inflate every other
+	block's share of the wage.
+
+	Args:
+		block_minutes: Rows of `{"cost_center", "minutes"}`, optionally with
+			`block` and `task_count`, which are carried through for the report.
+		paid_minutes: What payroll actually paid this person for, in minutes.
+			Zero means "no hours on the slip", and then the attributed time is
+			the whole of the split.
+		fallback_cost_center: Where the unattributed remainder is booked.
+
+	Returns:
+		Dict with `shares` — the list `split_amount` takes, each row carrying
+		`cost_center`, `minutes` and `share` — plus the minutes it was computed
+		from, so a preview can show its own arithmetic.
+	"""
+	buckets: dict[str, dict] = {}
+	order: list[str] = []
+	unplaced = 0.0
+
+	for row in block_minutes or []:
+		row = row or {}
+		minutes = max(_as_float(row.get("minutes")), 0.0)
+		if minutes <= 0:
+			continue
+		center = str(row.get("cost_center") or "").strip()
+		if not center:
+			unplaced = round(unplaced + minutes, 2)
+			continue
+		if center not in buckets:
+			buckets[center] = {"minutes": 0.0, "blocks": [], "task_count": 0}
+			order.append(center)
+		bucket = buckets[center]
+		bucket["minutes"] = round(bucket["minutes"] + minutes, 2)
+		bucket["task_count"] += int(_as_float(row.get("task_count"), 1.0)) or 1
+		block = str(row.get("block") or "").strip()
+		if block and block not in bucket["blocks"]:
+			bucket["blocks"].append(block)
+
+	attributed = round(sum(bucket["minutes"] for bucket in buckets.values()), 2)
+	paid = max(_as_float(paid_minutes), 0.0)
+	residual = round(paid - attributed, 2) if paid > 0 else 0.0
+	if residual < 0.005:
+		residual = 0.0
+
+	# The fallback may BE one of the blocks' cost centers — a farm whose mapping
+	# points at the same center a block does. Merging rather than appending keeps
+	# the entry to one line there, and keeps `shares` a set of distinct centers
+	# so the largest-remainder split cannot hand the same center two cents.
+	if residual > 0:
+		center = str(fallback_cost_center or "").strip()
+		if center in buckets:
+			buckets[center]["minutes"] = round(buckets[center]["minutes"] + residual, 2)
+		else:
+			buckets[center] = {"minutes": residual, "blocks": [], "task_count": 0}
+			order.append(center)
+
+	total = round(sum(bucket["minutes"] for bucket in buckets.values()), 2)
+	shares: list[dict] = []
+	if total > 0:
+		rows = sorted(
+			order,
+			key=lambda center: (-buckets[center]["minutes"], center),
+		)
+		for center in rows:
+			bucket = buckets[center]
+			shares.append(
+				{
+					"cost_center": center,
+					"minutes": round(bucket["minutes"], 2),
+					"share": round(bucket["minutes"] / total, 6),
+					"blocks": list(bucket["blocks"]),
+					"task_count": bucket["task_count"],
+				}
+			)
+
+	return {
+		"shares": shares,
+		"attributed_minutes": attributed,
+		"paid_minutes": round(paid, 2),
+		"unattributed_minutes": residual,
+		"unplaced_minutes": unplaced,
+		"total_minutes": total,
+		"coverage": round(attributed / paid, 4) if paid > 0 else None,
+		"fallback_cost_center": str(fallback_cost_center or ""),
+	}
+
+
+def split_amount(amount, shares) -> list[dict]:
+	"""`amount` across `shares`, to the cent, summing back to exactly `amount`.
+
+	LARGEST REMAINDER, not round-each-and-hope. A third of $1,000.00 three times
+	is $333.33 three times and a cent left over, and a Journal Entry a cent out
+	of balance does not post — so the cent is GIVEN to somebody rather than
+	lost. It goes to the largest fractional remainder, ties broken by position,
+	which makes the same run produce the same entry every time it is previewed.
+
+	A negative amount — a correction booked as a negative slip — is split on its
+	magnitude and given its sign back, so the reversal lands on the same cost
+	centers in the same proportions as the posting it reverses.
+	"""
+	rows = [row for row in (shares or []) if _as_float((row or {}).get("share")) > 0]
+	total_share = sum(_as_float(row.get("share")) for row in rows)
+	if not rows or total_share <= 0:
+		return []
+
+	money = _money(amount)
+	sign = -1 if money < 0 else 1
+	cents = round(abs(money) * 100)
+
+	raw = [_as_float(row.get("share")) / total_share * cents for row in rows]
+	base = [int(value) for value in raw]
+	# Each remainder is under one cent, so there are never more spare cents than
+	# there are shares — the loop below cannot run off the end of `ranked`.
+	spare = cents - sum(base)
+	ranked = sorted(range(len(rows)), key=lambda index: (-(raw[index] - base[index]), index))
+	for index in ranked[: max(spare, 0)]:
+		base[index] += 1
+
+	out = []
+	for row, value in zip(rows, base, strict=True):
+		if value == 0:
+			continue
+		out.append(
+			{
+				"cost_center": str(row.get("cost_center") or ""),
+				"amount": round(sign * value / 100.0, 2),
+			}
+		)
+	return out
+
+
+def allocate_expense_amounts(amounts: dict, shares, include_employer: bool = True) -> dict:
+	"""One slip's expense components, each split across cost centers.
+
+	Returns `{component: {cost_center: amount}}`, covering only the components
+	with a debit side and only where that component has an amount this period. A
+	component absent from the result is one `journal_lines` should post whole,
+	on the blanket cost center, exactly as it always has.
+	"""
+	out: dict[str, dict[str, float]] = {}
+	for component in EXPENSE_COMPONENTS:
+		definition = COMPONENT_INDEX[component]
+		if not include_employer and definition["party"] == "Employer":
+			continue
+		amount = _money((amounts or {}).get(component))
+		if abs(amount) < 0.005:
+			continue
+		pieces = split_amount(amount, shares)
+		if not pieces:
+			continue
+		bucket: dict[str, float] = {}
+		for piece in pieces:
+			center = piece["cost_center"]
+			bucket[center] = round(bucket.get(center, 0.0) + piece["amount"], 2)
+		out[component] = bucket
+	return out
+
+
+def consolidate_expense_amounts(
+	slips: list[dict],
+	allocations: dict | None,
+	include_employer: bool = True,
+	fallback_cost_center: str = "",
+) -> dict:
+	"""A whole run's expense side, split per employee and then summed.
+
+	EACH PERSON'S OWN SHARES, not the run's blended ones, and that is not
+	fussiness. Employer taxes are not proportional to gross — FUTA stops at the
+	first $7,000 and SUTA at whatever the state's base is — so blending the run
+	into one set of proportions and splitting the totals by it would book the
+	tax expense of the people who had capped out onto the blocks worked by the
+	people who had not. Splitting each slip and summing the results costs one
+	pass and is right by construction.
+
+	A slip with no allocation is booked whole to `fallback_cost_center`, which is
+	the blanket cost center the mapping already carried.
+	"""
+	default = [{"cost_center": str(fallback_cost_center or ""), "share": 1.0}]
+	out: dict[str, dict[str, float]] = {}
+	for slip in slips or []:
+		employee = str((slip or {}).get("employee") or "")
+		shares = (allocations or {}).get(employee) or default
+		per_slip = allocate_expense_amounts(
+			component_amounts(slip),
+			shares,
+			include_employer=include_employer,
+		)
+		for component, bucket in per_slip.items():
+			target = out.setdefault(component, {})
+			for center, amount in bucket.items():
+				target[center] = round(target.get(center, 0.0) + amount, 2)
+	return out
+
+
+def cost_center_totals(expense_split: dict | None) -> list[dict]:
+	"""Every cost center an entry's expense side landed on, and what it took.
+
+	The line a P&L-by-cost-center reader wants off a posting result without
+	adding the journal up themselves. Largest first, because the question is
+	always which block carried the wage.
+	"""
+	totals: dict[str, float] = {}
+	for bucket in (expense_split or {}).values():
+		for center, amount in (bucket or {}).items():
+			totals[center] = round(totals.get(center, 0.0) + amount, 2)
+	return [
+		{"cost_center": center, "amount": amount}
+		for center, amount in sorted(totals.items(), key=lambda item: (-abs(item[1]), item[0]))
+	]
+
+
 # ── Building lines ────────────────────────────────────────────────────────
 
 
-def _line_key(account: str, side: str) -> tuple:
-	return (account, side)
+def _line_key(account: str, side: str, cost_center: str = "") -> tuple:
+	return (account, side, cost_center)
 
 
 def journal_lines(
@@ -452,6 +733,7 @@ def journal_lines(
 	mapping,
 	cost_center: str = "",
 	include_employer: bool = True,
+	expense_split: dict | None = None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
 	"""Component amounts and a mapping in; Journal Entry Account rows out.
 
@@ -467,6 +749,20 @@ def journal_lines(
 
 	A component whose amount is zero produces no line. ERPNext refuses a row
 	with a zero on both sides, and a zero line is not a fact about anything.
+
+	`expense_split` — `{component: {cost center: amount}}` from
+	`allocate_expense_amounts` — breaks a component's DEBIT into one line per
+	cost center. The merge key gains the cost center for that reason, which
+	changes nothing when there is no split: every line then carries the same
+	blanket cost center and merges exactly as it did before. The credits are
+	never split; a withholding liability is not a block's cost.
+
+	Args:
+		amounts: Component amounts, from `component_amounts`.
+		mapping: The company's account mapping.
+		cost_center: The blanket cost center, on every line that is not split.
+		include_employer: False leaves the employer's own taxes off.
+		expense_split: Per-component cost center breakdown for the debits.
 
 	Returns:
 		(lines, breakdown, skipped) — the Journal Entry Account rows, one row per
@@ -499,6 +795,7 @@ def journal_lines(
 			continue
 
 		placed = {}
+		centers: list[dict] = []
 		for side in definition["sides"]:
 			account = entry.get(f"{side}_account")
 			if not account:
@@ -511,30 +808,50 @@ def journal_lines(
 					}
 				)
 				continue
-			key = _line_key(account, side)
-			if key not in merged:
-				merged[key] = {
-					"account": account,
-					"side": side,
-					"amount": 0.0,
-					"components": [],
-				}
-				order.append(key)
-			merged[key]["amount"] = round(merged[key]["amount"] + amount, 2)
-			merged[key]["components"].append(component)
+
+			pieces = [(cost_center, amount)]
+			if side == "debit" and (expense_split or {}).get(component):
+				split = [
+					(center, value)
+					for center, value in (expense_split[component] or {}).items()
+					if abs(_as_float(value)) >= 0.005
+				]
+				if split:
+					# Largest first: the question a split entry is read to answer
+					# is which block carried the wage, and the answer should be
+					# the top line rather than somewhere down the list.
+					split.sort(key=lambda item: (-abs(item[1]), item[0]))
+					pieces = split
+					centers = [{"cost_center": center, "amount": _money(value)} for center, value in split]
+
+			for center, piece in pieces:
+				key = _line_key(account, side, center)
+				if key not in merged:
+					merged[key] = {
+						"account": account,
+						"side": side,
+						"cost_center": center,
+						"amount": 0.0,
+						"components": [],
+					}
+					order.append(key)
+				merged[key]["amount"] = round(merged[key]["amount"] + _money(piece), 2)
+				if component not in merged[key]["components"]:
+					merged[key]["components"].append(component)
 			placed[side] = account
 
 		if placed:
-			breakdown.append(
-				{
-					"component": component,
-					"label": definition["label"],
-					"party": definition["party"],
-					"amount": amount,
-					"debit_account": placed.get("debit", ""),
-					"credit_account": placed.get("credit", ""),
-				}
-			)
+			row = {
+				"component": component,
+				"label": definition["label"],
+				"party": definition["party"],
+				"amount": amount,
+				"debit_account": placed.get("debit", ""),
+				"credit_account": placed.get("credit", ""),
+			}
+			if centers:
+				row["cost_centers"] = centers
+			breakdown.append(row)
 
 	lines = []
 	for key in order:
@@ -545,8 +862,8 @@ def journal_lines(
 		line = {"account": row["account"]}
 		line[row["side"]] = amount
 		line["user_remark"] = ", ".join(COMPONENT_INDEX[name]["label"] for name in row["components"])
-		if cost_center:
-			line["cost_center"] = cost_center
+		if row["cost_center"]:
+			line["cost_center"] = row["cost_center"]
 		lines.append(line)
 
 	return lines, breakdown, skipped
@@ -646,6 +963,7 @@ def build_journal_entry(
 	slip_name: str = "",
 	cost_center: str = "",
 	include_employer: bool = True,
+	allocation=None,
 ) -> dict:
 	"""One employee's slip as one Journal Entry structure.
 
@@ -653,13 +971,23 @@ def build_journal_entry(
 	that writes an unbalanced entry has ignored a field that says so, which is a
 	different and more findable failure than a function that raised somewhere
 	inside a loop over forty people.
+
+	`allocation` is this person's own cost center shares, from
+	`cost_center_shares`. Absent or empty, the expense lands whole on
+	`cost_center` — which is every entry this function built before v0.101.0.
 	"""
 	amounts = component_amounts(slip)
+	expense_split = (
+		allocate_expense_amounts(amounts, allocation, include_employer=include_employer)
+		if allocation
+		else None
+	)
 	lines, breakdown, unmapped = journal_lines(
 		amounts,
 		mapping,
 		cost_center=cost_center,
 		include_employer=include_employer,
+		expense_split=expense_split,
 	)
 	balance = check_balance(lines)
 
@@ -677,6 +1005,8 @@ def build_journal_entry(
 		"payroll_entry": payroll_entry,
 		"payroll_slip": slip_name,
 		"employer_taxes_recorded": employer_taxes_recorded(slip),
+		"cost_center": cost_center,
+		"cost_center_split": cost_center_totals(expense_split),
 		"warnings": _slip_warnings(slip, amounts, include_employer),
 	}
 	entry.update(balance)
@@ -742,6 +1072,7 @@ def build_consolidated_journal_entry(
 	payroll_entry: str = "",
 	cost_center: str = "",
 	include_employer: bool = True,
+	allocations: dict | None = None,
 ) -> dict:
 	"""A whole run as ONE Journal Entry.
 
@@ -750,13 +1081,29 @@ def build_consolidated_journal_entry(
 	general ledger does not want forty. Per-employee earns its keep where labour
 	is costed by person or where a slip has to be reversed on its own; the run's
 	own record keeps the per-person detail either way.
+
+	AND IT IS THE MODE THE COST CENTER SPLIT MATTERS MOST IN. One entry per run
+	was the reason a farm could not see labour by block at all; the split is
+	computed per employee and summed, so the consolidated entry carries the same
+	per-block totals the forty per-employee ones would have had between them.
 	"""
 	amounts = consolidate_amounts(slips)
+	expense_split = (
+		consolidate_expense_amounts(
+			slips,
+			allocations,
+			include_employer=include_employer,
+			fallback_cost_center=cost_center,
+		)
+		if allocations
+		else None
+	)
 	lines, breakdown, unmapped = journal_lines(
 		amounts,
 		mapping,
 		cost_center=cost_center,
 		include_employer=include_employer,
+		expense_split=expense_split,
 	)
 	balance = check_balance(lines)
 
@@ -794,6 +1141,8 @@ def build_consolidated_journal_entry(
 			for slip in slips or []
 		],
 		"employer_taxes_recorded": any(employer_taxes_recorded(slip) for slip in slips or []),
+		"cost_center": cost_center,
+		"cost_center_split": cost_center_totals(expense_split),
 		"warnings": warnings,
 	}
 	entry.update(balance)
@@ -810,6 +1159,7 @@ def build_payroll_journal_entries(
 	cost_center: str = "",
 	include_employer: bool = True,
 	slip_names: dict | None = None,
+	allocations: dict | None = None,
 ) -> dict:
 	"""The whole run, as the Journal Entries it should become.
 
@@ -828,10 +1178,14 @@ def build_payroll_journal_entries(
 		cost_center: Set on every line where given.
 		include_employer: False posts the wage half only.
 		slip_names: Employee → Farm Payroll Slip child docname, for the remarks.
+		allocations: Employee → the `shares` list from `cost_center_shares`, for
+			splitting the expense side across the blocks the work was done on.
+			Absent, or absent for one employee, the expense lands whole on
+			`cost_center` — the behaviour of every release before v0.101.0.
 
 	Returns:
-		Dict with `journal_entries`, `totals`, `balanced`, `warnings`, `skipped`
-		and the validation verdict for the mapping.
+		Dict with `journal_entries`, `totals`, `balanced`, `warnings`, `skipped`,
+		`cost_center_split` and the validation verdict for the mapping.
 	"""
 	mode = (mode or "consolidated").strip().lower().replace("-", "_").replace(" ", "_")
 	if mode in ("per_employee", "peremployee", "employee", "individual"):
@@ -872,6 +1226,7 @@ def build_payroll_journal_entries(
 					slip_name=(slip_names or {}).get(slip.get("employee", ""), ""),
 					cost_center=cost_center,
 					include_employer=include_employer,
+					allocation=(allocations or {}).get(slip.get("employee", "")),
 				)
 			)
 	else:
@@ -899,6 +1254,7 @@ def build_payroll_journal_entries(
 					payroll_entry=payroll_entry,
 					cost_center=cost_center,
 					include_employer=include_employer,
+					allocations=allocations,
 				)
 			)
 
@@ -928,12 +1284,27 @@ def build_payroll_journal_entries(
 		if not entry["balanced"]
 	]
 
+	# The run's own expense side by cost center, summed across however many
+	# entries the mode produced. Identical in both modes for the same reason the
+	# totals are: the split is computed per slip and the mode only decides how
+	# many journal entries the same arithmetic is spread across.
+	run_split: dict[str, float] = {}
+	for entry in entries:
+		for row in entry.get("cost_center_split") or []:
+			center = row["cost_center"]
+			run_split[center] = round(run_split.get(center, 0.0) + _as_float(row["amount"]), 2)
+
 	return {
 		"mode": mode,
 		"company": company,
 		"payroll_entry": payroll_entry,
 		"posting_date": str(posting_date or ""),
 		"cost_center": cost_center,
+		"cost_center_split": [
+			{"cost_center": center, "amount": amount}
+			for center, amount in sorted(run_split.items(), key=lambda item: (-abs(item[1]), item[0]))
+		],
+		"split_by_cost_center": bool(allocations),
 		"include_employer": include_employer,
 		"journal_entries": entries,
 		"entry_count": len(entries),
