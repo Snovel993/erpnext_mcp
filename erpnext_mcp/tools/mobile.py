@@ -601,6 +601,7 @@ def list_mobile_users(args: dict) -> ToolResult:
 				"token_revoked_on",
 				"token_issue_count",
 				"last_qr_issued_on",
+				"last_seen_on",
 				"revoked_on",
 				"revoked_by",
 				"revocation_reason",
@@ -643,6 +644,13 @@ def list_mobile_users(args: dict) -> ToolResult:
 			"token_revoked_on": str(row.get("token_revoked_on") or "") or None,
 			"tokens_issued": int(row.get("token_issue_count") or 0),
 			"last_qr_issued_on": str(row.get("last_qr_issued_on") or "") or None,
+			# THE COLUMN THE IDLE SWEEP ACTS ON, and until now the one column this
+			# list did not report. `api/guard` stamps it at most once a day and
+			# `sweep_idle_grants` revokes a token nobody has used for
+			# `idle_token_days`; a roster that showed every other date but not this
+			# one could not answer "why did that phone stop working", which is the
+			# only question anybody asks after a sweep.
+			"last_seen_on": str(row.get("last_seen_on") or "") or None,
 			"endpoint_url": row.get("endpoint_url") or None,
 			"revoked_on": str(row.get("revoked_on") or "") or None,
 			"revoked_by": row.get("revoked_by") or None,

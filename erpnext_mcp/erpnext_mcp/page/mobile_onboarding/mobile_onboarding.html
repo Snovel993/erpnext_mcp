@@ -1,0 +1,147 @@
+<div class="mo-wrap">
+	<!-- SPDX-License-Identifier: MIT
+
+		The shell of /app/mobile-onboarding. Markup only: every value on this page
+		arrives from `erpnext_mcp.mobile_onboarding`, and mobile_onboarding.js
+		fills the placeholders in. Nothing here is rendered server-side, so there
+		is no Jinja in it and no jinja marker asking Frappe to look for any.
+
+		THE COMMENTS AND THE STYLE BLOCK LIVE INSIDE THE ROOT ELEMENT ON PURPOSE.
+		The JS does `$(frappe.render_template("mobile_onboarding"))`, and jQuery
+		turns a leading comment into a node of its own — so a file that opened
+		with one would hand back a collection rather than the single wrapper every
+		`.find()` below assumes.
+
+		EVERY APOSTROPHE IN THE VISIBLE TEXT IS &#39; AND NOT ONE. Frappe compiles
+		this file into `frappe.templates["mobile_onboarding"] = &#39;...&#39;;` — a
+		SINGLE-quoted JS string — in `build.html_to_js_template`, and what stands
+		between a straight apostrophe and a syntax error that takes the whole page
+		script down is one `str.replace` in `scrub_html_template`. Not depending on
+		it costs two entities.
+	-->
+	<style>
+		.mo-wrap { padding-bottom: 30px; }
+		.mo-wrap h5 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+			letter-spacing: .08em; color: var(--text-muted, #8d99a6); }
+		.mo-panel { border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+			padding: 16px 18px; background: var(--card-bg, #fff); margin-bottom: 18px; }
+		.mo-cols { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+		.mo-cols > .mo-panel { flex: 1 1 340px; margin-bottom: 0; }
+		.mo-note { font-size: 12px; color: var(--text-muted, #8d99a6); margin-top: 4px; }
+		.mo-alert { border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; }
+		.mo-alert-bad { border: 1px solid #e0b4b4; background: #fdf6f6; color: #7a2626; }
+		.mo-alert-ok { border: 1px solid #b7d9bd; background: #f4faf5; color: #285c33; }
+		.mo-alert p { margin: 0 0 6px; }
+		.mo-alert p:last-child { margin-bottom: 0; }
+		.mo-entities { border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px;
+			padding: 8px 10px; max-height: 170px; overflow-y: auto; }
+		.mo-entities label { display: block; font-weight: normal; margin: 0 0 4px; cursor: pointer; }
+		.mo-entities input { margin-right: 7px; }
+		.mo-card-preview { text-align: center; }
+		.mo-card-preview img { width: 220px; height: 220px; image-rendering: pixelated; }
+		.mo-roster-table { width: 100%; font-size: 13px; }
+		.mo-roster-table th { font-weight: 600; color: var(--text-muted, #8d99a6);
+			text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+		.mo-roster-table td, .mo-roster-table th { padding: 7px 8px; vertical-align: top;
+			border-bottom: 1px solid var(--border-color, #e2e8f0); }
+		.mo-concern { color: #8a4b00; font-size: 12px; display: block; margin-top: 3px; }
+		.mo-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+			border: 1px solid var(--border-color, #e2e8f0); }
+		.mo-pill-active { border-color: #b7d9bd; background: #f4faf5; color: #285c33; }
+		.mo-pill-revoked { border-color: #e0b4b4; background: #fdf6f6; color: #7a2626; }
+		.mo-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+			margin-bottom: 12px; }
+		.mo-filters .form-group { margin-bottom: 0; }
+	</style>
+
+	<div class="mo-blockers"></div>
+
+	<div class="mo-cols">
+		<div class="mo-panel mo-enrol">
+			<h5>Enrol a phone</h5>
+			<form class="mo-form" autocomplete="off">
+				<div class="form-group">
+					<label class="control-label" for="mo-full-name">Full name</label>
+					<input type="text" class="form-control" id="mo-full-name" required>
+					<div class="mo-note">
+						As it should read on a dispatch board and on an evidence record.
+					</div>
+				</div>
+				<div class="form-group">
+					<label class="control-label" for="mo-email">Email</label>
+					<input type="email" class="form-control" id="mo-email" required>
+					<div class="mo-note">The address the account signs in with. It is the account name.</div>
+				</div>
+				<div class="form-group">
+					<label class="control-label" for="mo-role">Role</label>
+					<select class="form-control mo-role"></select>
+					<div class="mo-note mo-role-note"></div>
+				</div>
+				<div class="form-group">
+					<label class="control-label">Entities this account may see</label>
+					<div class="mo-entities"></div>
+					<div class="mo-note">
+						At least one. An account with none would see every entity on the site &mdash;
+						that is Frappe&#39;s rule for User Permissions, and it is why this cannot be left empty.
+					</div>
+				</div>
+				<div class="form-group">
+					<label class="control-label" for="mo-hours">Card valid for (hours)</label>
+					<input type="number" class="form-control" id="mo-hours" min="1" step="1">
+					<div class="mo-note">
+						How long the printed card may be used to enrol with &mdash; not how long the
+						credential lasts. Once the phone has scanned it, the token works until it is revoked.
+					</div>
+				</div>
+				<div class="form-group">
+					<label class="control-label" for="mo-notes">Notes (optional)</label>
+					<input type="text" class="form-control" id="mo-notes">
+				</div>
+				<div class="form-group">
+					<label class="control-label" style="font-weight: normal;">
+						<input type="checkbox" id="mo-update-existing">
+						This person already has an account &mdash; update its role and entities
+					</label>
+					<div class="mo-note">
+						Leave this off for a new hire. Ticking it rewrites a live account&#39;s role and
+						scoping, which is a decision rather than a retry.
+					</div>
+				</div>
+				<button type="submit" class="btn btn-primary mo-submit">Create &amp; Generate QR</button>
+			</form>
+		</div>
+
+		<div class="mo-panel mo-card-panel" style="display: none;">
+			<h5>Enrolment card</h5>
+			<div class="mo-card-result"></div>
+			<div class="mo-card-preview" style="display: none;">
+				<img class="mo-card-img" alt="Login QR code">
+				<div class="mo-note mo-card-expiry"></div>
+				<div style="margin-top: 12px;">
+					<button type="button" class="btn btn-primary mo-print">Print card</button>
+					<button type="button" class="btn btn-default mo-clear">Done</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="mo-panel mo-roster">
+		<h5>Mobile users</h5>
+		<div class="mo-filters">
+			<div class="form-group">
+				<label class="control-label" for="mo-filter-company">Entity</label>
+				<select class="form-control mo-filter-company"></select>
+			</div>
+			<div class="form-group">
+				<label class="control-label" style="font-weight: normal;">
+					<input type="checkbox" class="mo-filter-revoked"> Include revoked
+				</label>
+			</div>
+			<div class="form-group">
+				<button type="button" class="btn btn-default mo-refresh">Refresh</button>
+			</div>
+			<div class="form-group mo-roster-summary mo-note"></div>
+		</div>
+		<div class="mo-roster-body"></div>
+	</div>
+</div>

@@ -3,6 +3,57 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.102.0 — 2026-08-19 — somewhere to stand while you enrol somebody
+
+Item 20. `create_mobile_user` has made the account, scoped it and minted the
+credential since v0.17.0; `generate_mobile_login_qr` has drawn the card the phone
+scans. Neither has ever had a place for a person to do it from. Enrolment happens
+on the morning of somebody's first day, in a farm office, with the worker
+standing there holding their phone — and the only two surfaces for it were an MCP
+client and `bench console`. That is not a gap in the tooling but in who can reach
+it, and it lands on the step that gates every other feature on the handset.
+
+**`/app/mobile-onboarding`.** Name, email, role, entities, **Create & Generate
+QR**, and a printable card the worker scans off the desk. Below it the roster —
+who is enrolled, on what, when they were last seen, and every drift
+`list_mobile_users` already finds — with **Regenerate QR** on each row.
+
+**A wrapper and not a second implementation**, which is the rule `badge_sheet.py`
+states and `asset_tag_sheet.py` repeats. The role catalogue, the mandatory entity
+scoping, the HTTPS-only endpoint, the one-week ceiling on a card and the "this
+user already exists" refusal are all still the tool's, unchanged. The page adds
+one gate a tool cannot make — a session — and takes none away.
+
+**The gate is Frappe's own permission table, not a role name in the source.**
+Enrolling needs create on `Mobile Access Grant` *and* create on `User`. The second
+half is what makes widening the first safe: however far an operator opens this
+app's own register, the page can still only produce an account they could have
+produced by hand on the User form. The Page record names no role at all, because
+a standard Page is rewritten from this app's JSON at every migrate and a role list
+stored there is a decision an operator makes and then loses.
+
+**The pre-flight runs before anything is written.** A bench with no QR encoder and
+a site whose `public_url` is empty or plaintext are both knowable before anybody
+types a name, and run in tool order either one leaves a worker *half enrolled* —
+login and credential in place, nothing to scan. `enrolment_blockers` is a pure
+function over those two facts, so the same list greys the button out at page load
+and refuses at submit with *No account was created.* The residual race is
+reported as a half success rather than an error, because reporting it as a failure
+invites a second press and "this user already exists".
+
+**One rotation and not two.** A new account's card prints the credential
+`create_mobile_user` just minted; an account that was only re-scoped kept its old
+one by design, so its card mints a fresh one. The `api_secret` is not in the JSON
+the browser receives — the PNG carries it, and the only thing that reads it is a
+camera.
+
+**`list_mobile_users` gains `last_seen_on`.** It is the column `sweep_idle_grants`
+acts on and the one column that roster did not report, so "why did that phone stop
+working" had no answer on any list.
+
+Full notes: [RELEASES/v0.102.0.md](RELEASES/v0.102.0.md).
+Operator guide: [docs/mobile-onboarding.md](docs/mobile-onboarding.md).
+
 ## 0.101.0 — 2026-08-19 — the wage lands on the block that earned it
 
 Item 18. `post_payroll_to_gl` put one cost center on every line of a payroll
