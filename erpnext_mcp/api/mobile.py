@@ -5328,6 +5328,19 @@ ATTACHMENT_PARENTS = {
 	"Housing Inspection": False,
 	"Compliance Alert": False,
 	"Farm Shift": False,
+	# S10, the other half. Filing a photograph against a report and never being
+	# able to list it back is the gap `list_attachments` was added to close for
+	# Employee in v0.62.0, and it would be reopened here by adding only the
+	# write. `False` — NO HR GATE — because this app does not treat an Accident
+	# Report as a personnel document anywhere else it decides: `NARRATIVE_TARGETS`
+	# maps it to None beside `Farm Task` while flagging `Farm Incident Record`
+	# "hr", and `get_accident_report` takes no role beyond enrolment.
+	#
+	# THE DOCTYPE'S OWN DOCPERMS ARE NARROWER (System Manager, HR Manager) and
+	# `files.list_attachments` honours them, exactly as the `Farm Incident
+	# Record` entry above says of itself. So this opens the door for the accounts
+	# that hold those roles and manufactures a permission for nobody.
+	ACCIDENT_REPORT: False,
 	payroll_tools.PAYROLL_ENTRY: True,
 	# v0.96.0. The photographs `create_discipline_record` now files against an
 	# incident record, readable back. `True` — the HR gate — because this is a
@@ -8074,6 +8087,25 @@ ATTACHABLE_DOCTYPES = (
 	"Compliance Alert",
 	"Spray REI",
 	"Document Validation",
+	# S10. THE PHOTOGRAPH OF THE SCENE, which this surface has been able to open
+	# a report about since v0.88.0 and never able to put a picture on. The
+	# omission read, from a handset, as "photo attachments are rejected on
+	# accident reports" — and it was: `attach_file_to_document` refused the
+	# doctype by name, not the file. A guard left down, a torn sleeve, the
+	# ground where somebody fell: these are the evidence an OSHA 301 is
+	# reconstructed from, they exist for about an hour before the scene is
+	# cleared, and the only camera there is the one in somebody's pocket.
+	#
+	# IT MEETS THIS TUPLE'S OWN RULE — `Accident Report` carries a `company`
+	# column, so `guard.require_scoped_doc` scopes it like every other entry
+	# rather than passing every docname through.
+	#
+	# NO NEW PERMISSION IS MANUFACTURED. `create_accident_report` on this
+	# surface is already open to any enrolled worker, deliberately and for the
+	# same reason ("the person who finds somebody on the ground is whoever finds
+	# them"), and `get_accident_report` is scoped and otherwise open too. A
+	# worker who may open the report may photograph what it is about.
+	ACCIDENT_REPORT,
 )
 
 #: Most bytes one attach carries in a request body. The chunked upload path

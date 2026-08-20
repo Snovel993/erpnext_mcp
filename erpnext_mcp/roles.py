@@ -132,6 +132,8 @@ migrate forever.
 
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass, field
 
 import frappe
@@ -1307,3 +1309,141 @@ def entity_access_note(companies: list) -> str:
 		"every entity on the site. That is almost never what a mobile account should be. "
 		"create_mobile_user refuses to produce one; a user in this state was made some other way."
 	)
+
+
+# ── entity_access, and the comma that is part of a company's name ─────────────
+#
+# "Orchard Meadow, LLC" IS ONE COMPANY. Every parser here used to read it as two,
+# because both of them treated a comma as a separator unconditionally:
+# `mobile_access_grant._tidy_lines` did `str(raw).replace(",", "\n")` on the way
+# into the column and `tools/mobile._resolve_entities` did
+# `raw.replace("\n", ",").split(",")` on the way in from a request body. A farm
+# whose entities are LLCs — which is most of them — got "Orchard Meadow" and
+# "LLC", neither of which is a Company, and the grant either refused a name that
+# was correct or recorded two lines of nonsense in a column an auditor reads.
+#
+# NEWLINE IS THE DELIMITER AND THE COMMA IS A GUESS. A newline cannot occur in a
+# Frappe docname, so splitting on one is always right; a comma occurs in company
+# names constantly, so splitting on one is only right when the pieces turn out to
+# be companies. That asymmetry is the whole of the fix below — the comma is tried
+# and then CHECKED, and a split that does not produce known entities is undone.
+#
+# WHICH WAY TO FAIL. Where nothing can be verified — no `known` predicate — the
+# line is kept WHOLE. The two failures are not equal: an unsplit "A, B" typed
+# into a form fails loudly at `resolve_company` with "is not a Company on this
+# site", which is a sentence somebody can act on, while a wrongly-split "Orchard
+# Meadow, LLC" silently writes two entities that scope nothing and reads, on the
+# roster, as though somebody deliberately granted them.
+
+
+def _quote_aware_parts(line: str) -> list:
+	"""`'"Orchard Meadow, LLC", Highland'` → the two names, quotes consumed.
+
+	Only used where the line actually carries a quote character. A person who has
+	quoted a name has said, unambiguously, where it ends — that is a stronger
+	signal than any lookup, so it is honoured before the Company check below and
+	without one.
+	"""
+	try:
+		rows = list(csv.reader(io.StringIO(line), skipinitialspace=True))
+	except Exception:  # pragma: no cover - csv does not raise on a single line
+		return [line]
+	parts = [str(cell).strip() for row in rows for cell in row]
+	return [part for part in parts if part] or [line]
+
+
+def split_entity_names(raw, known=None) -> list:
+	"""The entity names in `raw`, with a company's own comma left inside it.
+
+	`raw` may be a list — in which case every element is taken WHOLE, because a
+	caller that built a list has already said where each name ends and second-
+	guessing it is how "Orchard Meadow, LLC" became two entries in the first
+	place — or a string, which is split on newlines and then, per line, on commas
+	only where that produces names `known` recognises.
+
+	`known(name) -> bool` is the check. `parse_entity_access` supplies the
+	Company register; `tools/mobile._resolve_entities` supplies `resolve_company`,
+	so abbreviations resolve too. WITH NO PREDICATE NOTHING IS COMMA-SPLIT — see
+	the block above for why that is the safe direction.
+	"""
+	if isinstance(raw, (list, tuple, set)):
+		lines = [str(entry).strip() for entry in raw]
+	else:
+		lines = [chunk.strip() for chunk in str(raw or "").split("\n")]
+
+	out = []
+	for line in lines:
+		if not line:
+			continue
+		for name in _names_in(line, known):
+			if name and name not in out:
+				out.append(name)
+	return out
+
+
+def _names_in(line: str, known) -> list:
+	"""One line of `entity_access` as the names it holds. Never returns [].
+
+	LONGEST MATCH FIRST, LEFT TO RIGHT. "Orchard Meadow, LLC, Example Trading Co"
+	is two companies and there is no way to see that from the commas alone: the
+	line has three comma-separated pieces, one of them ("LLC") is not a company
+	on its own, and an all-or-nothing rule reads the whole thing as one name
+	nobody can resolve. So each position tries the LONGEST run of pieces that is
+	a known entity before it tries a shorter one, which is what makes
+	"Orchard Meadow, LLC" win over "Orchard Meadow" at the same starting point.
+
+	THE UNRESOLVABLE TAIL COMES BACK WHOLE rather than in pieces. Where no run
+	starting at some position is known, everything from there to the end of the
+	line is returned as one name — so the caller's refusal says
+	"'Nowhere Farms, LLC' is not a Company on this site" and names the thing
+	somebody actually typed, instead of blaming a fragment of it.
+	"""
+	if '"' in line or "'" in line:
+		return _quote_aware_parts(line)
+	if "," not in line or known is None:
+		# No comma, or nothing to check one against. Keep it whole and let the
+		# caller's own resolver be the one to complain.
+		return [line]
+
+	# Split without stripping, so a candidate rejoined with "," is character-for-
+	# character the substring somebody typed — "A,B" and "A, B" both look up as
+	# they were written rather than as this function would have spelled them.
+	pieces = line.split(",")
+	names = []
+	start = 0
+	while start < len(pieces):
+		for end in range(len(pieces), start, -1):
+			candidate = ",".join(pieces[start:end]).strip()
+			if candidate and known(candidate):
+				names.append(candidate)
+				start = end
+				break
+		else:
+			tail = ",".join(pieces[start:]).strip()
+			if tail:
+				names.append(tail)
+			break
+	return names or [line.strip()]
+
+
+def parse_entity_access(raw) -> list:
+	"""`Mobile Access Grant.entity_access` as a list of Company names.
+
+	The reader half of the column. `known` is the Company register itself, so a
+	stored "Orchard Meadow, LLC" survives a round trip and a stored "A, B" — two
+	companies somebody comma-separated into one line before this was fixed — is
+	still read as the two it was meant to be.
+	"""
+
+	def known(name: str) -> bool:
+		try:
+			return bool(frappe.db.exists("Company", name))
+		except Exception:  # pragma: no cover - no table on a bare site
+			return False
+
+	return split_entity_names(raw, known)
+
+
+def tidy_entity_access(raw) -> str:
+	"""The column's stored form: one entity per line, blanks and duplicates gone."""
+	return "\n".join(parse_entity_access(raw))

@@ -220,14 +220,87 @@ class WhoIsUnderEighteen(Wave3TestCase):
 		self.assertEqual(minors.band(_years_ago(18), today), "")
 
 	def test_the_ceilings_differ_between_the_bands(self):
-		under = minors.LIMITS[minors.BAND_UNDER_16]
-		older = minors.LIMITS[minors.BAND_16_17]
+		"""OREGON'S FIGURES, NOW ASKED FOR BY NAME. This asserted `minors.LIMITS`
+		until v0.106.0, when that constant stopped being Oregon's table and became
+		the strictest-across-states one — see `test_an_unrecorded_state_gets_the_
+		strictest_of_both` below. The four Oregon numbers are unchanged."""
+		under = minors.LIMITS_BY_STATE["OR"][minors.BAND_UNDER_16]
+		older = minors.LIMITS_BY_STATE["OR"][minors.BAND_16_17]
 		self.assertEqual((under["daily_hours"], under["weekly_hours"]), (8.0, 40.0))
 		self.assertEqual((older["daily_hours"], older["weekly_hours"]), (10.0, 60.0))
-		# The clock applies to the younger band alone, which is FLSA and not an
-		# oversight — a seventeen-year-old may lawfully pick at five in the morning.
+		# The clock applies to the younger band alone IN OREGON, which is FLSA and
+		# not an oversight — a seventeen-year-old may lawfully pick at five in the
+		# morning there. Washington disagrees, which is the next test.
 		self.assertTrue(under["earliest"] and under["latest"])
 		self.assertFalse(older["earliest"] or older["latest"])
+
+	def test_washington_binds_tighter_on_the_older_bands_week(self):
+		"""S5. THE FIGURE A STATE-BLIND TABLE GOT WRONG. WAC 296-131-120 caps a
+		16- or 17-year-old at fifty hours in a non-school week; Oregon allows
+		sixty. An app carrying Oregon's number into Washington reports a lawful
+		roster for a week that is ten hours over."""
+		older = minors.LIMITS_BY_STATE["WA"][minors.BAND_16_17]
+		self.assertEqual(older["weekly_hours"], 50.0)
+		self.assertEqual(minors.LIMITS_BY_STATE["OR"][minors.BAND_16_17]["weekly_hours"], 60.0)
+		# And Washington DOES put a clock on that band, where Oregon does not.
+		self.assertEqual((older["earliest"], older["latest"]), ("05:00", "22:00"))
+
+	def test_the_same_week_is_lawful_in_one_state_and_not_the_other(self):
+		"""The two tables, exercised through the function that refuses."""
+		fifty_five = (minors.BAND_16_17, 9.0, 55.0)
+		self.assertIsNone(minors.hours_violation(*fifty_five, "OR"))
+		self.assertIn("50-hour", minors.hours_violation(*fifty_five, "WA") or "")
+
+	def test_washingtons_younger_band_may_start_at_five(self):
+		"""And Oregon's may not. The clock differs by two hours at the front."""
+		six_am = (minors.BAND_UNDER_16, "2026-08-20 06:00:00")
+		self.assertIsNone(minors.time_of_day_violation(*six_am, work_state="WA"))
+		self.assertIn("before 07:00", minors.time_of_day_violation(*six_am, work_state="OR") or "")
+
+	def test_an_unrecorded_state_gets_the_strictest_of_both(self):
+		"""THE SAFE DIRECTION, and the same argument the module makes about a
+		missing date of birth: "we do not know" and "they may work" are different
+		answers. Defaulting to Oregon would clear a Washington seventeen-year-old
+		onto a 60-hour week that state does not allow."""
+		older = minors.LIMITS[minors.BAND_16_17]
+		self.assertEqual(older["weekly_hours"], 50.0)  # Washington's, the tighter
+		self.assertEqual(older["latest"], "22:00")
+		under = minors.LIMITS[minors.BAND_UNDER_16]
+		self.assertEqual((under["earliest"], under["latest"]), ("07:00", "19:00"))  # Oregon's
+		# The narrowest window any state allows — the INTERSECTION, not the union.
+		self.assertEqual(under["daily_hours"], 8.0)
+
+	def test_the_strictest_table_keeps_every_states_citation_in_full(self):
+		"""It enforces Oregon's 07:00 and Washington's fifty in one row, so no
+		single citation is the whole answer. 29 CFR 570.35 is the authority for
+		that 07:00 and was being trimmed off at the semicolon."""
+		citation = minors.LIMITS[minors.BAND_UNDER_16]["citation"]
+		self.assertIn("29 CFR 570.35", citation)
+		self.assertIn("WAC 296-131-120", citation)
+
+	def test_an_unknown_state_is_answered_and_never_raised(self):
+		"""This is read on the refusal path. A compliance check that threw because
+		a column held something unexpected would fail open at the worst moment."""
+		self.assertEqual(
+			minors.limits_for_band(minors.BAND_16_17, "CA"),
+			minors.limits_for_band(minors.BAND_16_17, ""),
+		)
+
+	def test_the_state_note_names_the_column_and_only_when_it_is_missing(self):
+		self.assertEqual(minors.state_note("OR"), "")
+		self.assertEqual(minors.state_note("WA"), "")
+		self.assertIn("work_state", minors.state_note(""))
+
+	def test_the_six_day_week_is_washingtons_and_is_never_a_refusal(self):
+		"""WAC 296-131-120(4) excepts dairy, livestock, hay harvest and
+		irrigation-dependent crop work, and this app cannot tell which a shift is
+		— so a hard block would be a false refusal on exactly those operations.
+		Oregon carries no figure here; the module says why."""
+		self.assertIsNone(minors.days_warning(minors.BAND_16_17, 7, "OR"))
+		warned = minors.days_warning(minors.BAND_16_17, 7, "WA")
+		self.assertIn("6-day", warned or "")
+		self.assertIn("excepted", warned or "")
+		self.assertIsNone(minors.days_warning(minors.BAND_16_17, 6, "WA"))
 
 	def test_an_unknown_date_of_birth_is_none_and_not_false(self):
 		"""THE FAILURE A BOOLEAN COLUMN WOULD HAVE SHIPPED.
@@ -1401,3 +1474,235 @@ class TheBinTracesBackToTheCrew(Wave3TestCase):
 		answer is untested. `describe` reads the parent document."""
 		name = self.a_seal()["name"]
 		self.assertEqual(len(binseals.describe(name, with_contributors=True)["contributors"]), 2)
+
+
+# ── S5 / S12: the state, and the hours that were actually worked ────────────
+class TheShiftKnowsWhichStateItIsIn(Wave3TestCase):
+	"""S5. `work_state` has been on Farm Shift since v0.58.0 and nothing wrote it.
+
+	Three readers consult that column — `get_break_schedule`'s policy fallback,
+	`list_employees_by_work_state`, and the minor hour ceilings — and every shift
+	this app had ever created carried an empty one, so all three were answering
+	from a blank. `start_shift` now takes it.
+	"""
+
+	def test_start_shift_records_the_state_it_was_given(self):
+		data = self.a_shift(work_state="WA")
+		self.assertEqual(STORE.get_raw("Farm Shift", data["name"])["work_state"], "WA")
+
+	def test_it_is_optional_and_a_shift_without_one_still_opens(self):
+		"""A foreman opening a shift at five in the morning is not stopped by a
+		field. The readers each say what they did without it."""
+		data = self.a_shift()
+		self.assertTrue(data["name"])
+		self.assertFalse(STORE.get_raw("Farm Shift", data["name"]).get("work_state"))
+
+	def test_a_state_this_app_does_not_know_is_refused_rather_than_dropped(self):
+		"""The column is a Select with two options, so Frappe would drop a third
+		silently — leaving a shift reporting NO state after a call that named one,
+		and the minor checks quietly back on the strictest table."""
+		message = self.tool_error(
+			"start_shift",
+			{
+				"foreman": FOREMAN,
+				"location": "Block 7 North",
+				"shift_type": "Harvest",
+				"start_datetime": self.at(8),
+				"crew_employees": [WORKER],
+				"work_state": "CA",
+			},
+		)
+		self.assertIn("OR, WA", message)
+		self.assertIn("Nothing was created", message)
+
+	def a_fifty_one_hour_week(self):
+		"""Forty-two hours over the week's earlier days, plus nine today.
+
+		THE FIGURE IS CHOSEN TO SIT BETWEEN THE TWO STATES: Washington's ceiling
+		for this band is fifty and Oregon's is sixty, so fifty-one is a breach in
+		one state and lawful in the other, and the three tests below differ only
+		in which state the shift says it is in. The daily total stays at nine,
+		under both states' ten, so nothing here can pass or fail on the DAILY
+		limit by accident.
+
+		THE DAYS ARE READ OFF `shifts.week_bounds` RATHER THAN COUNTED BACKWARDS
+		FROM TODAY. The workweek starts on a Monday, so a fixed `-5` lands in the
+		PREVIOUS week and its ten hours are not counted at all — which is how the
+		first draft of this helper built a "fifty-nine hour week" that the code
+		correctly read as forty-nine. The assertion below is deliberate: if the
+		fixture's frozen date ever moves to early in a week there are not enough
+		earlier days to build this total, and that should fail loudly here rather
+		than as a puzzling pass somewhere else.
+		"""
+		today = frappe.utils.today()
+		week_start, _ = shifts.week_bounds(today)
+		earlier = []
+		offset = -1
+		while str(frappe.utils.add_days(today, offset)) >= str(week_start):
+			earlier.append(offset)
+			offset -= 1
+		self.assertGreaterEqual(
+			len(earlier),
+			4,
+			"this fixture's frozen date is too early in the week to build a 51-hour week",
+		)
+		for day_offset in earlier[:4]:
+			self.a_worked_hours(MINOR, 10.5, day_offset)
+		self.a_worked_hours(MINOR, 9.0, 0)
+
+	def test_oregon_allows_the_fifty_nine_hour_week(self):
+		"""THE NEGATIVE HALF OF S5, and it has to be asserted or the refusal below
+		is satisfied by any rule that dislikes long weeks."""
+		self.a_fifty_one_hour_week()
+		oregon = self.a_shift(work_state="OR", crew_employees=[], start_datetime=self.at(8))
+		added = self.tool_data(
+			"add_worker_to_shift",
+			{"shift": oregon["name"], "employee": MINOR, "joined_at": self.at(9)},
+		)
+		self.assertEqual(added["added"]["employee"], MINOR)
+
+	def test_washington_refuses_the_same_week_by_its_own_citation(self):
+		"""THE POINT OF S5. Same person, same hours, same call — a different
+		state, and this one is nine hours over."""
+		self.a_fifty_one_hour_week()
+		washington = self.a_shift(work_state="WA", crew_employees=[], start_datetime=self.at(8))
+		message = self.tool_error(
+			"add_worker_to_shift",
+			{"shift": washington["name"], "employee": MINOR, "joined_at": self.at(9)},
+		)
+		self.assertIn("50-hour", message)
+		self.assertIn("WAC 296-131-120", message)
+
+	def test_with_no_state_the_stricter_figure_binds_and_the_refusal_says_so(self):
+		"""The safe direction, plus the one sentence that makes it actionable —
+		an unactionable refusal is one a foreman routes around."""
+		self.a_fifty_one_hour_week()
+		shift = self.a_shift(crew_employees=[], start_datetime=self.at(8))
+		message = self.tool_error(
+			"add_worker_to_shift",
+			{"shift": shift["name"], "employee": MINOR, "joined_at": self.at(9)},
+		)
+		self.assertIn("50-hour", message)
+		self.assertIn("NO work_state IS RECORDED", message)
+		self.assertIn("set work_state on the shift", message)
+
+	def a_worked_hours(self, employee: str, hours: float, day_offset: int = 0):
+		"""One closed shift of `hours` on the day `day_offset` days from today.
+
+		MINUTE-ACCURATE, because the totals these tests turn on are half-hours —
+		an `int(hours)` end time silently rounded 10.5 down to 10 and put the
+		week four hours under the figure the test name claimed.
+		"""
+		day = frappe.utils.add_days(frappe.utils.today(), day_offset)
+		name = f"SHIFT-{employee}-{day_offset}"
+		finish = 6 * 60 + round(hours * 60)
+		ends = f"{day} {finish // 60:02d}:{finish % 60:02d}:00"
+		STORE.seed(
+			"Farm Shift",
+			[
+				{
+					"name": name,
+					"foreman": FOREMAN,
+					"company": MAIN,
+					"status": "Closed",
+					"start_datetime": f"{day} 06:00:00",
+					"end_datetime": ends,
+					"crew": [
+						{
+							"name": f"{name}-CREW-1",
+							"parent": name,
+							"parenttype": "Farm Shift",
+							"parentfield": "crew",
+							"employee": employee,
+							"joined_at": f"{day} 06:00:00",
+							"left_at": ends,
+						}
+					],
+				}
+			],
+		)
+		return name
+
+
+class TheCloseChecksTheHoursThatWereWorked(Wave3TestCase):
+	"""S12. The gap between "may be scheduled" and "was worked".
+
+	`add_worker_to_shift` refuses a roster that WOULD breach a ceiling and
+	`start_shift` reports one — and both run against a shift with no end time, so
+	the span it will add is unknown and nothing is projected. That leaves the
+	ordinary case unchecked by anything: ONE SHIFT THAT SIMPLY RAN LONG. A
+	fifteen-year-old put on an empty roster at 07:00 and clocked out at 19:30
+	passed every check this app made.
+
+	REPORTED, NOT REFUSED, and here the argument is stronger than at
+	`start_shift`: the hours are already worked, and refusing the close would
+	leave the shift open, unsigned and with no Attendance — destroying the one
+	document an investigator asks for, as a punishment for something the refusal
+	cannot undo.
+	"""
+
+	SIGNATURE = "/files/ada-shift-signature.png"
+
+	def close(self, shift: str, **overrides):
+		payload = {
+			"shift": shift,
+			"end_datetime": self.at(15),
+			"supervisor_signature_file_token": self.SIGNATURE,
+		}
+		payload.update(overrides)
+		return self.tool_data("end_shift", payload)
+
+	def test_a_twelve_hour_day_on_a_fifteen_year_old_is_caught_at_the_close(self):
+		"""THE CASE NOTHING CAUGHT. One shift, no other hours anywhere, inside the
+		clock at both ends — and four hours over the daily ceiling."""
+		opened = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(7), work_state="OR")
+		closed = self.close(opened["name"], end_datetime=self.at(19))
+		self.assertEqual(len(closed["minor_limits_exceeded"]), 1)
+		self.assertIn("Nina Fifteen", closed["minor_note"])
+		self.assertIn("8-hour", closed["minor_note"])
+
+	def test_the_close_still_happens_and_still_writes_its_attendance(self):
+		"""The finding does not cost the record. This is the whole design."""
+		opened = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(7), work_state="OR")
+		closed = self.close(opened["name"], end_datetime=self.at(19))
+		self.assertIn("minor_limits_exceeded", closed)
+		self.assertEqual(STORE.get_raw("Farm Shift", opened["name"])["end_datetime"], self.at(19))
+		self.assertTrue(STORE.get_raw("Farm Shift", opened["name"])["supervisor_review_signature"])
+		self.assertTrue(closed["attendance_created"])
+
+	def test_the_negative_control_an_adult_works_the_same_twelve_hours(self):
+		"""Without this, the finding above is satisfied by any rule about long
+		days rather than by one about age."""
+		frappe.db.set_value("Employee", WORKER, "date_of_birth", _years_ago(41))
+		opened = self.a_shift(crew_employees=[WORKER], start_datetime=self.at(7), work_state="OR")
+		closed = self.close(opened["name"], end_datetime=self.at(19))
+		self.assertNotIn("minor_limits_exceeded", closed)
+		self.assertNotIn("minor_crew_findings", closed)
+
+	def test_a_lawful_eight_hour_day_closes_clean(self):
+		opened = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(8), work_state="OR")
+		closed = self.close(opened["name"], end_datetime=self.at(16))
+		self.assertNotIn("minor_limits_exceeded", closed)
+		# Still REPORTED as a minor on the crew — the badge, not the breach.
+		self.assertEqual(len(closed["minor_crew_findings"]), 1)
+
+	def test_closing_after_the_curfew_is_caught_even_when_the_hours_are_fine(self):
+		"""Two and a half hours' work, ending at 21:30. Nowhere near a daily
+		ceiling and squarely outside the clock — the two checks are independent
+		and a test that only moved the hours could not tell."""
+		opened = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(19), work_state="OR")
+		closed = self.close(opened["name"], end_datetime=self.at(21, 30))
+		reasons = " ".join(closed["minor_limits_exceeded"][0]["reasons"])
+		self.assertIn("21:30", reasons)
+		self.assertIn("19:00", reasons)
+
+	def test_the_state_decides_the_close_too(self):
+		"""A 21:30 finish for a fifteen-year-old is outside Oregon's 19:00 and
+		inside Washington's 21:00... by half an hour, which is the point: the
+		curfews differ and the close reads the shift's own state."""
+		oregon = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(19), work_state="OR")
+		self.assertIn("minor_limits_exceeded", self.close(oregon["name"], end_datetime=self.at(20, 30)))
+
+		washington = self.a_shift(crew_employees=[YOUNGER], start_datetime=self.at(19), work_state="WA")
+		closed = self.close(washington["name"], end_datetime=self.at(20, 30))
+		self.assertNotIn("minor_limits_exceeded", closed)

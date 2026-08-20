@@ -228,6 +228,50 @@ def task_row(task: str) -> dict:
 	)
 
 
+def lock_task(task: str) -> None:
+	"""Hold the Farm Task row until this transaction ends. THE CLAIM RACE'S FIX.
+
+	────────────────────────────────────────────────────────────────────────
+	S8: TWO WORKERS, ONE TASK, AND BOTH TOLD THEY GOT IT
+	────────────────────────────────────────────────────────────────────────
+
+	`claim_farm_task` read the state, compared it with `Available`, and then
+	saved — three statements with two gaps in them. Two handsets that tap the
+	same job inside the same moment both read `Available`, both pass the check,
+	and both write; the second `save` overwrites `assigned_to` and the FIRST
+	worker is told, in a 200, that the task is theirs. Nothing in the record
+	afterwards shows there were two: one name is on the task, one assignment row
+	exists, and the other person is standing in the block holding a phone that
+	says they own it. That is the exact failure a dispatch board exists to
+	prevent, and the refusal `claim_farm_task` already writes for the sequential
+	case says so in those words — it simply never ran for the simultaneous one.
+
+	A SELECT ... FOR UPDATE ON THE ROW, WHICH IS THE WHOLE MECHANISM. Frappe wraps
+	each request in one transaction, so the lock this takes is held until that
+	request commits. The second claimer BLOCKS here rather than reading stale
+	state, and when it wakes the row says `Claimed` and it takes the ordinary
+	refusal with the holder's name in it. No new failure mode, no polling, no
+	retry — the existing sentence, now reachable.
+
+	NOT AN `UPDATE ... WHERE state = 'Available'`, which is the other way to make
+	this atomic. `tests_standalone/harness.py` refuses raw SQL by design — "every
+	write goes through the ORM so doctype validation runs" — and a claim that
+	bypassed the controller would skip whatever `Farm Task.validate` grows next.
+	The lock keeps the ORM write and makes the read before it authoritative.
+
+	THE HARNESS IGNORES `for_update` AND THAT IS CORRECT. The double is
+	single-threaded and has no locks to take; what the tests can assert is that
+	the state is re-read after this call, which
+	`test_dispatch.TwoWorkersOneTask` does by changing the row in between. The
+	`TypeError` fallback is for a Frappe old enough not to accept the argument:
+	losing the lock is bad, but refusing every claim on that bench is worse.
+	"""
+	try:
+		frappe.db.get_value(FARM_TASK, task, "name", for_update=True)
+	except TypeError:  # pragma: no cover - a Frappe without for_update
+		pass
+
+
 def _shift_argument(args: dict, company: str = "", key: str = "farm_shift") -> str:
 	"""A Farm Shift docname off the arguments, checked, or "" where none was given.
 
@@ -1398,6 +1442,16 @@ def assign_farm_task(args: dict) -> ToolResult:
 	"""Send one named person to one task. The foreman's half of the dual mode."""
 	_require()
 	row = task_row(as_str(args, "task", required=True))
+	# THE SAME LOCK `claim_farm_task` TAKES, and for a race that is worse here.
+	# `reassign` exists to stop work being taken off somebody who may already be
+	# standing in front of it — and that guard is `live_assignment` returning
+	# nothing, read before the write. A worker claiming the task in the gap makes
+	# it return nothing when there IS a holder, so the foreman's assignment goes
+	# through without the flag ever being asked for and the claimant is silently
+	# displaced. Locking the row makes the two calls serialise: whichever lands
+	# second sees what the first did. See `lock_task`.
+	lock_task(row["name"])
+	row = task_row(row["name"])
 	worker = _worker(args, "assigned_to")
 	worker_name = _worker_name(worker, as_str(args, "assigned_to_name"))
 
@@ -1727,6 +1781,14 @@ def claim_farm_task(args: dict) -> ToolResult:
 	"""A worker takes one task from the pool. Capped at three at once, per worker."""
 	_require()
 	row = task_row(as_str(args, "task", required=True))
+	# THE LOCK GOES BEFORE THE STATE IS TRUSTED, AND THE ROW IS THEN READ AGAIN.
+	# The first read above is what turns a bad docname into a sentence about
+	# `list_dispatch_board`; it is NOT the read this function may decide on,
+	# because between it and the save another claimer can have taken the task.
+	# Everything from here to `task_doc.save` runs inside the row lock. See
+	# `lock_task`.
+	lock_task(row["name"])
+	row = task_row(row["name"])
 	worker = _worker(args)
 	worker_name = _worker_name(worker, as_str(args, "worker_name"))
 

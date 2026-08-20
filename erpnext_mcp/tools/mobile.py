@@ -155,6 +155,23 @@ def _grant_row(user: str) -> dict:
 	return dict(frappe.get_doc(GRANT, user).as_dict())
 
 
+def _is_a_company(name: str) -> bool:
+	"""Whether `name` resolves to a Company here — docname or abbreviation.
+
+	`resolve_company` RAISES on an unknown non-empty name; `required=False` only
+	governs what it does with an EMPTY one, which is a distinction worth writing
+	down because `_resolve_entities` below was written as though the falsy return
+	were the unknown case and has a branch that has therefore never run. Used as
+	the split predicate, a raise would abort the parse on the first candidate
+	that is not a company — and the whole method is to TRY candidates — so it is
+	caught here and answered as the no it means.
+	"""
+	try:
+		return bool(resolve_company(name, required=False))
+	except ToolError:
+		return False
+
+
 def _resolve_entities(args: dict, key: str = "entity_access") -> list:
 	"""The Companies an account may see, resolved from names or abbreviations.
 
@@ -164,12 +181,17 @@ def _resolve_entities(args: dict, key: str = "entity_access") -> list:
 	produce one.
 	"""
 	raw = args.get(key)
-	if isinstance(raw, str):
-		wanted = [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
-	elif isinstance(raw, (list, tuple)):
-		wanted = [str(part).strip() for part in raw if str(part).strip()]
-	elif raw is None:
+	if raw is None:
 		wanted = []
+	elif isinstance(raw, (str, list, tuple)):
+		# A COMMA IS PART OF "ORCHARD MEADOW, LLC" UNTIL THE REGISTER SAYS
+		# OTHERWISE. This used to be `raw.replace("\n", ",").split(",")`, which
+		# split every LLC on the site into a name and a suffix — neither of which
+		# resolves, so the refusal below named a company the caller had spelled
+		# correctly. `split_entity_names` tries the comma against
+		# `resolve_company` (abbreviations and all) and undoes the split where
+		# the pieces are not entities. See `roles.py`.
+		wanted = roles.split_entity_names(raw, _is_a_company)
 	else:
 		raise ToolError(f"{key} must be a list of Company names (or a comma-separated string).")
 
@@ -619,7 +641,11 @@ def list_mobile_users(args: dict) -> ToolResult:
 		row = dict(row)
 		user = str(row.get("user") or "")
 		live_entities = roles.companies_for(user)
-		recorded = [line for line in str(row.get("entity_access") or "").split("\n") if line.strip()]
+		# THE SAME PARSER THE COLUMN IS WRITTEN WITH, so a grant recorded before
+		# the comma fix — one line reading "Orchard Meadow, LLC" — reads back as
+		# the one entity it is rather than as two the roster would show as
+		# granted. See `roles.split_entity_names`.
+		recorded = roles.parse_entity_access(row.get("entity_access"))
 		if company and company not in live_entities:
 			continue
 		enabled = bool(frappe.db.get_value(USER, user, "enabled")) if frappe.db.exists(USER, user) else False

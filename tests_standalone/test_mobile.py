@@ -343,6 +343,63 @@ class EntityScopingIsMandatory(MobileTestCase):
 		self.assertIn("invisible", data["entity_note"])
 
 
+class ACompanyNameWithACommaInIt(MobileTestCase):
+	"""S6, through the tool. "Orchard Meadow, LLC" is one entity, not two.
+
+	`_resolve_entities` used to do `raw.replace("\n", ",").split(",")` on a
+	string body, which split every LLC on the site into a name and a suffix. The
+	refusal that came back named "Orchard Meadow" — a company the caller had
+	spelled correctly and in full — so the only way to create the account was to
+	rename the business. The parser and its reasoning are in `roles.py`; these
+	are the two paths a request body actually takes.
+	"""
+
+	COMMA_CO = "Orchard Meadow, LLC"
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Company",
+			[
+				{
+					"name": self.COMMA_CO,
+					"abbr": "OML",
+					"default_currency": "USD",
+					"country": "United States",
+					"is_group": 0,
+				}
+			],
+		)
+
+	def test_a_list_element_containing_a_comma_is_one_entity(self):
+		self.make(entity_access=[self.COMMA_CO])
+		self.assertEqual(roles.companies_for(WORKER), [self.COMMA_CO])
+
+	def test_a_string_body_containing_one_such_name_is_one_entity(self):
+		self.make(entity_access=self.COMMA_CO)
+		self.assertEqual(roles.companies_for(WORKER), [self.COMMA_CO])
+
+	def test_a_string_body_naming_two_companies_still_splits(self):
+		self.make(entity_access=f"{self.COMMA_CO}, {MAIN}")
+		self.assertEqual(sorted(roles.companies_for(WORKER)), sorted([self.COMMA_CO, MAIN]))
+
+	def test_the_grant_column_records_one_line_per_entity(self):
+		self.make(entity_access=[self.COMMA_CO, MAIN])
+		stored = frappe.db.get_value("Mobile Access Grant", WORKER, "entity_access")
+		self.assertEqual(str(stored).split("\n"), [self.COMMA_CO, MAIN])
+
+	def test_the_roster_reads_the_comma_name_back_as_one(self):
+		self.make(entity_access=[self.COMMA_CO])
+		rows = self.tool_data("list_mobile_users", {})["users"]
+		mine = next(row for row in rows if row["user"] == WORKER)
+		self.assertEqual(mine["entity_access_recorded"], [self.COMMA_CO])
+		self.assertEqual(mine["entity_access"], [self.COMMA_CO])
+
+	def test_a_name_that_is_not_a_company_is_still_refused_whole(self):
+		message = self.make_error(entity_access="Nowhere Farms, LLC")
+		self.assertIn("Nowhere Farms, LLC", message)
+
+
 class TheCredential(MobileTestCase):
 	def token_for(self, user=WORKER):
 		data = self.tool_data("generate_api_token", {"user": user})

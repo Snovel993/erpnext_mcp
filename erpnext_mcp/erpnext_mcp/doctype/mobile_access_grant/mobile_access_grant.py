@@ -41,6 +41,8 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from erpnext_mcp import roles
+
 ACTIVE = "Active"
 EXPIRED = "Expired"
 REVOKED = "Revoked"
@@ -106,20 +108,20 @@ class MobileAccessGrant(Document):
 def _tidy_lines(raw) -> str:
 	"""One entity per line, in order, with the blanks and duplicates gone.
 
-	The field is read back by splitting on newlines, so a value that arrived as
-	"A, B" from a form would read as one entity called "A, B" and would never
-	match a Company. Commas are separators here too.
+	THE COMMA IS NOT A SEPARATOR ANY MORE — not unconditionally. This function
+	used to do `str(raw).replace(",", "\\n")`, which is correct for the "A, B"
+	somebody types into a form and catastrophic for "Orchard Meadow, LLC", which
+	it filed as two entities that scope nothing. `roles.split_entity_names` tries
+	the comma and then CHECKS it against the Company register, so a name that
+	contains one survives and a line that really was two companies still splits.
+	Argued at length where it lives; both readers of this column call it, so the
+	way in and the way out cannot disagree.
 	"""
 	if not raw:
 		return ""
-	parts = []
-	for chunk in str(raw).replace(",", "\n").split("\n"):
-		entry = chunk.strip()
-		if entry and entry not in parts:
-			parts.append(entry)
-	return "\n".join(parts)
+	return roles.tidy_entity_access(raw)
 
 
 def entity_lines(raw) -> list:
 	"""The entity_access field as a list. The inverse of `_tidy_lines`."""
-	return [line for line in _tidy_lines(raw).split("\n") if line]
+	return roles.parse_entity_access(raw)

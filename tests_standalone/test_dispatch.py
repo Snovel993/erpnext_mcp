@@ -43,6 +43,7 @@ import frappe
 
 from erpnext_mcp import dashboard, records
 from erpnext_mcp.erpnext_mcp.doctype.farm_task.farm_task import MAX_CONCURRENT_CLAIMS
+from erpnext_mcp.tools import dispatch
 
 from .fixtures import MAIN, V12TestCase
 from .harness import INSTALLED_DOCTYPES, META, STORE
@@ -1487,3 +1488,100 @@ class TheKillSwitches(DispatchTestCase):
 		):
 			with self.subTest(tool=name):
 				self.assertIn(name, registry.READ_TOOLS)
+
+
+# ── S8 ──────────────────────────────────────────────────────────────────────
+class TwoWorkersOneTask(DispatchTestCase):
+	"""S8. The sub-second race, and the property that closes it.
+
+	`test_a_task_somebody_else_holds_cannot_be_claimed` above already covers the
+	SEQUENTIAL case — the second worker taps a second later and is refused by
+	name. What it cannot cover is the simultaneous one: two handsets that read
+	`Available` in the same instant both passed the check and both wrote, and the
+	one who tapped first was told in a 200 that the task was theirs while
+	somebody else's name went onto the record.
+
+	THIS DOUBLE IS SINGLE-THREADED, SO THERE IS NO CONCURRENCY TO TEST. What
+	there IS to test is the property that makes the lock work on a real bench:
+	`claim_farm_task` must read the task's state AFTER taking the row lock, not
+	before. So these tests stand in for the other transaction by mutating the row
+	from inside `lock_task` — which is exactly the moment a real second claimer's
+	commit becomes visible — and assert the refusal comes back.
+
+	Both fail against the code before the fix, which had already read `state`
+	into `row` by the time anything was locked.
+	"""
+
+	def racing(self, mutate):
+		"""Run `mutate` ONCE, at the moment the row lock is taken.
+
+		ONCE IS LOAD-BEARING, NOT TIDINESS. `mutate` is how a test stands in for
+		the other transaction, and the most realistic `mutate` — "a worker claims
+		it" — calls `claim_farm_task`, which takes the lock again. Without the
+		one-shot guard that re-enters this hook forever, which is a recursion
+		error dressed up as ninety identical claim failures.
+		"""
+		original = dispatch.lock_task
+		fired = []
+
+		def lock_then_race(task: str) -> None:
+			original(task)
+			if not fired:
+				fired.append(task)
+				mutate(task)
+
+		dispatch.lock_task = lock_then_race
+		self.addCleanup(setattr, dispatch, "lock_task", original)
+
+	def test_a_claim_that_lands_during_the_lock_wait_is_refused(self):
+		task = self.a_task()["name"]
+
+		def somebody_else_gets_there_first(name: str) -> None:
+			doc = frappe.get_doc("Farm Task", name)
+			doc.state = "Claimed"
+			doc.assigned_to = "EMP-002"
+			doc.assigned_to_name = "Beatriz"
+			doc.save(ignore_permissions=True)
+
+		self.racing(somebody_else_gets_there_first)
+		message = self.tool_error("claim_farm_task", {"task": task, "worker_id": "EMP-001"})
+		self.assertIn("Beatriz", message)
+		self.assertIn("both believing it is theirs", message)
+		self.assertIn("Nothing was changed", message)
+
+	def test_an_assignment_that_lands_during_the_lock_wait_sees_the_claim(self):
+		"""The foreman's half. `reassign` exists to stop work being taken off
+		somebody already standing in front of it, and that guard is a read — so a
+		claim landing in the gap made it return nothing when there WAS a holder,
+		and the flag was never asked for."""
+		task = self.a_task()["name"]
+
+		def a_worker_claims_it(name: str) -> None:
+			self.tool_data(
+				"claim_farm_task", {"task": name, "worker_id": "EMP-002", "worker_name": "Beatriz"}
+			)
+
+		self.racing(a_worker_claims_it)
+		message = self.tool_error(
+			"assign_farm_task", {"task": task, "assigned_to": "EMP-001", "assigned_to_name": "Ana"}
+		)
+		self.assertIn("Beatriz", message)
+		self.assertIn("reassign=true", message)
+
+	def test_the_lock_is_taken_before_the_state_is_read(self):
+		"""Asserted on the ORDER rather than on an outcome, because the outcome
+		above could also be produced by a re-read that happened to be late. If a
+		future edit moves the state read back above `lock_task`, this fails."""
+		seen = []
+		original = dispatch.lock_task
+		self.addCleanup(setattr, dispatch, "lock_task", original)
+
+		def note(task: str) -> None:
+			seen.append(("locked", frappe.db.get_value("Farm Task", task, "state")))
+			original(task)
+
+		dispatch.lock_task = note
+		task = self.a_task()["name"]
+		self.tool_data("claim_farm_task", {"task": task, "worker_id": "EMP-001"})
+		self.assertEqual([entry[0] for entry in seen], ["locked"])
+		self.assertEqual(seen[0][1], "Available")

@@ -36,15 +36,26 @@ band or permit unlawful work for the younger. `band()` answers `"under-16"`,
 `"16-17"` or `""` (an adult, or somebody too young to be employed at all — see
 `MINIMUM_AGE`).
 
-  under-16   8 h a day, 40 h a week, and 07:00 to 19:00 only.
+  under-16   OR: 8 h a day, 40 h a week, and 07:00 to 19:00 only.
              ORS 653.315 / OAR 839-021-0220 for the hours; 29 CFR 570.35 for
              the clock, which is the FLSA's own limit on a fourteen- or
              fifteen-year-old outside school hours.
+             WA: 8 h a day, 40 h a week, 05:00 to 21:00, six days a week.
+             WAC 296-131-120.
 
-  16-17      10 h a day, 60 h a week, no time-of-day limit in agriculture.
+  16-17      OR: 10 h a day, 60 h a week, no time-of-day limit in agriculture.
              OAR 839-021-0104. There is no FLSA hours limit on this band in
              agriculture at all; the Oregon ceiling is the binding one, which
              is why it is the number here.
+             WA: 10 h a day, FIFTY h a week, 05:00 to 22:00, six days a week.
+             WAC 296-131-120 — and the fifty is the one figure in this module
+             where Washington binds tighter than Oregon.
+
+AND THE STATE IS PART OF THE ANSWER, WHICH IT WAS NOT UNTIL NOW. Every function
+below takes a `work_state`; where none is given they answer from
+`strictest_limits()`, the tightest figure across both states, because a table
+with no state in its name must not permit what some state forbids. The refusals
+built from it say so and name the one argument that fixes it — see `state_note`.
 
 The daily figures are NON-SCHOOL-DAY figures, deliberately. A school-day limit
 is three hours (ORS 653.315), and applying it would need this app to know each
@@ -94,25 +105,181 @@ MAJORITY_AGE = 18
 BAND_UNDER_16 = "under-16"
 BAND_16_17 = "16-17"
 
-#: What each band may work, and when. `earliest`/`latest` are wall-clock strings
-#: and empty means "no limit in agriculture", which is the true answer for the
-#: older band rather than a gap.
-LIMITS = {
-	BAND_UNDER_16: {
-		"daily_hours": 8.0,
-		"weekly_hours": 40.0,
-		"earliest": "07:00",
-		"latest": "19:00",
-		"citation": "ORS 653.315 / OAR 839-021-0220; 29 CFR 570.35",
+#: The two states this app has a labour vocabulary for. The same pair
+#: `tools/shifts._VALID_STATES`, `Labor Break Policy.work_state` and the
+#: withholding tables use, so a farm that has told this app which state it
+#: operates in has told every part of it at once.
+STATES = ("OR", "WA")
+
+#: What each band may work, and when, PER STATE. `earliest`/`latest` are
+#: wall-clock strings and empty means "no limit in agriculture", which is a true
+#: answer in Oregon for the older band rather than a gap.
+#:
+#: ────────────────────────────────────────────────────────────────────────
+#: WHY THIS IS KEYED ON A STATE AND USED NOT TO BE
+#: ────────────────────────────────────────────────────────────────────────
+#:
+#: Because the two states genuinely differ, and they differ in BOTH directions —
+#: which is what makes a single table wrong rather than merely imprecise:
+#:
+#:   * Washington's weekly ceiling for a 16- or 17-year-old is FIFTY hours and
+#:     Oregon's is sixty. A crew rostered to Oregon's figure in Franklin County
+#:     is ten hours a week over a limit this app was telling them they were
+#:     inside.
+#:   * Washington has a CLOCK for that band — 05:00 to 22:00 — and Oregon has
+#:     none at all. A single table either invented an Oregon curfew or dropped
+#:     Washington's.
+#:
+#: The daily figures are NON-SCHOOL-DAY / NON-SCHOOL-WEEK figures in both
+#: states, for the reason the module docstring gives: the school-day limits need
+#: each worker's school calendar, which this app does not have and should not
+#: collect. Every refusal says which figure it used.
+LIMITS_BY_STATE = {
+	"OR": {
+		BAND_UNDER_16: {
+			"daily_hours": 8.0,
+			"weekly_hours": 40.0,
+			"earliest": "07:00",
+			"latest": "19:00",
+			"max_days_per_week": None,
+			"citation": "ORS 653.315 / OAR 839-021-0220; 29 CFR 570.35",
+		},
+		BAND_16_17: {
+			"daily_hours": 10.0,
+			"weekly_hours": 60.0,
+			"earliest": "",
+			"latest": "",
+			"max_days_per_week": None,
+			"citation": "OAR 839-021-0104",
+		},
 	},
-	BAND_16_17: {
-		"daily_hours": 10.0,
-		"weekly_hours": 60.0,
-		"earliest": "",
-		"latest": "",
-		"citation": "OAR 839-021-0104",
+	#: WAC 296-131-120, "Hours of work for minors in agriculture", read against
+	#: the rule text rather than a summary of it. The four numbers that matter:
+	#: under-16 may work up to eight hours a day and forty a week during weeks
+	#: when school is not in session and "may not be employed before 5:00 a.m.
+	#: nor after 9:00 p.m."; 16- and 17-year-olds up to ten a day and FIFTY a
+	#: week, and "may not be employed before 5:00 a.m. nor after 10:00 p.m."
+	#:
+	#: THE FIFTY IS THE ONE TO NOTICE. It is the only figure here that is
+	#: STRICTER than Oregon's, and it is the reason a state-blind table was not
+	#: merely untidy — an app carrying Oregon's sixty into Washington reports a
+	#: lawful roster for a week that is ten hours over.
+	"WA": {
+		BAND_UNDER_16: {
+			"daily_hours": 8.0,
+			"weekly_hours": 40.0,
+			"earliest": "05:00",
+			"latest": "21:00",
+			"max_days_per_week": 6,
+			"citation": "WAC 296-131-120",
+		},
+		BAND_16_17: {
+			"daily_hours": 10.0,
+			"weekly_hours": 50.0,
+			"earliest": "05:00",
+			"latest": "22:00",
+			"max_days_per_week": 6,
+			"citation": "WAC 296-131-120",
+		},
 	},
 }
+
+#: `max_days_per_week` IS SET FOR WASHINGTON AND None FOR OREGON, and the
+#: asymmetry is deliberate rather than half-finished. WAC 296-131-120(4) states
+#: the six-day limit plainly, in the same rule as the hours above. Oregon's
+#: six-day sentence lives in OAR 839-021-0290 — which is ALSO the rule that puts
+#: an under-16's non-school-day ceiling at ten hours and sixty a week, not the
+#: eight and forty this app has shipped since v0.98.0 under a different
+#: citation. Encoding one sentence out of a rule whose other numbers contradict
+#: the table above would be picking the half that suits; the discrepancy is
+#: written down here so somebody can settle it against counsel rather than
+#: against a search result. Until then Oregon carries no days-per-week figure
+#: and this app says nothing about it, which is the honest of the two silences.
+#:
+#: IT IS A WARNING AND NEVER A REFUSAL, wherever it is read. WAC 296-131-120(4)
+#: carves out dairy, livestock, hay harvest and irrigation-dependent crop work,
+#: and this app does not know which of those a given shift is — so a hard block
+#: would be a false refusal on exactly the operations the exception was written
+#: for.
+
+
+def strictest_limits() -> dict:
+	"""The tightest figure from every state, per band. What an UNKNOWN state gets.
+
+	NOT A JURISDICTION. No farm is subject to this table; it is what this app
+	applies when nothing has said which state the work is in, and it is built by
+	taking the smallest ceiling and the narrowest clock across `LIMITS_BY_STATE`
+	rather than by hand, so a state added later cannot leave it stale.
+
+	WHY THE STRICT DIRECTION AND NOT A DEFAULT STATE. The same argument the
+	module docstring makes about a missing date of birth: "we do not know" and
+	"they may work" are different answers, and defaulting an unrecorded state to
+	Oregon would clear a Washington seventeen-year-old onto a 60-hour week that
+	state does not allow. The cost is the mirror image — an Oregon crew with no
+	`work_state` on the shift is held to Washington's fifty — so every refusal
+	built from this table SAYS it was built from this table and names the one
+	argument that fixes it. See `state_note`.
+	"""
+	bands = {}
+	for band_name in (BAND_UNDER_16, BAND_16_17):
+		tables = [state[band_name] for state in LIMITS_BY_STATE.values()]
+		earliest = [table["earliest"] for table in tables if table["earliest"]]
+		latest = [table["latest"] for table in tables if table["latest"]]
+		days = [table["max_days_per_week"] for table in tables if table["max_days_per_week"]]
+		bands[band_name] = {
+			"daily_hours": min(table["daily_hours"] for table in tables),
+			"weekly_hours": min(table["weekly_hours"] for table in tables),
+			# The LATEST start and the EARLIEST finish — the narrowest window any
+			# state allows, which is the intersection and not the union.
+			"earliest": max(earliest) if earliest else "",
+			"latest": min(latest) if latest else "",
+			"max_days_per_week": min(days) if days else None,
+			# EVERY STATE'S CITATION IN FULL, not the first clause of each. The
+			# strictest table takes its daily figure from one rule and its clock
+			# from another, so no single citation is the whole answer — and
+			# trimming at the semicolon dropped `29 CFR 570.35`, which is the
+			# authority for the 07:00 start this row actually enforces.
+			"citation": " / ".join(sorted({table["citation"] for table in tables})),
+		}
+	return bands
+
+
+#: What a caller that has not said which state gets. See `strictest_limits`.
+#:
+#: THIS CONSTANT CHANGED MEANING IN THIS RELEASE. It was Oregon's table under a
+#: state-blind name; it is now the strictest-across-states table, because the
+#: name has no state in it and the thing a nameless table must not do is permit
+#: what some state forbids. Oregon's own figures are `LIMITS_BY_STATE["OR"]` and
+#: are unchanged to the digit.
+LIMITS = strictest_limits()
+
+
+def limits_for_band(work_band: str, work_state: str = "") -> dict:
+	"""One band's limits in one state, or the strictest where the state is unknown.
+
+	An unrecognised state answers the strictest table rather than raising: this
+	is read on the refusal path, and a compliance check that threw because a
+	column held something unexpected would fail open at the worst moment.
+	"""
+	table = LIMITS_BY_STATE.get(str(work_state or "").strip().upper()) or LIMITS
+	return dict(table.get(work_band) or {})
+
+
+def state_note(work_state: str) -> str:
+	"""The sentence a refusal owes somebody when no state was recorded. "" if one was.
+
+	A refusal a foreman cannot act on is a refusal they route around, and
+	"stricter of Oregon and Washington" is unactionable on its own — so this
+	names the column and the two values it takes.
+	"""
+	if str(work_state or "").strip().upper() in LIMITS_BY_STATE:
+		return ""
+	return (
+		"NO work_state IS RECORDED for this shift, so the STRICTER of Oregon and Washington was "
+		"applied — Washington's 50-hour week for the 16-17 band is the binding figure, and "
+		"Oregon allows 60. If this crew is in Oregon, set work_state on the shift (OR or WA) and "
+		"the state's own ceiling is used instead."
+	)
 
 #: How close to a ceiling is close enough to say so. An hour of the day and four
 #: of the week — one more pick round and one more afternoon respectively, which
@@ -269,12 +436,12 @@ def is_minor(date_of_birth, on_date) -> bool | None:
 	return age < MAJORITY_AGE
 
 
-def limits_for(date_of_birth, on_date) -> dict:
+def limits_for(date_of_birth, on_date, work_state: str = "") -> dict:
 	"""The band's limits, or an empty dict for an adult or an unknown birth date."""
-	return dict(LIMITS.get(band(date_of_birth, on_date)) or {})
+	return limits_for_band(band(date_of_birth, on_date), work_state)
 
 
-def describe(date_of_birth, on_date) -> dict:
+def describe(date_of_birth, on_date, work_state: str = "") -> dict:
 	"""Everything a roster row, an employee read or a refusal needs, in one shape.
 
 	`is_minor` is the key iOS branches on for the purple badge. It is `None` where
@@ -284,12 +451,19 @@ def describe(date_of_birth, on_date) -> dict:
 	"""
 	age = age_on(date_of_birth, on_date)
 	which = band(date_of_birth, on_date)
+	state = str(work_state or "").strip().upper()
 	out = {
 		"date_of_birth_recorded": bool(_as_date(date_of_birth)),
 		"age": age,
 		"is_minor": None if age is None else age < MAJORITY_AGE,
 		"minor_band": which or None,
-		"minor_limits": dict(LIMITS.get(which) or {}) or None,
+		"minor_limits": limits_for_band(which, state) or None,
+		# WHICH TABLE THE FIGURES BESIDE THIS CAME FROM. A roster row carrying a
+		# ceiling and not the jurisdiction it is a ceiling in cannot be checked by
+		# the person reading it, and the two states disagree about the 16-17
+		# weekly figure by ten hours. None means no state was recorded and the
+		# strictest table was used.
+		"minor_limits_state": state if state in LIMITS_BY_STATE else None,
 	}
 	if age is not None and age < MINIMUM_AGE:
 		out["below_minimum_age"] = True
@@ -299,7 +473,7 @@ def describe(date_of_birth, on_date) -> dict:
 # ── the clock ─────────────────────────────────────────────────────────────────
 
 
-def time_of_day_violation(work_band: str, start, end="") -> str | None:
+def time_of_day_violation(work_band: str, start, end="", work_state: str = "") -> str | None:
 	"""Why this span is outside the hours the band may work, or None.
 
 	Checked against the START and the END separately rather than against the
@@ -307,7 +481,7 @@ def time_of_day_violation(work_band: str, start, end="") -> str | None:
 	crossing midnight is a different violation with a different sentence — one
 	this returns on the end check, since 00:30 is before 07:00.
 	"""
-	limits = LIMITS.get(work_band) or {}
+	limits = limits_for_band(work_band, work_state)
 	earliest = _minutes(limits.get("earliest"))
 	latest = _minutes(limits.get("latest"))
 	if earliest is None and latest is None:
@@ -331,13 +505,15 @@ def time_of_day_violation(work_band: str, start, end="") -> str | None:
 	return None
 
 
-def hours_violation(work_band: str, hours_today: float, hours_this_week: float) -> str | None:
+def hours_violation(
+	work_band: str, hours_today: float, hours_this_week: float, work_state: str = ""
+) -> str | None:
 	"""Why these totals are over the band's ceiling, or None.
 
 	The DAILY figure is reported first where both are over, because it is the one
 	a foreman can still do something about before the crew starts.
 	"""
-	limits = LIMITS.get(work_band) or {}
+	limits = limits_for_band(work_band, work_state)
 	if not limits:
 		return None
 	daily = float(limits["daily_hours"])
@@ -355,14 +531,16 @@ def hours_violation(work_band: str, hours_today: float, hours_this_week: float) 
 	return None
 
 
-def hours_warning(work_band: str, hours_today: float, hours_this_week: float) -> str | None:
+def hours_warning(
+	work_band: str, hours_today: float, hours_this_week: float, work_state: str = ""
+) -> str | None:
 	"""How close to the ceiling this is, where it is close but not over.
 
 	Returns None once it is actually over — that is `hours_violation`'s sentence,
 	and two messages about one fact is how a warning stops being read.
 	"""
-	limits = LIMITS.get(work_band) or {}
-	if not limits or hours_violation(work_band, hours_today, hours_this_week):
+	limits = limits_for_band(work_band, work_state)
+	if not limits or hours_violation(work_band, hours_today, hours_this_week, work_state):
 		return None
 	daily = float(limits["daily_hours"])
 	weekly = float(limits["weekly_hours"])
@@ -377,6 +555,30 @@ def hours_warning(work_band: str, hours_today: float, hours_this_week: float) ->
 			f"{weekly - hours_this_week:.1f} hour(s) left before the {work_band} ceiling."
 		)
 	return None
+
+
+def days_warning(work_band: str, days_this_week: int, work_state: str = "") -> str | None:
+	"""Whether this many days in the week is over the band's limit. A WARNING.
+
+	NEVER A REFUSAL, and the reason is in the block beside `LIMITS_BY_STATE`:
+	WAC 296-131-120(4) carves out dairy, livestock, hay harvest and
+	irrigation-dependent crop work from the six-day rule, and this app cannot
+	tell which of those a shift is. Refusing a seventh day on a dairy would be a
+	false refusal on precisely the operation the exception was written for — so
+	this says the number and the citation and lets the foreman answer it.
+
+	Oregon carries no figure, so this is silent there. See `LIMITS_BY_STATE`.
+	"""
+	limits = limits_for_band(work_band, work_state)
+	ceiling = limits.get("max_days_per_week")
+	if not ceiling or days_this_week <= int(ceiling):
+		return None
+	return (
+		f"that would be {days_this_week} days this week against a {int(ceiling)}-day limit for the "
+		f"{work_band} band ({limits['citation']}). Dairy, livestock, hay harvest and "
+		"irrigation-dependent crop work are excepted from it, so this is a note and not a refusal "
+		"— but if this crew is none of those, the seventh day is one too many."
+	)
 
 
 # ── the work ──────────────────────────────────────────────────────────────────

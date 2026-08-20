@@ -525,3 +525,123 @@ class TheCatalogue(RolesTestCase):
 		self.assertIsNotNone(roles.spec_for("Field Worker"))
 		self.assertIsNone(roles.spec_for("field worker"))
 		self.assertIsNone(roles.spec_for("Worker"))
+
+
+#: A company whose LEGAL NAME CONTAINS A COMMA, which is the ordinary case on a
+#: farm and the one every parser in this app used to get wrong.
+COMMA_CO = "Orchard Meadow, LLC"
+#: Its near-neighbour. Seeded so `_names_in` has to choose between an exact match
+#: on the whole line and a split that would also resolve — the ambiguity that
+#: makes "check the whole line first" load-bearing rather than incidental.
+PREFIX_CO = "Orchard Meadow"
+
+
+class TheCommaInACompanysName(RolesTestCase):
+	"""S6. "Orchard Meadow, LLC" is ONE entity, and was read as two.
+
+	Both ends of `Mobile Access Grant.entity_access` split on commas
+	unconditionally — the doctype's `_tidy_lines` on the way in, and
+	`tools/mobile._resolve_entities` on the way in from a request body. A farm
+	whose entities are LLCs got a name and a suffix, neither of which is a
+	Company, so `create_mobile_user` refused a spelling that was correct and
+	`list_mobile_users` reported two grants of access that scope nothing.
+
+	The fix is not "stop splitting on commas" — a line that really is two
+	companies still has to split, because that is what somebody typing into a
+	Small Text field means. It is "split, then check", which is what every test
+	below is about.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		STORE.seed(
+			"Company",
+			[
+				{
+					"name": COMMA_CO,
+					"abbr": "OML",
+					"default_currency": "USD",
+					"country": "United States",
+					"is_group": 0,
+				},
+				{
+					"name": PREFIX_CO,
+					"abbr": "OMD",
+					"default_currency": "USD",
+					"country": "United States",
+					"is_group": 0,
+				},
+			],
+		)
+
+	def test_a_company_name_containing_a_comma_stays_one_entity(self):
+		self.assertEqual(roles.parse_entity_access(COMMA_CO), [COMMA_CO])
+
+	def test_two_companies_on_one_line_still_split(self):
+		"""The case the old `replace(",", "\\n")` existed for. It still works."""
+		self.assertEqual(roles.parse_entity_access(f"{MAIN}, {OTHER}"), [MAIN, OTHER])
+
+	def test_the_whole_line_wins_over_a_split_that_would_also_resolve(self):
+		"""Both readings resolve here, and only one of them is what was typed.
+
+		`Orchard Meadow, LLC` splits into `Orchard Meadow` — a real company on
+		this fixture — and `LLC`, which is not; so the all-pieces-known test
+		fails and the whole line is kept. Seeding the near-neighbour is what
+		makes this a real choice rather than a vacuous one.
+		"""
+		self.assertEqual(roles.parse_entity_access(COMMA_CO), [COMMA_CO])
+		self.assertEqual(roles.parse_entity_access(PREFIX_CO), [PREFIX_CO])
+
+	def test_newline_is_always_a_separator(self):
+		self.assertEqual(roles.parse_entity_access(f"{COMMA_CO}\n{MAIN}"), [COMMA_CO, MAIN])
+
+	def test_a_quoted_name_splits_at_the_quotes_and_needs_no_lookup(self):
+		"""Somebody who quoted a name has said where it ends. No register needed."""
+		self.assertEqual(
+			roles.split_entity_names('"Orchard Meadow, LLC", "Highland Orchards, Inc."'),
+			["Orchard Meadow, LLC", "Highland Orchards, Inc."],
+		)
+
+	def test_with_no_predicate_nothing_is_comma_split(self):
+		"""The safe direction. An unsplit line fails loudly at `resolve_company`;
+		a wrongly-split one silently records two entities that scope nothing."""
+		self.assertEqual(roles.split_entity_names("Anything, At All"), ["Anything, At All"])
+
+	def test_a_list_is_taken_element_by_element_and_never_re_split(self):
+		"""A caller that built a list has already said where each name ends."""
+		self.assertEqual(roles.split_entity_names([COMMA_CO, MAIN]), [COMMA_CO, MAIN])
+
+	def test_blanks_and_duplicates_go_and_order_is_kept(self):
+		self.assertEqual(
+			roles.parse_entity_access(f"{MAIN}\n\n{COMMA_CO}\n{MAIN}\n   "),
+			[MAIN, COMMA_CO],
+		)
+
+	def test_an_unknown_name_with_a_comma_is_reported_whole(self):
+		"""So the refusal names what somebody typed, not a fragment of it."""
+		self.assertEqual(roles.parse_entity_access("Nowhere Farms, LLC"), ["Nowhere Farms, LLC"])
+
+	def test_the_column_round_trips(self):
+		stored = roles.tidy_entity_access(f"{COMMA_CO}, {MAIN}")
+		# Two companies were named; the comma between them separates because both
+		# halves resolve — but the LLC's own comma is not one of the two.
+		self.assertEqual(roles.parse_entity_access(stored), [COMMA_CO, MAIN])
+		self.assertEqual(stored, f"{COMMA_CO}\n{MAIN}")
+
+	def test_a_comma_name_beside_a_plain_one_on_the_same_line(self):
+		"""Three comma-separated pieces, two companies. The case that forced the
+		longest-match walk: an all-or-nothing rule reads this as one bad name."""
+		self.assertEqual(
+			roles.parse_entity_access(f"{COMMA_CO}, {MAIN}"),
+			[COMMA_CO, MAIN],
+		)
+
+	def test_the_unresolvable_tail_is_reported_whole(self):
+		"""So the refusal names what was typed rather than a fragment of it."""
+		self.assertEqual(
+			roles.parse_entity_access(f"{MAIN}, Nowhere Farms, LLC"),
+			[MAIN, "Nowhere Farms, LLC"],
+		)
+
+	def test_a_missing_space_after_the_comma_looks_up_as_written(self):
+		self.assertEqual(roles.parse_entity_access(f"{MAIN},{OTHER}"), [MAIN, OTHER])

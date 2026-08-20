@@ -248,6 +248,37 @@ def _when(args: dict, key: str) -> str:
 	return as_str(args, key) or frappe.utils.now()
 
 
+#: The two states this app carries labour rules for — break schedules,
+#: withholding tables and the minor hour ceilings. MOVED UP FROM THE BREAK POLICY
+#: BLOCK in v0.106.0, because `_work_state_argument` now reads it four hundred
+#: lines earlier than `create_break_policy` does and a constant defined below its
+#: first caller reads as an accident. Same tuple, same two values.
+_VALID_STATES = ("OR", "WA")
+
+
+def _work_state_argument(args: dict, key: str = "work_state") -> str:
+	"""`OR` or `WA`, upper-cased, or "" where none was given.
+
+	REFUSES A THIRD STATE rather than storing it. The column is a Select with
+	exactly these two options, so a value outside them is dropped by Frappe on
+	save and the caller is never told — which would leave a shift that reports no
+	state at all after a call that named one, and the minor checks silently back
+	on the strictest table. The same pair `create_break_policy` validates against.
+	"""
+	wanted = as_str(args, key).strip().upper()
+	if not wanted:
+		return ""
+	if wanted not in _VALID_STATES:
+		raise ToolError(
+			f"{key} must be one of {', '.join(_VALID_STATES)}, got {wanted!r}. It decides which "
+			"state's break schedule and which minor hour ceilings this shift is read against — "
+			"Oregon allows a 16- or 17-year-old sixty hours a week and Washington fifty — so a "
+			"value this app does not know would be dropped on save and the shift would report "
+			"none. Nothing was created."
+		)
+	return wanted
+
+
 def _crew_argument(raw, label: str = "crew_employees") -> list:
 	"""Whatever the caller sent as a crew, as a list of Employee docnames."""
 	if raw in (None, "", []):
@@ -331,7 +362,15 @@ def minor_findings(
 		# without going to look somebody up. `start_shift` calls this with no
 		# name in hand; `add_worker_to_shift` already has one.
 		employee_name = employee_name or str(row.get("employee_name") or "")
-	described = minors.describe(born, when[:10] or frappe.utils.today())
+	# WHICH STATE'S RULES. Oregon lets a 16- or 17-year-old work sixty hours a
+	# week and Washington fifty, and Washington puts a 05:00-22:00 clock on that
+	# band where Oregon has none — so a check that did not read this column was
+	# answering for one state on every farm. Where the shift carries no
+	# `work_state` the strictest of the two is used and `minors.state_note` says
+	# so in the refusal, because an unactionable refusal is one a foreman routes
+	# around. See `minors.LIMITS_BY_STATE`.
+	work_state = str(shift_row.get("work_state") or "")
+	described = minors.describe(born, when[:10] or frappe.utils.today(), work_state)
 	out = {"employee": employee, "employee_name": employee_name or employee, **described, "blocked": []}
 	if described["is_minor"] is None:
 		out["date_of_birth_missing"] = (
@@ -344,7 +383,7 @@ def minor_findings(
 		return out
 
 	band = described["minor_band"]
-	clock = minors.time_of_day_violation(band, when, shift_row.get("end_datetime") or "")
+	clock = minors.time_of_day_violation(band, when, shift_row.get("end_datetime") or "", work_state)
 	if clock:
 		out["blocked"].append(f"{employee_name or employee} is {described['age']} — {clock}")
 
@@ -360,13 +399,35 @@ def minor_findings(
 	projected = shifts.hours_between(when, str(shift_row.get("end_datetime") or "")) or 0.0
 	out["hours_added_by_this_shift"] = projected
 
-	over = minors.hours_violation(band, worked["today"] + projected, worked["week"] + projected)
+	over = minors.hours_violation(band, worked["today"] + projected, worked["week"] + projected, work_state)
 	if over:
 		out["blocked"].append(f"{employee_name or employee} is {described['age']} — {over}")
 	else:
-		warning = minors.hours_warning(band, worked["today"] + projected, worked["week"] + projected)
+		warning = minors.hours_warning(
+			band, worked["today"] + projected, worked["week"] + projected, work_state
+		)
 		if warning:
 			out["approaching_limit"] = warning
+
+	# THE SEVENTH DAY, counted from the distinct days the workweek's shifts fall
+	# on rather than from a column — `hours_worked_by` already walked them. A
+	# WARNING and never a block: Washington excepts dairy, livestock, hay harvest
+	# and irrigation-dependent crop work from its six-day rule and this app cannot
+	# tell which a shift is. Oregon carries no figure, so this is silent there.
+	days = {entry["day"] for entry in worked["shifts"] if entry.get("day")}
+	days.add(when[:10])
+	out["days_this_week"] = len(days)
+	crowded = minors.days_warning(band, len(days), work_state)
+	if crowded:
+		out["days_warning"] = f"{employee_name or employee} is {described['age']} — {crowded}"
+
+	# THE MISSING COLUMN, reported beside the finding it changed. Only where
+	# there IS a finding — a note about `work_state` on every clean roster row
+	# would be the kind of advice that trains people to skip the whole block.
+	if out["blocked"] or out.get("approaching_limit"):
+		note = minors.state_note(work_state)
+		if note:
+			out["work_state_note"] = note
 	return out
 
 
@@ -385,6 +446,7 @@ def _refuse_a_minor_over_the_limit(findings: dict) -> None:
 		+ f" ({limits.get('citation')}). If they have already worked today on another crew, close "
 		"or clock them out of that shift first; if the date of birth on their record is wrong, "
 		"correct it with update_employee."
+		+ (f" {findings['work_state_note']}" if findings.get("work_state_note") else "")
 	)
 
 
@@ -454,6 +516,7 @@ def start_shift(args: dict) -> ToolResult:
 
 	crew = _crew_argument(args.get("crew_employees") or args.get("crew"))
 	start = _when(args, "start_datetime")
+	work_state = _work_state_argument(args)
 
 	# THE CREW IS CHECKED AGAINST THE COMPANY BEFORE ANYTHING IS WRITTEN, because a
 	# shift half-created and then refused on its ninth crew member leaves an open
@@ -485,6 +548,16 @@ def start_shift(args: dict) -> ToolResult:
 	doc.farm_location_gps = as_str(args, "farm_location_gps")
 	doc.shift_type = as_choice(DOCTYPE, "shift_type", as_str(args, "shift_type") or "General", "shift_type")
 	doc.start_datetime = start
+	# v0.106.0. THE COLUMN NOTHING EVER WROTE. `work_state` has been on this
+	# doctype since v0.58.0 and is read by three things — `get_break_schedule`'s
+	# policy fallback, `list_employees_by_work_state`, and now the minor hour
+	# checks — and `start_shift` never set it, so it was empty on every shift this
+	# app has ever created and all three were answering from a blank. It is
+	# OPTIONAL rather than required: a foreman opening a shift at five in the
+	# morning should not be stopped by a field, and the readers each say what
+	# they did without one.
+	if work_state:
+		doc.work_state = work_state
 	for entry in crew:
 		doc.append(
 			"crew",
@@ -1083,6 +1156,44 @@ def end_shift(args: dict) -> ToolResult:
 	bridge = shifts.bridge_to_attendance(closed, shifts.crew_of(row["name"]))
 
 	hours = shifts.hours_between(str(row.get("start_datetime") or ""), end)
+
+	# ── S12. THE HOURS A MINOR ACTUALLY WORKED, checked at the moment they stop
+	# being a plan and become a fact. ──────────────────────────────────────────
+	#
+	# `add_worker_to_shift` refuses a roster that WOULD breach a ceiling and
+	# `start_shift` reports one, and until now nothing looked again. Both of those
+	# run against a shift with no end time, so `minor_findings` projects nothing
+	# and the day's total is whatever had already been worked elsewhere — which
+	# means the ordinary case, one shift that simply RAN LONG, was never checked
+	# by anything. A fifteen-year-old added to an empty roster at 07:00 and
+	# clocked out at 19:30 passed every check this app made.
+	#
+	# REPORTED, NOT REFUSED, and here the argument is stronger than it is at
+	# `start_shift`. The hours are already worked. Refusing the close would leave
+	# the shift OPEN — no supervisor signature, no Attendance rows, no closed
+	# compliance record — as a punishment for something the refusal cannot undo,
+	# and the one document an investigator would ask for is the one that would not
+	# exist. So the close goes through and carries the finding, which is what a
+	# record is for.
+	#
+	# THE END TIME IS PASSED AS THE SHIFT'S OWN, so the projection is the real
+	# span rather than nothing: `minor_findings` reads `end_datetime` off the row
+	# it is given, and the row it is given here is the closed one.
+	closed_row = {**row, "end_datetime": end}
+	minors_found = [
+		minor_findings(
+			entry["employee"],
+			str(entry.get("employee_name") or ""),
+			closed_row,
+			entry.get("joined_at") or str(row.get("start_datetime") or ""),
+			exclude=row["name"],
+		)
+		for entry in crew_before
+	]
+	over = [entry for entry in minors_found if entry.get("blocked")]
+	on_crew = [entry for entry in minors_found if entry.get("is_minor")]
+	crowded = [entry for entry in minors_found if entry.get("days_warning")]
+
 	data = {
 		**described,
 		"actor": actor,
@@ -1133,6 +1244,25 @@ def end_shift(args: dict) -> ToolResult:
 	)
 	if shadow:
 		data["shadow_log"] = shadow
+
+	if on_crew:
+		data["minor_crew_findings"] = on_crew
+	if crowded:
+		data["minor_days_warnings"] = [entry["days_warning"] for entry in crowded]
+	if over:
+		data["minor_limits_exceeded"] = [
+			{"employee": entry["employee"], "reasons": entry["blocked"]} for entry in over
+		]
+		notes = [entry["work_state_note"] for entry in over if entry.get("work_state_note")]
+		data["minor_note"] = (
+			f"THIS SHIFT CLOSES OVER A CHILD-LABOUR LIMIT for {len(over)} worker(s): "
+			+ "; ".join(reason for entry in over for reason in entry["blocked"])
+			+ ". The close was NOT refused — the hours are already worked, and an open shift with "
+			"no supervisor signature would be a worse record of the same afternoon, not a "
+			"correction of it. This is the finding on the record. If an end time is wrong, it is "
+			"the end time that should be corrected; if it is right, this is a breach that "
+			"happened and the next roster is where it gets prevented." + (f" {notes[0]}" if notes else "")
+		)
 
 	if not described["compliance_events"]:
 		data["timeline_note"] = (
@@ -2368,8 +2498,6 @@ def _schedule_rows(rows) -> list:
 
 
 # ── 11a. create_break_policy ────────────────────────────────────────────
-
-_VALID_STATES = ("OR", "WA")
 
 _SCHEDULE_TABLES = ("rest_schedule", "meal_schedule", "minor_rest_schedule", "minor_meal_schedule")
 

@@ -683,6 +683,13 @@ def _check_company(doctype: str, name: str, parent: dict, company: str, tail: st
 	return company_field, parent_company
 
 
+#: The extensions a handset camera produces. NOT AN ALLOWLIST AND NOT CONSULTED
+#: BY ONE — `_check_extension` compiles no list of blessed extensions and this
+#: does not change that. It is read only when the SITE'S OWN list has already
+#: refused something, to say whether the thing refused was a photograph.
+CAMERA_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "heic", "heif"})
+
+
 def _check_extension(file_name: str, tail: str = "Nothing was attached.") -> None:
 	"""Honour whatever extension allowlist this site declares, and no other.
 
@@ -704,11 +711,29 @@ def _check_extension(file_name: str, tail: str = "Nothing was attached.") -> Non
 		return
 	extension = os.path.splitext(file_name)[1].lstrip(".").lower()
 	if extension not in allowed:
+		# WHAT A PHONE ACTUALLY SENDS, named in the refusal. An iPhone photographs
+		# in HEIC by default and a site whose allowlist predates that setting
+		# refuses every picture taken at an accident scene — a true refusal with a
+		# cause nobody standing in a block can guess, because the sentence above
+		# reads as though the FILE were wrong when the SETTING is. Still not a
+		# compiled-in allowlist and still the site's list that decides; this only
+		# says which line to add and where.
+		remedy = ""
+		if extension in CAMERA_EXTENSIONS:
+			missing = sorted(CAMERA_EXTENSIONS - set(allowed))
+			remedy = (
+				f" .{extension} is what a phone camera produces — HEIC/HEIF is the iPhone "
+				"default and JPEG the fallback — so this refuses photographs rather than "
+				"anything unusual. Add "
+				+ ", ".join(missing)
+				+ " to allowed_file_extensions in System Settings if this farm files pictures "
+				"from handsets."
+			)
 		raise ToolError(
 			f"this site's System Settings allow only these file extensions: "
 			f"{', '.join(sorted(allowed))} — and {file_name!r} is "
 			f"{'.' + extension if extension else 'extensionless'}. That list is the site's "
-			f"own, not this app's. {tail}"
+			f"own, not this app's.{remedy} {tail}"
 		)
 
 
