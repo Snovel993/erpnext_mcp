@@ -110,6 +110,99 @@ flat), `designation` beside `job_title`, and the four counts it was leaving ever
 caller to derive. All additive; nothing was removed, and the full response is set
 out key by key in `tools/training.py`'s own docstring.
 
+### Also in 0.106.0 — the rest of the iOS usability audit
+
+**A minor's hour ceilings depend on which state they are working in, and did
+not.** `minors.LIMITS` was one table and the citations under it were Oregon's, so
+a Washington crew was checked against Oregon's law. The two differ in BOTH
+directions: WAC 296-131-120 caps a 16- or 17-year-old at **fifty** hours in a
+non-school week where Oregon allows sixty, and puts a 05:00–22:00 clock on a band
+Oregon leaves unrestricted in agriculture. An app carrying Oregon's sixty into
+Franklin County reports a lawful roster for a week that is ten hours over.
+`LIMITS_BY_STATE` holds both tables and every function takes a `work_state`.
+
+**With no state recorded, the stricter figure binds.** `LIMITS` is now the
+strictest-across-states table rather than Oregon's under a state-blind name —
+the same argument `minors.py` already makes about a missing date of birth: "we do
+not know" and "they may work" are different answers, and defaulting to Oregon
+would clear a Washington seventeen-year-old onto a week that state does not
+allow. The cost is the mirror image, an Oregon crew held to Washington's fifty,
+so every refusal built from that table says which table it used and names the one
+argument that fixes it.
+
+**`start_shift` writes `work_state`.** The column has been on Farm Shift since
+v0.58.0, is read by `get_break_schedule`'s policy fallback and by
+`list_employees_by_work_state`, and **nothing ever set it** — so it was empty on
+every shift this app has ever created and both readers were answering from a
+blank. Optional, and refused rather than stored if it is not `OR` or `WA`: the
+column is a Select, so a third value would be dropped on save with nobody told.
+
+**`end_shift` checks the hours a minor actually worked.** `add_worker_to_shift`
+refuses a roster that WOULD breach a ceiling and `start_shift` reports one — and
+both run against a shift with no end time, so nothing is projected and the
+ordinary case was checked by nothing at all: **one shift that simply ran long.** A
+fifteen-year-old added to an empty roster at 07:00 and clocked out at 19:30 passed
+every check this app made. Reported, never refused — the hours are already worked,
+and refusing the close would leave the shift open and unsigned with no Attendance,
+destroying the one document an investigator asks for as a punishment for something
+the refusal cannot undo. Washington's six-day week is reported the same way and is
+never a block, because WAC 296-131-120(4) excepts dairy, livestock, hay harvest
+and irrigation-dependent crop work and this app cannot tell which a shift is.
+
+**Two workers could claim the same task inside the same second and both be told
+they got it.** `claim_farm_task` read the state, compared it with `Available`, then
+saved — three statements with two gaps in them. Both handsets read `Available`,
+both passed the check, both wrote, and the second `save` put the other person's
+name on the task while the first worker's phone showed a 200. Nothing in the
+record afterwards showed there had been two. `lock_task` takes a
+`SELECT … FOR UPDATE` on the row and the state is re-read under it, so the loser
+takes the refusal that already existed for the sequential case — the one that says
+"two people stood in front of the same work both believing it is theirs is exactly
+what a dispatch board exists to prevent". `assign_farm_task` takes the same lock,
+where the race is worse: `reassign` exists to stop work being taken off somebody
+already standing in front of it, and that guard is a read, so a claim landing in
+the gap made it return nothing and displaced the claimant silently.
+
+**"Orchard Meadow, LLC" was two entities.** Both ends of
+`Mobile Access Grant.entity_access` treated a comma as a separator
+unconditionally — the doctype's `_tidy_lines` on the way in and
+`tools/mobile._resolve_entities` on the way in from a request body — so every farm
+whose entities are LLCs got a name and a suffix, neither of which is a Company.
+The grant either refused a spelling that was correct or recorded two lines of
+nonsense in a column an auditor reads. `roles.split_entity_names` splits on
+newlines, which cannot occur in a docname, then tries the comma and **checks** it
+against the Company register, longest match first; an unresolvable tail comes back
+whole so the refusal names what somebody typed rather than a fragment of it.
+
+**An accident report can carry a photograph.** This surface has opened accident
+reports since v0.88.0 and could never put a picture on one:
+`attach_file_to_document` refused the doctype by name, which reads from a handset
+as the FILE being rejected. A guard left down, a torn sleeve, the ground where
+somebody fell — these are what an OSHA 301 is reconstructed from, they exist for
+about an hour before the scene is cleared, and the only camera there is in
+somebody's pocket. `Accident Report` joins both allow-lists, so the photograph can
+be filed and listed back. No permission is manufactured: `create_accident_report`
+on this surface is already open to any enrolled worker, deliberately, and the
+doctype's own DocPerms still decide who may list the folder.
+
+**The extension refusal now says when the thing refused was a photograph.** HEIC
+is the iPhone default and JPEG the fallback; a site whose `allowed_file_extensions`
+predates that setting refuses every picture taken in the field, with a sentence
+that reads as though the file were wrong when the SETTING is. Still no allowlist
+compiled into this app — the site's list is still the one that decides, and this
+only names which line to add and where.
+
+**No change was needed for the location registry, and the reason is worth
+recording.** The audit reported that a handset cannot create fields or blocks
+because no location endpoint exists. All six routes have been mounted since
+v0.98.0, and a credential-free probe of the live server answers **401** on
+`list_farm_locations`, `create_farm_location`, `create_field`,
+`create_irrigation_zone`, `create_parcel` and `create_housing_unit` — against
+**404** for a method that genuinely is not there. The routes exist and are
+deployed. `LocationRegistryAPI.swift` throws `Unavailable` **before touching the
+network**, from a probe taken on 2026-08-18 — the same day v0.98.0 shipped them —
+so the remaining work is on the client, not here.
+
 ## 0.105.0 — 2026-08-19 — the feedback queue on every phone finally drains
 
 `fafo_ios/SERVER_CHANGES.md` item 24. The handset half of the in-app feedback
