@@ -1629,6 +1629,60 @@ BREAK_KINDS = {
 	"Shade Break": {"event_type": "Shade Break", "paid": True},
 }
 
+#: The shorter spellings a caller may send, mapped onto the value the Select
+#: column actually holds.
+#:
+#: THE HANDSET'S ENUM SPELLS THE TWO HEAT PROVISIONS `Water` AND `Shade`. That is
+#: `BreakEvent.Kind`'s rawValue in `FarmOpsKit`, and it is what a phone sends on
+#: the day it stops folding them onto Cool-Down. v0.96.0 widened `BREAK_KINDS` to
+#: `Water Break` and `Shade Break` — the doctype's own wording, which is NOT what
+#: the app says — so item 9 of `SERVER_CHANGES.md` was left half closed: the app
+#: reaches a widened list by comparing on letters and digits alone, and `water`
+#: never matches `waterbreak`. Accepting both spellings is what actually lets a
+#: shade break arrive as a shade break.
+#:
+#: AN ALIAS IS THE SAME PROVISION SPELLED SHORTER AND NEVER A DIFFERENT ONE. An
+#: unpaid meal must never resolve to a paid rest to make a write succeed — that
+#: is a payroll record saying the wrong thing about somebody's day — so this map
+#: holds only pairs whose two names are the same break.
+BREAK_KIND_ALIASES = {
+	"Water": "Water Break",
+	"Shade": "Shade Break",
+}
+
+
+def _break_kind_spelling(value: str) -> str:
+	"""The comparison form of a break kind: letters and digits, lower case.
+
+	`Cool-Down`, `Cool Down`, `cooldown` and `COOL_DOWN` are ONE option spelled
+	four ways, and an administrator who retyped the Select had no idea a handset
+	was matching on it exactly. This is the same normalisation the app applies to
+	the list it reads out of a refusal, deliberately: two systems agreeing about
+	which spellings are the same word is the whole point.
+	"""
+	return "".join(character for character in value.lower() if character.isalnum())
+
+
+#: Every spelling this tool accepts, mapped to the one it stores. Built from
+#: `BREAK_KINDS` and `BREAK_KIND_ALIASES` rather than typed out, so a kind added
+#: to either is reachable by both spellings without a third list to keep.
+_BREAK_KIND_BY_SPELLING = {
+	**{_break_kind_spelling(name): name for name in BREAK_KINDS},
+	**{_break_kind_spelling(alias): name for alias, name in BREAK_KIND_ALIASES.items()},
+}
+
+
+def canonical_break_kind(value: str) -> str:
+	"""What a caller's `break_kind` is stored as, or "" when it is not a break kind.
+
+	Empty rather than an exception: the caller raises the refusal, because the
+	sentence it raises is one the handset PARSES — `BreakKindRefusal` reads the
+	accepted list out of it and retries — and that sentence belongs next to the
+	call it refuses.
+	"""
+	return _BREAK_KIND_BY_SPELLING.get(_break_kind_spelling(value), "")
+
+
 VALID_APPLIES_TO = ("Crew", "Individual")
 
 
@@ -1679,9 +1733,20 @@ def log_shift_break(args: dict) -> ToolResult:
 	row = _resolve_shift(args)
 	employee_tool.require_company_scope(actor, str(row.get("company") or ""))
 
-	break_kind = as_str(args, "break_kind", required=True).strip()
-	if break_kind not in BREAK_KINDS:
-		raise ToolError(f"break_kind must be one of {', '.join(BREAK_KINDS)}. Got {break_kind!r}.")
+	sent_kind = as_str(args, "break_kind", required=True).strip()
+	# RESOLVED BEFORE IT IS VALIDATED, AND STORED CANONICAL. A body may spell a
+	# heat break the way the handset's enum does (`Water`, `Shade`) or the way an
+	# administrator retyped the column (`Cool Down`); the Select holds one
+	# spelling, and every reader in `breaks.py` — `HEAT_RELIEF_KINDS`, the payroll
+	# tallies, `next_break_due` — compares against it BY NAME. Storing what
+	# arrived would make those comparisons miss and the break vanish from the
+	# counts it exists to feed.
+	break_kind = canonical_break_kind(sent_kind)
+	if not break_kind:
+		# The refusal still enumerates the CANONICAL values, and not the aliases
+		# beside them: it is read by a machine as well as a person, and the list
+		# it hands back is the list a retry is built from.
+		raise ToolError(f"break_kind must be one of {', '.join(BREAK_KINDS)}. Got {sent_kind!r}.")
 
 	applies_to = (as_str(args, "applies_to") or "Crew").strip()
 	if applies_to not in VALID_APPLIES_TO:

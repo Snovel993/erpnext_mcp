@@ -905,6 +905,87 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 			None,
 		)
 
+	# ── item 9, the half of it that was left open ───────────────────────────
+	#
+	# v0.96.0 widened `BREAK_KINDS` to `Water Break` and `Shade Break` and the
+	# item was called closed. It was not: the app's enum spells them `Water` and
+	# `Shade`, its recovery path matches a farm's list on letters and digits
+	# alone, and `water` never matches `waterbreak` — so a phone that stopped
+	# folding onto Cool-Down would have been refused, and every water and shade
+	# break would have gone back to living on the handset. These pin the
+	# spellings a phone actually sends.
+
+	def test_the_spelling_the_handset_uses_is_taken_and_stored_canonical(self):
+		"""`Water` is `BreakEvent.Kind.water.rawValue`, verbatim."""
+		shift = self.a_hot_shift()
+		self.tool_data(
+			"log_shift_break",
+			{"shift": shift, "break_kind": "Water", "started_at": self.at(16), "duration_minutes": 10},
+		)
+		# STORED AS THE SELECT'S OWN WORDING, not as what arrived: every reader in
+		# `breaks.py` compares against these by name, so a row holding `Water`
+		# would be a heat break missing from the heat counts.
+		row = self.the_break(shift, "Water Break")
+		self.assertEqual(row["break_kind"], "Water Break")
+		self.assertEqual(row["event_type"], "Water Break")
+		self.assertTrue(row["heat_obligation"])
+		self.assertIn(row["break_kind"], breaks_mod.HEAT_RELIEF_KINDS)
+
+	def test_shade_too_and_it_is_not_folded_onto_a_cool_down(self):
+		"""The distinction is the regulation's. An inspector after a heat event
+		asks whether SHADE was provided, not whether a cool-down was."""
+		shift = self.a_hot_shift()
+		self.tool_data(
+			"log_shift_break",
+			{"shift": shift, "break_kind": "Shade", "started_at": self.at(16), "duration_minutes": 10},
+		)
+		kinds = {row["break_kind"] for row in shifts.events_of(shift) if row.get("break_kind")}
+		self.assertEqual(kinds, {"Shade Break"})
+		self.assertNotIn("Cool-Down", kinds)
+
+	def test_a_retyped_select_is_still_the_same_column(self):
+		"""An administrator who dropped the hyphen broke every heat break on the
+		farm and would never have connected the two."""
+		shift = self.a_hot_shift()
+		for sent in ("Cool Down", "cooldown", "COOL_DOWN", "water break"):
+			with self.subTest(sent=sent):
+				self.assertEqual(
+					shift_tools.canonical_break_kind(sent),
+					"Cool-Down" if sent.lower().startswith("cool") else "Water Break",
+				)
+
+	def test_nothing_resolves_across_meanings(self):
+		"""THE ONE THAT MATTERS MOST. An unpaid meal must never become a paid
+		rest to make a write succeed — that is a wage claim with this server's
+		fingerprints on it — and a word that is not a break kind is still a
+		refusal rather than a guess."""
+		self.assertEqual(shift_tools.canonical_break_kind("Rest"), "")
+		self.assertEqual(shift_tools.canonical_break_kind("Meal"), "")
+		self.assertEqual(shift_tools.canonical_break_kind("Lunch"), "")
+		self.assertEqual(shift_tools.canonical_break_kind(""), "")
+		for alias, canonical in shift_tools.BREAK_KIND_ALIASES.items():
+			with self.subTest(alias=alias):
+				# An alias is the same provision spelled shorter. Both names have
+				# to be about the same break, and `paid` is where a substitution
+				# across meanings would show up first.
+				self.assertIn(canonical, shift_tools.BREAK_KINDS)
+				self.assertIn(alias.lower(), canonical.lower())
+
+	def test_the_refusal_still_enumerates_the_canonical_list(self):
+		"""It is parsed by a machine as well as read by a person: the handset
+		reads the accepted values out of this sentence and builds its retry from
+		them, so it must name what the column HOLDS and not the aliases."""
+		shift = self.a_hot_shift()
+		message = self.tool_error(
+			"log_shift_break",
+			{"shift": shift, "break_kind": "Lunch", "started_at": self.at(16)},
+		)
+		self.assertIn("break_kind must be one of", message)
+		self.assertIn("Water Break", message)
+		self.assertIn("Shade Break", message)
+		self.assertIn("Got 'Lunch'", message)
+		self.assertNotIn("'Water',", message)
+
 
 # ── 6. item 4: one afternoon, not eleven cards ──────────────────────────────
 class OneAfternoonNotElevenCards(Wave3TestCase):
