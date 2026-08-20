@@ -121,7 +121,12 @@ FARM_OPS_ROLES = frozenset({"Field Worker", "Farm Worker", "Foreman", "Crew Lead
 #: afternoon in it. `fill_pipeline.FOREMAN_ROLES` adds System Manager, which is
 #: right there and pointless here — the enrolment gate has already refused an
 #: operator's own account, grant or no grant.
-DISPATCH_ROLES = frozenset({"Foreman", "Farm Manager"})
+#:
+#: DEFINED IN `roles.py` AND ALIASED HERE, from v0.106.0. The list is now
+#: reported to clients as `can_dispatch` on an employee row, and a refusal that
+#: could disagree with the flag the picker greyed a name out on would be worse
+#: than no flag at all.
+DISPATCH_ROLES = role_lib.DISPATCH_ROLES
 
 #: The roles that may ADD A PLACE to one of the four location registers. A
 #: STRICT SUBSET of `DISPATCH_ROLES` — the only gate on this surface narrower

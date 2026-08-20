@@ -398,6 +398,115 @@ class CertificationExpiring(AlertTestCase):
 		self.assertEqual(self.assertFires(self.RULE)["category"], "Workforce")
 
 
+class WhoTheAlertIsAbout(AlertTestCase):
+	"""v0.106.0. `subject_employee`, and why a column beats a string search.
+
+	THE HANDSET WAS READING A NAME OUT OF PROSE. The compliance-to-task picker
+	removes the person an alert is about from the list of people it may be handed
+	to — nobody signs off their own gap — and the only person on an alert was
+	inside the message: *"Applicator License — Timothy Polehn 2025 EXPIRED 36
+	day(s) ago"*. So the app matched candidate names against that sentence, which
+	is a whole-word string search standing in for a foreign key and fails in both
+	directions: a worker spelled differently on the certificate is not excluded,
+	and an alert that happens to quote a second person excludes them too.
+
+	EMPTY IS A REAL ANSWER AND IS THE COMMON ONE. Most alerts are about the
+	operation, and the tests below pin that as hard as they pin the resolution —
+	because a caller must never be able to read a blank as licence to guess.
+	"""
+
+	def a_person(self, docname, full_name, company=MAIN, status="Active"):
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": docname,
+					"employee_name": full_name,
+					"company": company,
+					"status": status,
+					"date_of_joining": "2025-01-01",
+				}
+			],
+		)
+		return docname
+
+	def subject_of(self, alert_type):
+		alert = self.assertFires(alert_type)
+		return frappe.db.get_value(alerts.base.ALERT_DOCTYPE, alert["name"], "subject_employee")
+
+	def test_a_certificate_naming_its_holder_resolves_to_that_employee(self):
+		"""THE ALERT THIS WHOLE MECHANISM EXISTS FOR. `Certification.holder` is
+		free text — the register holds licences issued to the OPERATION as well
+		as to people, and a Link to Employee could not hold both — so an
+		applicator licence identifies its holder by name and nothing else."""
+		self.a_person("HR-EMP-TIM", "Timothy Polehn")
+		self.a_certificate(
+			"Applicator License — Timothy Polehn 2025",
+			cert_type="Applicator License",
+			holder="Timothy Polehn",
+			expires_in_days=-36,
+		)
+		self.assertEqual(self.subject_of("certification_expiring"), "HR-EMP-TIM")
+
+	def test_a_certificate_held_by_the_operation_is_about_nobody(self):
+		"""A GlobalGAP certificate is held by the farm. The default fixture's
+		`holder` IS the company, which is exactly the case that must not resolve
+		to whoever happens to share a name with an entity."""
+		self.a_certificate(expires_in_days=45)
+		self.assertFalse(self.subject_of("certification_expiring"))
+
+	def test_two_employees_of_one_name_resolve_to_neither(self):
+		"""AMBIGUOUS IS NOT A SUBJECT, IT IS TWO PEOPLE — and on this field
+		guessing does not merely mislabel a row, it removes the wrong worker from
+		a picker and can hide the only person qualified to do the job."""
+		self.a_person("HR-EMP-J1", "Juan Garcia")
+		self.a_person("HR-EMP-J2", "Juan Garcia")
+		self.a_certificate(
+			"CDL — J. Garcia",
+			cert_type="Commercial Driver License",
+			holder="Juan Garcia",
+			expires_in_days=-5,
+		)
+		self.assertFalse(self.subject_of("certification_expiring"))
+
+	def test_a_holder_at_another_company_is_not_this_company_s_subject(self):
+		"""The name is only ever resolved within the entity whose alert it is, so
+		a holder at one farm cannot become a subject at another."""
+		self.a_person("HR-EMP-ELSE", "Rosa Delgado", company=OTHER)
+		self.a_certificate(
+			"Applicator — R. Delgado",
+			cert_type="Applicator License",
+			holder="Rosa Delgado",
+			expires_in_days=-5,
+		)
+		self.assertFalse(self.subject_of("certification_expiring"))
+
+	def test_an_alert_about_a_cabin_is_about_nobody(self):
+		"""A stale detector and an uninspected cabin are about the OPERATION.
+		Inventing a person for them would put somebody's name on a gap that is
+		not theirs."""
+		self.a_cabin()
+		self.assertFalse(self.subject_of("housing_inspection_overdue"))
+
+	def test_the_column_is_rewritten_on_a_refresh_not_only_on_a_create(self):
+		"""DERIVED, so it follows the record. A certificate reassigned to another
+		holder is about somebody else from that night on, and an alert still
+		naming the previous holder would remove the wrong person from the
+		picker."""
+		self.a_person("HR-EMP-TIM", "Timothy Polehn")
+		self.a_person("HR-EMP-ANA", "Ana Ruiz")
+		self.a_certificate(
+			"Applicator — handover",
+			cert_type="Applicator License",
+			holder="Timothy Polehn",
+			expires_in_days=-5,
+		)
+		self.assertEqual(self.subject_of("certification_expiring"), "HR-EMP-TIM")
+
+		frappe.db.set_value("Certification", "Applicator — handover", "holder", "Ana Ruiz")
+		self.assertEqual(self.subject_of("certification_expiring"), "HR-EMP-ANA")
+
+
 # ── 2. policy_review_overdue ────────────────────────────────────────────────
 class PolicyReviewOverdue(AlertTestCase):
 	RULE = "policy_review_overdue"

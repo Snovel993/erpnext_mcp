@@ -389,6 +389,24 @@ def alert(row: dict) -> dict:
 	is one key collision away from a pad addressed at the alert instead of at the
 	form.
 
+
+	v0.106.0 ADDS `subject_employee` AND `subject_employee_name`, AND THEY EXIST
+	TO STOP A CLIENT READING A NAME OUT OF PROSE. Until this release the only
+	person on an alert was inside `explanation` — *"Applicator License — Timothy
+	Polehn 2025 EXPIRED 36 day(s) ago"* — and the app was matching candidate names
+	against that sentence to keep somebody from being handed the task of signing
+	off their own gap. That is a whole-word string search standing in for a
+	foreign key, and it fails in both directions: a worker whose name is spelled
+	differently on the certificate is not excluded, and an alert that happens to
+	quote a second person excludes them too.
+
+	`subject_employee` is the Employee docname the sweep derived from the SOURCE
+	RECORD (`alerts/base.py::subject_employee`), and `subject_employee_name` is
+	that person's display name so a screen showing one does not need a second
+	call. Both are `None` far more often than not, and `None` MEANS "this alert
+	is about the operation, or about nobody this server could name" — never
+	"look in the prose instead".
+
 	SPRINT 3 (v0.68.0) ADDS A FOURTH, `rectification` — see `api/rectify.py`. It
 	answers "what fixes this, and what do I call to start it" for every alert
 	type this release names one for: `action_type`, `action_label`,
@@ -414,6 +432,9 @@ def alert(row: dict) -> dict:
 		"days_until_due": row.get("days_until_due"),
 		"subject_doctype": row.get("source_doctype"),
 		"subject_docname": row.get("source_docname"),
+		# v0.106.0. WHO THE ALERT IS ABOUT, AS A DOCNAME. See the docstring.
+		"subject_employee": row.get("subject_employee") or None,
+		"subject_employee_name": row.get("subject_employee_name") or None,
 		"can_dismiss": bool(row.get("can_dismiss")),
 	}
 	request = row.get("signature_request")

@@ -99,6 +99,7 @@ import json
 import frappe
 
 from .. import bucket_bridge, compat, datetimes, locations, pay_stub_pdf, timezones
+from .. import roles as role_lib
 from .. import shifts as shift_records
 from .. import training as training_register
 from ..erpnext_mcp.doctype.farm_task_assignment import farm_task_assignment as assignment_states
@@ -245,7 +246,33 @@ EMPLOYEE_SEARCH_FIELDS = (
 	"date_of_joining",
 	"employment_type",
 	"company",
+	# v0.106.0. THE TWO COLUMNS A PICKER NEEDS AND THIS SEARCH WAS DROPPING.
+	# `designation` is the job title — Checker, Tractor Driver, Foreman — and
+	# `user_id` is the login the person's ROLES hang off. Neither is displayed
+	# raw: `designation` goes out as itself, and `user_id` is spent resolving
+	# `capability` and is NOT returned, because a login is a credential
+	# identifier and a roster read has no business handing one to a handset.
+	"designation",
+	"user_id",
 )
+
+
+def _capability(user_id) -> dict:
+	"""One employee's role capability, flattened for a roster row. v0.106.0.
+
+	`user_id` IS SPENT HERE AND NEVER RETURNED. It is read so the roles hanging
+	off that login can be, and a search result carrying it would hand a handset
+	the login of every person on the register — which is the identifier an
+	attacker needs before a password is worth guessing. The three keys that come
+	back say what the picker has to know and nothing about how to sign in as
+	anybody.
+	"""
+	answer = role_lib.capability_of(user_id)
+	return {
+		"mobile_roles": answer["mobile_roles"],
+		"primary_role": answer["primary_role"],
+		"can_dispatch": answer["can_dispatch"],
+	}
 
 
 def _employee(user: str) -> str:
@@ -1646,6 +1673,31 @@ def search_employees(user: str, query=None, company=None) -> dict:
 	The company filter is the caller's own entities when the app does not name one,
 	never the whole site — the rule `list_available_tasks` states at length — and
 	`guard.scoped` checks the answer again on the way out.
+
+	v0.106.0 ADDS `designation`, `mobile_roles`, `primary_role` AND `can_dispatch`,
+	AND THE REASON IS A PICKER THAT WAS FILTERING ON NOTHING. This is the roster
+	half of every "who should hold this" screen in the app, and until now the only
+	role the mobile surface reported was the CALLER's, from
+	`get_current_user_context`. So a sheet asking "who may approve this" offered
+	the whole crew, the foreman picked a picker, and the refusal arrived after the
+	choice — a 403 about somebody else's roles, which reads as the feature being
+	broken.
+
+	`designation` AND `mobile_roles` ARE DIFFERENT REGISTERS AND BOTH ARE HERE.
+	A designation is what somebody does all day and carries no permission; a role
+	is what they may touch. A Checker has a designation and no role at all. See
+	the job-title table in `roles.py`, which exists because this distinction keeps
+	being asked about in the wrong shape.
+
+	`can_dispatch` IS A COURTESY AND NOT THE BOUNDARY. `guard.require_dispatch_role`
+	still runs on every dispatching call and is unchanged; this exists so a picker
+	can grey a row out rather than let somebody discover the refusal after they
+	have chosen. It is computed from the same frozenset the gate refuses on, so
+	the two cannot come to disagree.
+
+	`user_id` IS READ AND NOT RETURNED. The roles hang off the login, so it has to
+	be fetched; handing it back would publish the login of every person on the
+	register, which is a credential identifier and not a roster fact.
 	"""
 	allowed = guard.require_scope(user)
 	personnel.require_hr_role()
@@ -1680,6 +1732,13 @@ def search_employees(user: str, query=None, company=None) -> dict:
 				"date_of_joining": row.get("date_of_joining"),
 				"employment_type": row.get("employment_type"),
 				"company": row.get("company"),
+				"designation": row.get("designation") or None,
+				# v0.106.0. WHAT EACH PERSON MAY DO, so a picker can stop offering
+				# work to somebody the server is about to refuse. See
+				# `roles.capability_of` — `can_dispatch` is computed off the same
+				# frozenset `guard.require_dispatch_role` refuses on, and it is a
+				# COURTESY rather than the boundary: the gate is still on every call.
+				**_capability(row.get("user_id")),
 			}
 			for row in rows or []
 		],
@@ -10766,6 +10825,15 @@ def get_training_compliance_report(
 	is called here as well as one layer down, for the same reason the five
 	discipline routes call it — the refusal should happen before the roster is
 	read, not after.
+
+	THE ANSWER IS THE TOOL'S, UNCHANGED, AND ITS SHAPE IS DOCUMENTED IN FULL AT
+	`tools/training.py::get_training_compliance_report`. Read that block before
+	writing a client against this: `requirements` is spelled the same at two
+	levels and holds two different shapes — the COLUMN AXIS at the top level, the
+	CELLS on a matrix row — which is how a phone came to draw an empty grid for
+	months without erroring. v0.106.0 adds `cells` and `statuses` as row aliases
+	and `designation` beside `job_title`, all additive, so a client already
+	reading the old spellings reads exactly what it read before.
 	"""
 	personnel.require_hr_role()
 	allowed = guard.require_scope(user)
@@ -12885,3 +12953,173 @@ def submit_app_feedback(
 		"screenshot_stored": bool(answer.get("screenshot_stored")),
 		"screenshot_omitted": answer.get("screenshot_omitted"),
 	}
+
+
+# ── 153. materialize_task_for_alert ──────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("materialize_task_for_alert", mutating=True, limit=guard.WRITE_LIMIT)
+def materialize_task_for_alert(
+	user: str,
+	alert=None,
+	urgency=None,
+	assigned_to=None,
+	employee=None,
+	company=None,
+) -> dict:
+	"""One compliance alert, one Farm Task, handed to one person. v0.106.0.
+
+	THE ROUTE THE APP HAS BEEN CALLING AND GETTING A 404 FROM. `MobileAPI.swift`
+	has named `materialize_task_for_alert` since the compliance-to-task feature
+	shipped, `ComplianceAPI.createTaskFromAlert` tries it first on every raise,
+	and until this release the sidecar had no such path — so every task raised
+	from an alert went the long way round: `create_farm_task` with a title, a
+	type and a notes blob the HANDSET composed out of the alert's prose, followed
+	by `assign_farm_task` when the created task came back holding nobody.
+
+	WHY THE LONG WAY ROUND IS WORSE, WHICH IS THE ARGUMENT FOR THIS EXISTING.
+	The fallback's task is not linked to the alert. `source_alert` is not on
+	`create_farm_task`'s signature and deliberately so — it is in the list of
+	five arguments that door does not take — so the task a foreman raised and the
+	alert it answers are two records with no edge between them. Nothing closes
+	the alert when the task is completed, `linked_task` on the calendar row stays
+	empty, and the next sweep raises the same alert again beside the task
+	somebody is already holding. It also re-decides server-side facts on the
+	handset: the task type comes off a Swift switch on the alert's title rather
+	than off the rule's recipe, and the evidence contract is whatever the app
+	guessed rather than what the compliance rule requires.
+
+	`rectify_alert` IS NOT THIS AND STAYS. That route asks the alert what its fix
+	IS and refuses one whose fix is a form rather than a task — it is the
+	"tap the alert, do what it says" door, and it takes no assignee because
+	the rectification decides everything. This is the "hand this to Ana with High
+	urgency" door: it takes the two decisions a person standing in an orchard
+	makes, and it does not consult `describe_rectification` at all, because a
+	foreman may legitimately raise a task for an alert whose canonical fix is a
+	desk form somebody else will file later.
+
+	FOREMAN AND ABOVE, exactly as `create_farm_task` is, and for the same reason:
+	this raises work onto somebody else's list. `guard.require_dispatch_role`.
+
+	THE ANSWER IS A `FarmTask`, not a report, because the app decodes one. The
+	three keys beside it — `alert`, `already_answered`, `routing_notes` — are
+	additive and a client that ignores them is not wrong. `already_answered` is
+	the one worth reading: this is IDEMPOTENT, so a second tap on the same alert
+	returns the task the first tap raised rather than a second task, and a client
+	that reported "created" both times would be lying to the person tapping.
+	"""
+	guard.require_dispatch_role(user, "Raising a farm task from a compliance alert")
+	allowed = guard.require_scope(user)
+	# `company` is declared and NOT forwarded to the tool, which is not an
+	# oversight. The task's entity is the ALERT's — it is the alert's own column
+	# and the recipe's — and a body naming a different one would be asking for a
+	# task about one farm's cabin to be filed against another farm. Declaring it
+	# keeps `routes.bind` from dropping a key the app already sends, and running
+	# it through `require_company` keeps the argument meaning what it means
+	# everywhere else on this surface: an entity this caller reaches.
+	guard.require_company(user, company, allowed)
+	name = guard.require_scoped_doc(ALERT, alert, "alert", allowed)
+
+	inner: dict = {"alert": name}
+	if urgency not in (None, ""):
+		inner["urgency"] = str(urgency).strip()
+	person, label = _one_spelling(assigned_to, employee, "assigned_to", "employee")
+	if person:
+		inner["assigned_to"] = _employee_argument(person, allowed, label)
+
+	data = dispatch.materialize_task_for_alert(inner).data
+	docname = str(data.get("task") or "")
+	# THE TOOL ANSWERS A REPORT AND THE APP DECODES A TASK, so the task is read
+	# back and shaped here rather than the report's keys being renamed into
+	# something task-shaped. `shape.task` is what every other task on this
+	# surface goes through, and a second, hand-built spelling of a Farm Task is
+	# exactly how `completed_at` went missing for four releases.
+	out: dict = {}
+	if docname:
+		row = dispatch.get_farm_task({"task": docname}).data
+		out = shape.task(row, row.get("live_assignment") or {})
+	out["alert"] = name
+	out["already_answered"] = bool(data.get("already_answered"))
+	if data.get("routing_notes"):
+		out["routing_notes"] = data["routing_notes"]
+	if data.get("cohort_note"):
+		out["cohort_note"] = data["cohort_note"]
+	return out
+
+
+# ── 154. list_certifications ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("list_certifications", limit=guard.READ_LIMIT)
+def list_certifications(
+	user: str,
+	company=None,
+	cert_type=None,
+	status=None,
+	holder=None,
+	expiring_only=None,
+	limit=None,
+) -> dict:
+	"""The certificate and licence register, soonest expiry first. v0.106.0.
+
+	WHAT A PHONE WANTS IT FOR IS NOT THE REGISTER, IT IS THE HOLDER LIST. The
+	compliance-to-task sheet asks "who may I hand a pesticide job to", and the
+	honest answer is "whoever holds a current applicator licence" — which lives
+	here and nowhere else. Until this release the app had to infer it from the
+	training matrix, which answers a DIFFERENT question: a training record says
+	somebody sat through the course, and a certificate says the state issued them
+	a licence. On this farm those are not the same set of people.
+
+	THE DISPATCH GATE, matching `list_farm_task_templates` rather than the
+	unguarded field reads. A certificate register names people and says which of
+	them is out of compliance, which is a personnel fact — the picker who holds
+	the phone is entitled to their own tasks, not to a list of everybody whose
+	licence has lapsed.
+
+	`expiring_only` IS FORWARDED AND `expired` IS NOT A FILTER. The tool reports
+	`expired` off the DATE rather than off the status column, because nothing
+	rewrites a status when a date passes; a client filtering on `status` would
+	show a lapsed licence as Active. Read `expired` and `inside_renewal_window`
+	on each row.
+	"""
+	guard.require_dispatch_role(user, "Reading the certificate register")
+	allowed = guard.require_scope(user)
+	entity = guard.require_company(user, company, allowed) or (allowed[0] if allowed else "")
+
+	inner: dict = {"company": entity}
+	for key, value in (
+		("cert_type", cert_type),
+		("status", status),
+		("holder", holder),
+		("expiring_only", expiring_only),
+		("limit", limit),
+	):
+		if value not in (None, ""):
+			inner[key] = value
+
+	data = evidence_tools.list_certifications(inner).data
+	data["certifications"] = guard.scoped(data.get("certifications") or [], allowed)
+	data["certification_count"] = len(data["certifications"])
+	return data
+
+
+# ── 155. get_certification ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST", "GET"])
+@guard.endpoint("get_certification", limit=guard.READ_LIMIT)
+def get_certification(user: str, certification=None, company=None) -> dict:
+	"""One certificate, with every lapse in its history. v0.106.0.
+
+	THE DETAIL BEHIND A ROW OF `list_certifications`, and the lapse history is
+	why it is a separate call rather than more columns on the list: a certificate
+	renewed late has a period during which it was not a defence, the register
+	keeps that visible on purpose, and it is several rows per certificate.
+
+	SCOPED THE SAME WAY EVERY OTHER DOCNAME ON THIS SURFACE IS. A certificate
+	belonging to an entity this account cannot reach answers "not found" rather
+	than "refused", so guessing docnames cannot be used to learn whether another
+	farm holds a particular licence.
+	"""
+	guard.require_dispatch_role(user, "Reading a certificate")
+	allowed = guard.require_scope(user)
+	guard.require_company(user, company, allowed)
+	name = guard.require_scoped_doc(CERTIFICATION, certification, "certification", allowed)
+
+	return evidence_tools.get_certification({"certification": name}).data

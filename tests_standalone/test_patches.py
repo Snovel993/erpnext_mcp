@@ -27,6 +27,7 @@ import unittest
 
 from erpnext_mcp import install, settings
 from erpnext_mcp.patches import (
+	backfill_alert_subject_employee,
 	backfill_completion_signatures,
 	fix_literal_newlines_in_instructions,
 	migrate_declarative_rules,
@@ -58,6 +59,10 @@ PATCHES = (
 		fix_literal_newlines_in_instructions,
 	),
 	("erpnext_mcp.patches.rename_discipline_record", rename_discipline_record),
+	(
+		"erpnext_mcp.patches.backfill_alert_subject_employee",
+		backfill_alert_subject_employee,
+	),
 	("erpnext_mcp.patches.migrate_incident_tool_switches", migrate_incident_tool_switches),
 )
 
@@ -710,3 +715,133 @@ class TheIncidentToolSwitchMigration(FreshSite):
 		migrate_incident_tool_switches.execute()
 		set_default_tool_switches.execute()
 		self.assertEqual(self._stored().get("allow_create_incident_record"), "1")
+
+
+class BackfillAlertSubjectEmployee(FreshSite):
+	"""Naming the person an alert is about, on the alerts a site already has.
+
+	THE COLUMN IS WHAT KEEPS A HANDSET FROM READING A NAME OUT OF PROSE. The
+	compliance-to-task picker removes the subject of an alert from the list of
+	people it may be handed to — nobody signs off their own gap — and until
+	v0.106.0 the only way to identify them was to search the alert's message for
+	a candidate's full name. The sweep would fill the column overnight; this
+	fills it now, because a control that is off until tomorrow was off when
+	somebody used it this afternoon.
+	"""
+
+	ALERT = "Compliance Alert"
+
+	def an_alert(self, name, doctype, docname, subject=""):
+		row = {
+			"name": name,
+			"alert_key": name,
+			"alert_type": "certification_expiring",
+			"severity": "Warning",
+			"category": "Certifications",
+			"company": "Test Farm LLC",
+			"source_doctype": doctype,
+			"source_docname": docname,
+			"alert_message": f"{docname} is inside its renewal window.",
+			"dismissed": 0,
+		}
+		if subject:
+			row["subject_employee"] = subject
+		STORE.seed(self.ALERT, [row])
+		return name
+
+	def a_person(self, name, full_name, status="Active"):
+		STORE.seed(
+			"Employee",
+			[
+				{
+					"name": name,
+					"employee_name": full_name,
+					"company": "Test Farm LLC",
+					"status": status,
+				}
+			],
+		)
+		return name
+
+	def stored(self, alert):
+		return frappe.db.get_value(self.ALERT, alert, "subject_employee")
+
+	def test_an_alert_pointing_at_an_employee_is_about_that_employee(self):
+		self.a_person("HR-EMP-0001", "Ana Ruiz")
+		alert = self.an_alert("CA-EMP-0001", "Employee", "HR-EMP-0001")
+		backfill_alert_subject_employee.execute()
+		self.assertEqual(self.stored(alert), "HR-EMP-0001")
+
+	def test_an_alert_about_a_cabin_is_about_nobody_and_that_is_the_answer(self):
+		"""EMPTY IS A REAL ANSWER AND IS THE COMMON ONE. A stale water test, an
+		uninspected cabin and an overdue filing are about the OPERATION, and a
+		patch that invented a person for them would put somebody's name on a gap
+		that is not theirs."""
+		STORE.seed("Housing Unit", [{"name": "Cabin 1", "company": "Test Farm LLC"}])
+		alert = self.an_alert("CA-CABIN-0001", "Housing Unit", "Cabin 1")
+		report = backfill_alert_subject_employee.backfill_alert_subject_employee()
+		self.assertFalse(self.stored(alert))
+		self.assertEqual(report["no_subject"], 1)
+		self.assertEqual(report["filled"], 0)
+
+	def test_a_certificate_naming_one_holder_by_name_resolves_to_them(self):
+		"""`Certification.holder` IS FREE TEXT — the register holds licences
+		issued to the operation as well as to people — so the applicator-licence
+		alert, which is the one this whole mechanism exists for, has to come
+		through a name match."""
+		self.a_person("HR-EMP-0002", "Timothy Polehn")
+		STORE.seed(
+			"Certification",
+			[
+				{
+					"name": "Applicator License 2025",
+					"cert_name": "Applicator License 2025",
+					"cert_type": "Applicator License",
+					"company": "Test Farm LLC",
+					"holder": "Timothy Polehn",
+				}
+			],
+		)
+		alert = self.an_alert("CA-CERT-0001", "Certification", "Applicator License 2025")
+		backfill_alert_subject_employee.execute()
+		self.assertEqual(self.stored(alert), "HR-EMP-0002")
+
+	def test_two_people_of_the_same_name_resolve_to_neither(self):
+		"""AMBIGUOUS IS NOT A SUBJECT, IT IS TWO PEOPLE. Picking the first would
+		remove the wrong person from the picker — which on this field hides the
+		only worker qualified to do the job."""
+		self.a_person("HR-EMP-0003", "Juan Garcia")
+		self.a_person("HR-EMP-0004", "Juan Garcia")
+		STORE.seed(
+			"Certification",
+			[
+				{
+					"name": "CDL 2025",
+					"cert_name": "CDL 2025",
+					"cert_type": "Commercial Driver License",
+					"company": "Test Farm LLC",
+					"holder": "Juan Garcia",
+				}
+			],
+		)
+		alert = self.an_alert("CA-CERT-0002", "Certification", "CDL 2025")
+		backfill_alert_subject_employee.execute()
+		self.assertFalse(self.stored(alert))
+
+	def test_a_subject_already_stored_is_not_rewritten(self):
+		self.a_person("HR-EMP-0005", "Rosa Delgado")
+		self.a_person("HR-EMP-0006", "Marco Vega")
+		alert = self.an_alert("CA-EMP-0002", "Employee", "HR-EMP-0005", subject="HR-EMP-0006")
+		report = backfill_alert_subject_employee.backfill_alert_subject_employee()
+		self.assertEqual(self.stored(alert), "HR-EMP-0006")
+		self.assertEqual(report["already_set"], 1)
+		self.assertEqual(report["filled"], 0)
+
+	def test_it_is_a_no_op_the_second_time(self):
+		self.a_person("HR-EMP-0007", "Ana Ruiz")
+		alert = self.an_alert("CA-EMP-0003", "Employee", "HR-EMP-0007")
+		backfill_alert_subject_employee.execute()
+		second = backfill_alert_subject_employee.backfill_alert_subject_employee()
+		self.assertEqual(self.stored(alert), "HR-EMP-0007")
+		self.assertEqual(second["filled"], 0)
+		self.assertEqual(second["already_set"], 1)

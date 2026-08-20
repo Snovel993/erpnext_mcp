@@ -302,6 +302,12 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		# The login on a filed note is resolved from the caller, not reported by
 		# a handset that several people share.
 		"submit_app_feedback",
+		# v0.106.0. HERE RATHER THAN IN `PENDING_IOS_INTEGRATION` because
+		# `MobileAPI.swift` names it — `materializeTaskForAlert =
+		# path("materialize_task_for_alert")` — and `ComplianceAPI.createTaskFromAlert`
+		# has been calling it on every raise and falling back on the 404 since
+		# the compliance-to-task sheet shipped. This is the release that answers.
+		"materialize_task_for_alert",
 	}
 	FILES: ClassVar[set[str]] = {"stage_file_chunk", "finalize_staged_file"}
 
@@ -375,6 +381,16 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 	#: has one. Listed here rather than in `MOBILE` so this file keeps claiming
 	#: only what the compiled Swift actually names.
 	PENDING_IOS_INTEGRATION: ClassVar[set[str]] = {
+		# v0.106.0. The certificate register's two reads, HERE FOR THIS SET'S
+		# ORDINARY REASON — `MobileAPI.swift` names neither yet. The server side
+		# is published so the iOS half is a client change rather than a release
+		# of both: "who holds a current applicator licence" is the question the
+		# compliance-to-task sheet's picker actually wants answered, and the
+		# training matrix it uses instead answers a different one (somebody sat
+		# through the course, which is not the same as the state issuing them a
+		# licence). They move up when the constants land.
+		"list_certifications",
+		"get_certification",
 		"create_farm_location",
 		"universal_scan",
 		"classify_receipt",
@@ -4584,3 +4600,205 @@ class ReportingAnIncidentIsNotAdministration(MobileAPITestCase):
 		with self.assertRaises(Exception) as caught:
 			mobile_api.get_discipline_report(employee=WORKER_EMPLOYEE)
 		self.assertIn("personnel register", str(caught.exception))
+
+
+class ThePickerCanSeeWhoIsQualified(MobileAPITestCase):
+	"""v0.106.0. Roles on a roster row, and why a designation could not stand in.
+
+	THE PICKER WAS FILTERING ON NOTHING. Every "who should hold this" screen in
+	the app builds its candidate list from `search_employees`, and until this
+	release the only role the mobile surface reported was the CALLER's, from
+	`get_current_user_context`. So a sheet asking who may approve a compliance
+	task offered the whole crew, the foreman picked a picker, and the refusal
+	arrived after the choice — a 403 about somebody else's roles, which reads as
+	the feature being broken rather than as a permission working.
+
+	A COURTESY AND NOT THE BOUNDARY, which is the property the last test here
+	pins. `guard.require_dispatch_role` still runs on every dispatching call.
+	"""
+
+	def a_colleague(self, docname, full_name, login=None, designation="", role=None):
+		"""One person on the register, enrolled for real where they have a login.
+
+		ENROLLED THROUGH `create_mobile_user` RATHER THAN `set_roles`, and the
+		difference is the whole point of these tests. `set_roles` writes the
+		double's `ROLES` dict, which is what `frappe.get_roles` reads; a role
+		on a real bench is a `Has Role` ROW, which is what `roles.roles_of`
+		reads and what this feature reports. Faking the first and asserting the
+		second would test the double.
+		"""
+		if login and role:
+			self.enrol(email=login, name=full_name, role=role)
+			frappe.local.session.user = "Administrator"
+		row = {
+			"name": docname,
+			"employee_name": full_name,
+			"company": MAIN,
+			"status": "Active",
+		}
+		if login:
+			row["user_id"] = login
+		if designation:
+			row["designation"] = designation
+		STORE.seed("Employee", [row])
+		return docname
+
+	def search(self, query):
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+		return {row["name"]: row for row in mobile_api.search_employees(query=query)["employees"]}
+
+	def test_a_foreman_comes_back_marked_as_one(self):
+		self.a_colleague("EMP-FOREMAN", "Sol Herrera", "sol@example.test", role="Foreman")
+		row = self.search("Herrera")["EMP-FOREMAN"]
+		self.assertEqual(row["mobile_roles"], ["Foreman"])
+		self.assertEqual(row["primary_role"], "Foreman")
+		self.assertTrue(row["can_dispatch"])
+
+	def test_a_picker_comes_back_marked_as_not_one(self):
+		self.a_colleague("EMP-PICKER", "Nilo Cruz", "nilo@example.test", role="Field Worker")
+		row = self.search("Cruz")["EMP-PICKER"]
+		self.assertEqual(row["mobile_roles"], ["Field Worker"])
+		self.assertFalse(row["can_dispatch"])
+
+	def test_somebody_with_no_login_has_no_roles_and_says_which_it_is(self):
+		"""MOST OF A PICKING CREW. "This person may not dispatch" and "this
+		person has no account on this system" are different sentences to put in
+		front of a foreman, and a bare empty list says only the first."""
+		self.a_colleague("EMP-NOLOGIN", "Pilar Vega")
+		row = self.search("Vega")["EMP-NOLOGIN"]
+		self.assertEqual(row["mobile_roles"], [])
+		self.assertFalse(row["can_dispatch"])
+
+	def test_a_designation_is_not_a_role_and_both_are_returned(self):
+		"""A Checker is a designation and carries no permission at all; a Foreman
+		is a role that several designations hold. Neither is derived from the
+		other, which is why both are on the row."""
+		self.a_colleague(
+			"EMP-CHECKER", "Rita Salas", "rita@example.test", designation="Checker", role="Field Worker"
+		)
+		row = self.search("Salas")["EMP-CHECKER"]
+		self.assertEqual(row["designation"], "Checker")
+		self.assertFalse(row["can_dispatch"])
+
+	def test_the_login_is_read_and_never_returned(self):
+		"""`user_id` has to be fetched — a role hangs off a login — and handing it
+		back would publish the login of every person on the register, which is the
+		identifier an attacker needs before a password is worth guessing."""
+		self.a_colleague("EMP-FOREMAN", "Sol Herrera", "sol@example.test", role="Foreman")
+		row = self.search("Herrera")["EMP-FOREMAN"]
+		self.assertNotIn("user_id", row)
+		self.assertNotIn("sol@example.test", str(row))
+
+	def test_get_employee_carries_the_same_answer(self):
+		"""One record and the register have to agree, or a detail screen and the
+		picker behind it disagree about the same person."""
+		self.a_colleague("EMP-FOREMAN", "Sol Herrera", "sol@example.test", role="Foreman")
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+		detail = mobile_api.get_employee(employee="EMP-FOREMAN")
+		self.assertTrue(detail["can_dispatch"])
+		self.assertEqual(detail["mobile_roles"], ["Foreman"])
+		self.assertTrue(detail["capability"]["has_login"])
+
+	def test_the_flag_and_the_gate_cannot_disagree(self):
+		"""THE PROPERTY THAT MAKES THE COURTESY SAFE. `can_dispatch` is computed
+		from the same frozenset `guard.require_dispatch_role` refuses on, so a
+		row the picker greyed out is a row the server would have refused, and a
+		row it offered is one the server accepts."""
+		self.a_colleague("EMP-PICKER", "Nilo Cruz", "nilo@example.test", role="Field Worker")
+		self.a_colleague("EMP-FOREMAN", "Sol Herrera", "sol@example.test", role="Foreman")
+		found = {**self.search("Cruz"), **self.search("Herrera")}
+
+		for docname, login in (("EMP-PICKER", "nilo@example.test"), ("EMP-FOREMAN", "sol@example.test")):
+			with self.subTest(employee=docname):
+				refused = False
+				try:
+					guard.require_dispatch_role(login, "Raising a farm task")
+				except frappe.PermissionError:
+					refused = True
+				self.assertEqual(found[docname]["can_dispatch"], not refused)
+
+
+class TheCertificateRegisterReachesThePhone(MobileAPITestCase):
+	"""v0.106.0. `list_certifications` / `get_certification`, which 404'd.
+
+	WHY A PHONE WANTS THE LICENCE REGISTER AT ALL. "Who may I hand this pesticide
+	job to" is answered by who holds a current applicator licence, and by nothing
+	else. The app had been inferring it from the training matrix, which answers a
+	different question: a training record says somebody sat through the course
+	and a certificate says the state issued them a licence, and on a real farm
+	those are not the same set of people.
+	"""
+
+	def a_certificate(self, name, **overrides):
+		payload = {
+			"cert_name": name,
+			"cert_type": "Applicator License",
+			"company": MAIN,
+			"holder": "Sol Herrera",
+			"issuing_body": "Oregon Department of Agriculture",
+			"issued_date": frappe.utils.add_days(frappe.utils.today(), -300),
+			"expiration_date": frappe.utils.add_days(frappe.utils.today(), 40),
+			"renewal_window_days": 90,
+			"status": "Active",
+		}
+		payload.update(overrides)
+		STORE.seed("Certification", [{**payload, "name": name}])
+		return name
+
+	def as_foreman(self):
+		set_roles(WORKER, ["Field Worker", "Foreman"])
+		self.be()
+
+	def test_a_foreman_reads_the_register(self):
+		self.a_certificate("Applicator — Sol Herrera 2026")
+		self.as_foreman()
+		data = mobile_api.list_certifications()
+		self.assertEqual([row["name"] for row in data["certifications"]], ["Applicator — Sol Herrera 2026"])
+		self.assertEqual(data["certification_count"], 1)
+
+	def test_a_picker_does_not(self):
+		"""THE DISPATCH GATE, matching `list_farm_task_templates`. A register that
+		names everybody whose licence has lapsed is a personnel document, not a
+		field read."""
+		self.a_certificate("Applicator — Sol Herrera 2026")
+		self.be()
+		with self.assertRaises(frappe.PermissionError) as caught:
+			mobile_api.list_certifications()
+		self.assertIn("certificate register", str(caught.exception))
+
+	def test_expiry_is_read_from_the_date_and_not_from_the_status_column(self):
+		"""Nothing rewrites a status when a date passes, so a client filtering on
+		`status` would show a lapsed licence as Active. `expired` is the answer."""
+		self.a_certificate(
+			"Applicator — lapsed",
+			expiration_date=frappe.utils.add_days(frappe.utils.today(), -15),
+		)
+		self.as_foreman()
+		row = mobile_api.list_certifications()["certifications"][0]
+		self.assertEqual(row["status"], "Active")
+		self.assertTrue(row["expired"])
+
+	def test_the_detail_carries_the_lapse_history(self):
+		self.a_certificate("Applicator — Sol Herrera 2026")
+		self.as_foreman()
+		detail = mobile_api.get_certification(certification="Applicator — Sol Herrera 2026")
+		self.assertEqual(detail["name"], "Applicator — Sol Herrera 2026")
+		self.assertIn("renewals", detail)
+		self.assertIn("lapses", detail)
+
+	def test_another_entitys_certificate_is_not_found_rather_than_refused(self):
+		"""Scoped like every other docname here, so guessing docnames cannot be
+		used to learn whether another farm holds a particular licence."""
+		self.a_certificate("Applicator — elsewhere", company=OTHER)
+		self.as_foreman()
+		with self.assertRaises(frappe.DoesNotExistError):
+			mobile_api.get_certification(certification="Applicator — elsewhere")
+
+	def test_the_list_is_scoped_on_the_way_out_too(self):
+		self.a_certificate("Applicator — Sol Herrera 2026")
+		self.a_certificate("Applicator — elsewhere", company=OTHER)
+		self.as_foreman()
+		found = {row["name"] for row in mobile_api.list_certifications()["certifications"]}
+		self.assertEqual(found, {"Applicator — Sol Herrera 2026"})

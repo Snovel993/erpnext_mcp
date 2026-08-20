@@ -1195,6 +1195,61 @@ def roles_of(user: str) -> list:
 	return [name for name in ROLE_NAMES if name in held]
 
 
+#: The roles that may DISPATCH — raise work, send somebody to it, or read a
+#: board that is not their own. Defined HERE, beside the specs, rather than in
+#: `api/guard.py` where it used to live and which now imports it: a client
+#: asking "may this person be handed an approval task" and the server refusing
+#: the same person must be reading one list, and two frozensets in two modules
+#: are two lists that agree until somebody edits one.
+DISPATCH_ROLES = frozenset({"Foreman", "Farm Manager"})
+
+
+def capability_of(user_id: str) -> dict:
+	"""What this app's roles say ONE PERSON may do. Never raises. v0.106.0.
+
+	WHY A HANDSET NEEDS THIS AT ALL. A picker screen that offers everybody as the
+	holder of an approval task offers the wrong people: the server refuses a
+	Field Worker, so the foreman picks a name, taps Assign, and reads a 403 about
+	somebody else's roles. The app cannot work the answer out — a `designation`
+	is a job title and not a permission, and until this release the mobile API
+	returned no role on anybody but the CALLER, from
+	`get_current_user_context`. So the picker filtered by nothing, or by
+	designation, which is a different register (see the table below).
+
+	`can_dispatch` IS THE ANSWER TO THE QUESTION ACTUALLY BEING ASKED, and it is
+	computed from `DISPATCH_ROLES` — the same frozenset `guard.require_dispatch_role`
+	refuses on — rather than from a client-side list of role names that would go
+	stale the release a seventh role is added.
+
+	A COURTESY, NOT A BOUNDARY, and every caller has to be told so. The gate is
+	`guard.require_dispatch_role` on the server, on every call, and it is
+	unchanged; this exists so a picker can grey a row out instead of letting
+	somebody discover the refusal after they have chosen. A client that trusted
+	this INSTEAD of the server would be a sign on a door with no lock.
+
+	`""` OR AN EMPTY ANSWER IS NOT "no roles". A worker with no `user_id` has no
+	login and therefore no roles to read — which is most of a picking crew — and
+	`has_login` says which of the two a caller is looking at, because "this
+	person may not dispatch" and "this person has no account on this system" are
+	different sentences to put in front of a foreman.
+	"""
+	login = str(user_id or "").strip()
+	if not login:
+		return {"has_login": False, "mobile_roles": [], "primary_role": None, "can_dispatch": False}
+	held = roles_of(login)
+	return {
+		"has_login": True,
+		"mobile_roles": held,
+		# Spec order, which is ascending capability — see `ROLE_SPECS`. The
+		# FIRST is the least; a display wanting "Foreman" out of somebody who is
+		# also a Field Worker wants the last, so both are reported rather than
+		# this picking one and being wrong for half the callers.
+		"primary_role": held[0] if held else None,
+		"senior_role": held[-1] if held else None,
+		"can_dispatch": bool(set(held) & DISPATCH_ROLES),
+	}
+
+
 def all_roles_of(user: str) -> list:
 	"""Every role on a user, this app's and everybody else's. Sorted."""
 	try:

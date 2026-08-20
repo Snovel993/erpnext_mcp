@@ -3978,6 +3978,19 @@ def materialize_task_for_alert(args: dict) -> ToolResult:
 	Refuses with the same "no recipe" explanation `generate_tasks_from_compliance_alerts`
 	reports in `skipped_unmapped`, rather than silently doing nothing, because a mobile
 	caller has no report to read afterwards — the refusal IS the report.
+
+	v0.106.0 TAKES TWO OPTIONAL OVERRIDES, `urgency` AND `assigned_to`, AND THE
+	SWEEP TAKES NEITHER. A nightly run has no opinion about who should hold a job
+	or how urgent it is beyond what the alert says; a foreman standing in front of
+	one alert has both, and this is the door they come through. Neither is
+	required and neither changes the recipe: the task type, the evidence contract
+	and what record it has to produce are still decided by the rule, because those
+	are what the alert is FOR. What the caller may decide is who and how soon.
+
+	`assigned_to` IS SCOPE-CHECKED BY THE WRAPPER, NOT HERE, for the same reason
+	every other Employee argument on the mobile surface is — `api/mobile.py`
+	holds the caller's entity list and this module does not. A tool caller on the
+	MCP transport is an operator's console and is trusted with a docname.
 	"""
 	_require()
 	compat.require_doctype(
@@ -4004,7 +4017,11 @@ def materialize_task_for_alert(args: dict) -> ToolResult:
 	if not row:
 		raise ToolError(f"no Compliance Alert called {name!r}. get_compliance_calendar lists them.")
 	row = dict(row)
-	if row.get("dismissed"):
+	# `compat.checked` AND NOT `bool()`. A Check field does not always come back
+	# as an integer, and `bool("0")` is True — which here refused to raise a task
+	# for EVERY open alert on the calendar while reporting it as dismissed, which
+	# is the one refusal a caller would believe. See `compat.checked`.
+	if compat.checked(row.get("dismissed")):
 		raise ToolError(f"{name} is dismissed. A dismissed alert is not open work. Nothing was created.")
 
 	existing = _already_answered([name])
@@ -4028,7 +4045,7 @@ def materialize_task_for_alert(args: dict) -> ToolResult:
 			"the task by hand with create_farm_task."
 		)
 
-	entry = _task_from_alert(row, recipe, dry_run=False)
+	entry = _task_from_alert(row, recipe, dry_run=False, overrides=_overrides(args, row))
 	# v0.98.0. A GROUP CURRICULUM GETS ITS TASK AND IS TOLD ABOUT THE COHORT.
 	# This tool answers ONE docname by design — a tap on a phone names the alert
 	# somebody is looking at, not a filter — so it does not bundle, and bundling
@@ -4043,6 +4060,29 @@ def materialize_task_for_alert(args: dict) -> ToolResult:
 		summary=f"{name}: raised {entry.get('task_type')} task {entry.get('task')}",
 		docstatus_delta="none → 0 (created)",
 	)
+
+
+def _overrides(args: dict, row: dict) -> dict:
+	"""The two things a single-row caller may decide, validated. v0.106.0.
+
+	Both are checked HERE rather than left to the doctype, because a Select that
+	refuses on save does it from inside `doc.insert()` — after the alert has been
+	read, the recipe resolved and the routing worked out — and the refusal a
+	caller gets back names a Frappe field rather than the argument they sent.
+	"""
+	out: dict = {}
+	urgency = as_str(args, "urgency")
+	if urgency:
+		out["urgency"] = as_choice(FARM_TASK, "urgency", urgency, "urgency")
+	assigned = as_str(args, "assigned_to")
+	if assigned:
+		if compat.doctype_exists(EMPLOYEE) and not frappe.db.exists(EMPLOYEE, assigned):
+			raise ToolError(
+				f"no Employee called {assigned!r}. Nothing was created — a task raised onto a "
+				"name nobody holds is a job in a pool no one is allowed to claim."
+			)
+		out["assigned_to"] = assigned
+	return out
 
 
 def _cohort_note(row: dict) -> str:
@@ -4435,7 +4475,18 @@ def _already_answered(alert_names: list) -> dict:
 	return {str(row["source_alert"]): str(row["name"]) for row in rows or []}
 
 
-def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
+def _task_from_alert(row: dict, recipe: dict, dry_run: bool, overrides: dict | None = None) -> dict:
+	"""Build (and, unless this is a dry run, insert) one alert's task.
+
+	`overrides` IS ONLY EVER THE SINGLE-ROW PATH'S. The sweep passes nothing and
+	gets what it has always got: the urgency the alert's own severity implies and
+	the holder the recipe's routing worked out. `materialize_task_for_alert` — a
+	foreman looking at one alert and choosing — may pass `urgency` and
+	`assigned_to`, and each is a DELIBERATE OVERRIDE of a server-side derivation
+	rather than a value the server had no opinion about. Both are recorded in
+	`routing_notes` so the answer says which of them was the caller's.
+	"""
+	overrides = dict(overrides or {})
 	subject = str(row.get("source_docname") or "")
 	# v0.22.5. Resolved BEFORE the dry-run return, so a dry run reports the person
 	# the task would land on. A dry run that could not answer "who gets this" would
@@ -4443,13 +4494,32 @@ def _task_from_alert(row: dict, recipe: dict, dry_run: bool) -> dict:
 	routing_notes: list = []
 	source = _source_row(row)
 	assignee = _assignee_for(recipe, row, source, routing_notes)
+	# THE CALLER'S CHOICE OF PERSON BEATS THE RECIPE'S, and it is not close. A
+	# resolver walks a column to guess who ought to hold this; a foreman naming
+	# somebody is looking at the orchard. The recipe's own answer is still
+	# reported, because "this would have gone to Ana" is what tells an operator a
+	# resolver is pointing at the wrong column.
+	chosen = str(overrides.get("assigned_to") or "").strip()
+	if chosen:
+		if assignee and assignee != chosen:
+			routing_notes.append(
+				f"the recipe routed this to {assignee!r}; the caller named {chosen!r} instead."
+			)
+		assignee = chosen
+	urgency = SEVERITY_URGENCY.get(str(row.get("severity") or ""), "Normal")
+	asked = str(overrides.get("urgency") or "").strip()
+	if asked and asked != urgency:
+		routing_notes.append(
+			f"{row.get('severity') or 'Warning'} severity implies {urgency} urgency; the caller "
+			f"asked for {asked}."
+		)
 	entry = {
 		"alert": row["name"],
 		"alert_type": row["alert_type"],
 		"severity": row.get("severity"),
 		"task_name": _task_title(recipe, subject, source),
 		"task_type": recipe["task_type"],
-		"urgency": SEVERITY_URGENCY.get(str(row.get("severity") or ""), "Normal"),
+		"urgency": asked or urgency,
 		"dispatch_mode": recipe["dispatch"] if assignee else _pool_dispatch(recipe),
 		# EITHER/OR, ENFORCED HERE AS WELL AS AT AUTHORING TIME. The controller
 		# refuses a rule carrying both, and this is the second door: a task with a

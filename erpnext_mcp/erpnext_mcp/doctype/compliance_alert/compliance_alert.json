@@ -17,6 +17,7 @@
   "company",
   "source_doctype",
   "source_docname",
+  "subject_employee",
   "message_section",
   "alert_message",
   "timing_section",
@@ -110,6 +111,16 @@
    "in_list_view": 1,
    "label": "Source Record",
    "options": "source_doctype",
+   "search_index": 1
+  },
+  {
+   "description": "The person this alert is about, when it is about a person at all. Derived by the sweep from the source record and never typed: an alert on an Employee is about that Employee, an alert on a record carrying an `employee` link is about whoever it links to, and a certificate names its holder as free text which is resolved only when exactly one active employee at this company bears that name. Empty is a real answer — a stale water test, an uninspected cabin and an overdue filing are about the OPERATION, and inventing a person for them would put somebody's name on a gap that is not theirs.",
+   "fieldname": "subject_employee",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Subject Employee",
+   "options": "Employee",
+   "read_only": 1,
    "search_index": 1
   },
   {
@@ -217,7 +228,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-08-10 09:00:00.000000",
+ "modified": "2026-08-20 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "ERPNext MCP",
  "name": "Compliance Alert",

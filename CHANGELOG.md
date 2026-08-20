@@ -3,6 +3,113 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.106.0 — 2026-08-20 — the compliance alert becomes a job, and the picker knows who may take it
+
+Five gaps the iOS Compliance→Task feature stopped at, and every one of them was
+the handset half shipping and the server half not being there. The sheet works:
+long-press an alert, pick a person, raise the task. What it could not do was
+reach the route it was written against, know who the alert was about, know who
+was qualified, or read the certificate register at all.
+
+**`materialize_task_for_alert` had no mobile wrapper and no route, and the
+fallback was worse than a 404.** `MobileAPI.swift` has named it since the feature
+shipped and `ComplianceAPI.createTaskFromAlert` has tried it on every raise; a
+credential-free probe answered 404 on every farm while `create_farm_task` and
+`assign_farm_task` answered 401. So every task raised from an alert went the long
+way round — a title, a type and a notes blob the HANDSET composed out of the
+alert's prose, then a second call to assign it. **That task is not linked to the
+alert.** `source_alert` is not on `create_farm_task`'s signature and deliberately
+so, which means nothing closed the alert when the work was done and the sweep
+raised it again the same night beside the task somebody was already holding. It
+also moved server-side decisions onto the phone: the task type came off a Swift
+switch on the alert's title rather than off the compliance rule's own recipe, and
+the evidence contract was whatever the app guessed. The route now exists, Foreman
+and above, and it answers a `FarmTask` because that is what the app decodes.
+
+The tool behind it grew the two overrides a person standing in front of one alert
+has and a nightly sweep does not: `urgency` and `assigned_to`. Everything else —
+the task type, the evidence contract, what record closing it produces — is still
+the rule's, because that is what the alert is *for*. Where a caller overrides the
+recipe's own routing, the recipe's answer is reported in `routing_notes` rather
+than discarded.
+
+`rectify_alert` stays and is a different door: it asks the alert what its fix
+*is* and refuses one whose fix is a form rather than a task. This one takes the
+two decisions a foreman makes and does not consult `describe_rectification` at
+all, because raising a task for an alert whose canonical fix is a desk form is a
+legitimate thing to want.
+
+**A live bug found while wiring it.** `materialize_task_for_alert` guarded on
+`if row.get("dismissed")`, and a Check field does not always come back as an
+integer — `bool("0")` is True. It refused **every open alert on the calendar**
+with "this alert is dismissed", which is the one refusal a caller would believe.
+`compat.checked` now, which exists for exactly this.
+
+**`subject_employee` on Compliance Alert: who it is about, as a column.** The
+picker removes the person an alert names from the list of people it may be handed
+to — nobody signs off their own gap — and until now the only person on an alert
+was inside the prose: *"Applicator License — Timothy Polehn 2025 EXPIRED 36
+day(s) ago"*. The app was matching candidate names against that sentence, which
+is a whole-word string search standing in for a foreign key and fails in both
+directions: a worker spelled differently on the certificate is not excluded, and
+an alert that happens to quote a second person excludes them too.
+
+The sweep derives it three ways, in descending order of how much they know: the
+alert points *at* an Employee; the record it points at carries an `employee`
+link; or the record names its subject in **free text** and exactly one employee
+at that company bears that name. The third is there because
+`Certification.holder` is a `Data` field — the register holds licences issued to
+the operation as well as to people — so the applicator-licence alert, the one
+this whole mechanism exists for, has no link to follow. **Ambiguous is not a
+subject, it is two people**, and two matches resolves to nothing: on this field
+guessing does not merely mislabel a row, it removes the wrong worker from a
+picker and can hide the only person qualified to do the job.
+
+**Empty is a real answer and is the common one.** A stale water test, an
+uninspected cabin and an overdue filing are about the operation. Nothing
+downstream may read a blank as licence to guess — the phone guessing from prose
+is precisely what this field exists to stop. The column is rewritten on every
+refresh, so it follows a certificate reassigned to another holder, and
+`patches/backfill_alert_subject_employee.py` fills the alerts a site already has
+rather than leaving the control off for one working day.
+
+**Employee roles on a roster row.** Every "who should hold this" screen builds
+its candidate list from `search_employees`, and the only role this surface
+reported was the *caller's*, from `get_current_user_context`. So a sheet asking
+who may approve a compliance task offered the whole crew, the foreman picked a
+picker, and the refusal arrived after the choice — a 403 about somebody else's
+roles, which reads as the feature being broken rather than as a permission
+working. `search_employees` and `get_employee` now carry `designation`,
+`mobile_roles`, `primary_role` and `can_dispatch`.
+
+`can_dispatch` is computed from `roles.DISPATCH_ROLES`, which moved out of
+`api/guard.py` into `roles.py` so the flag a picker greys a row out on and the
+frozenset the server refuses on are one list. It is a **courtesy and not the
+boundary**: `guard.require_dispatch_role` still runs on every call. A designation
+is not a role and both are returned — a Checker is a designation carrying no
+permission at all, and a Foreman is a role several designations hold. `user_id`
+is read, because roles hang off a login, and is **not** returned: a roster read
+has no business publishing the login of every person on the register.
+
+**`list_certifications` and `get_certification` reach the phone.** "Who may I
+hand this pesticide job to" is answered by who holds a current applicator licence
+and by nothing else; the app had been inferring it from the training matrix,
+which answers a different question — a training record says somebody sat through
+the course, a certificate says the state issued them a licence, and on a real
+farm those are not the same set of people. Both carry `require_dispatch_role`:
+a register naming everybody whose licence has lapsed is a personnel document.
+
+**The training compliance report's shape is documented and its row spellings
+reconciled.** `requirements` means two different things at two levels — the
+**column axis** at the top of the response, the **cells** on a matrix row — and
+both are correct English for what they hold, so neither could be renamed. A
+client reading the row-level key as a list of names got an object, decoded
+nothing, and drew an empty grid for months without ever erroring. The row now
+also carries `cells` (the same objects), `statuses` (curriculum → status word,
+flat), `designation` beside `job_title`, and the four counts it was leaving every
+caller to derive. All additive; nothing was removed, and the full response is set
+out key by key in `tools/training.py`'s own docstring.
+
 ## 0.105.0 — 2026-08-19 — the feedback queue on every phone finally drains
 
 `fafo_ios/SERVER_CHANGES.md` item 24. The handset half of the in-app feedback

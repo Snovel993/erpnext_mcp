@@ -141,6 +141,77 @@ class ReportTestCase(V12TestCase):
 		return row["requirements"][curriculum]
 
 
+# ── 0 ───────────────────────────────────────────────────────────────────────
+class TheRowSaysTheSameThingUnderEverySpelling(ReportTestCase):
+	"""v0.106.0. `requirements` MEANS TWO DIFFERENT THINGS AT TWO LEVELS.
+
+	At the top of the response it is the COLUMN AXIS — the curricula. On a matrix
+	row it is the CELLS. Both are correct English for what they hold and neither
+	can be renamed without breaking a caller, and the cost of the collision was a
+	client that read the row-level key as a list of names, got an object, decoded
+	nothing, and drew an empty grid for months without ever erroring.
+
+	These pin the aliases that make the row readable whichever name a client
+	reached for, and pin that the old spellings still say exactly what they said.
+	"""
+
+	def test_cells_and_requirements_are_the_same_object(self):
+		self.a_training(training_type=WPS, regimes=["WPS"], expires_date=days_out(300))
+		row = next(entry for entry in self.matrix()["matrix"] if entry["employee"] == TRAINEE)
+		self.assertEqual(row["cells"], row["requirements"])
+
+	def test_statuses_is_the_flat_one_a_grid_wants(self):
+		"""Curriculum → the status WORD, with no provenance around it. A client
+		drawing a grid needs one string per cell and should not have to reach
+		through an object it does not otherwise use."""
+		self.a_training(training_type=WPS, regimes=["WPS"], expires_date=days_out(300))
+		row = next(entry for entry in self.matrix()["matrix"] if entry["employee"] == TRAINEE)
+		self.assertEqual(row["statuses"][WPS], "current")
+		self.assertEqual(
+			row["statuses"], {name: cell["status"] for name, cell in row["requirements"].items()}
+		)
+
+	def test_designation_stands_beside_job_title_and_carries_the_same_value(self):
+		"""`job_title` is what this report has sent since it shipped; `designation`
+		is the Employee column's own name and what every other endpoint in this
+		app calls it. Both, so neither caller is wrong."""
+		self.an_employee_at(MAIN, "Nula Newhire", "HR-EMP-NEW", designation="Checker")
+		row = next(entry for entry in self.matrix()["matrix"] if entry["employee"] == "HR-EMP-NEW")
+		self.assertEqual(row["designation"], "Checker")
+		self.assertEqual(row["job_title"], "Checker")
+
+	def test_the_counts_are_sent_rather_than_left_to_be_derived(self):
+		"""A row whose cell map failed to decode falls back to these, which is the
+		difference between a degraded row and a blank one."""
+		self.a_training(training_type=WPS, regimes=["WPS"], expires_date=days_out(300))
+		self.a_training(training_type=HEAT, regimes=["OR-OSHA"], expires_date=days_out(300))
+		self.an_employee_at(MAIN, "Nula Newhire", "HR-EMP-NEW")
+
+		rows = {entry["employee"]: entry for entry in self.matrix()["matrix"]}
+		trained, untrained = rows[TRAINEE], rows["HR-EMP-NEW"]
+
+		self.assertEqual(trained["current_count"], len(trained["current"]))
+		self.assertEqual(untrained["missing_count"], len(untrained["missing"]))
+		self.assertGreater(untrained["missing_count"], 0)
+		self.assertEqual(untrained["current_count"], 0)
+
+	def test_nothing_the_old_shape_carried_was_removed(self):
+		"""ADDITIVE, and that is the whole promise. A caller written against
+		v0.105.0 reads exactly what it read before."""
+		self.a_training(training_type=WPS, regimes=["WPS"], expires_date=days_out(300))
+		data = self.matrix()
+		row = next(entry for entry in data["matrix"] if entry["employee"] == TRAINEE)
+		for key in ("employee", "employee_name", "job_title", "standing", "requirements",
+			"missing", "expired", "due_soon"):
+			with self.subTest(key=key):
+				self.assertIn(key, row)
+		for key in ("requirements", "requirement_count", "matrix", "by_requirement", "summary"):
+			with self.subTest(key=key):
+				self.assertIn(key, data)
+		# The top-level key is still the COLUMN axis and is still a list.
+		self.assertIsInstance(data["requirements"], list)
+
+
 # ── 1 ───────────────────────────────────────────────────────────────────────
 class MissingIsAStatus(ReportTestCase):
 	"""The whole reason the matrix is not a filter over the register."""

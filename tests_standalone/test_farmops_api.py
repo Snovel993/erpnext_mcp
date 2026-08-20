@@ -589,6 +589,26 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		# client is a park rather than a failure. `user` is absent from its
 		# signature, so no body can file a note under a colleague's login.
 		"/mobile/submit_app_feedback",
+		# v0.106.0. The compliance-alert-to-task feature's three missing paths.
+		#
+		# `materialize_task_for_alert` is the one the app has been CALLING and
+		# getting a 404 from since the feature shipped, so it falls back to
+		# composing a task out of the alert's prose with `create_farm_task` —
+		# whose signature does not declare `source_alert`, so the task and the
+		# alert it answers are two records with no edge between them. Nothing
+		# closes the alert when the work is done and the sweep raises it again
+		# the same night. It declares `urgency` and `assigned_to` because those
+		# are the two decisions a foreman standing in an orchard makes; it does
+		# NOT declare the task type, the evidence contract or `source_alert`,
+		# which stay the compliance rule's.
+		#
+		# The two certificate reads carry `require_dispatch_role` in their own
+		# bodies. A register that names everybody whose licence has lapsed is a
+		# personnel document, not a field read — the same argument the training
+		# matrix's HR gate makes.
+		"/mobile/materialize_task_for_alert",
+		"/mobile/list_certifications",
+		"/mobile/get_certification",
 	}
 
 	def test_the_route_table_is_exactly_the_twelve_the_app_calls(self):

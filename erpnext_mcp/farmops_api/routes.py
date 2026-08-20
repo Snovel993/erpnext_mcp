@@ -897,6 +897,28 @@ ROUTES = (
 	# bytes and the stored filename is composed from the docname, so there is
 	# nowhere for a caller-supplied name to land.
 	Route("/mobile", mobile_api.submit_app_feedback),
+	# v0.106.0. The compliance-alert-to-task feature's three missing paths.
+	#
+	# `materialize_task_for_alert` IS THE ONE THE APP HAS BEEN CALLING SINCE THE
+	# FEATURE SHIPPED. `MobileAPI.swift` names it, `ComplianceAPI.createTaskFromAlert`
+	# tries it on every raise, and it has answered 404 on every farm — so the app
+	# has been falling back to composing a task out of the alert's prose and
+	# assigning it in a second call. That fallback's task is not linked to the
+	# alert: `source_alert` is not on `create_farm_task`'s signature, so nothing
+	# closes the alert when the work is done and the next sweep raises it again
+	# beside the task somebody is already holding. This is the path that draws the
+	# edge.
+	#
+	# THE TWO CERTIFICATE READS ARE THE OTHER HALF OF THE SAME SHEET. "Who may I
+	# hand this pesticide job to" is answered by the licence register and by
+	# nothing else — a training record says somebody sat through the course, a
+	# certificate says the state issued them a licence, and on a real farm those
+	# are different sets of people. Both carry `require_dispatch_role` in their own
+	# bodies: a register that names everybody whose licence has lapsed is a
+	# personnel document, not a field read.
+	Route("/mobile", mobile_api.materialize_task_for_alert),
+	Route("/mobile", mobile_api.list_certifications),
+	Route("/mobile", mobile_api.get_certification),
 )
 
 #: Path → Route. Built once at import; there is nothing dynamic about it.

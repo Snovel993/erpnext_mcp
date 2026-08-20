@@ -1594,6 +1594,22 @@ def employee_detail(name: str) -> dict:
 	# apart. iOS renders the purple badge on True and nothing on either of the
 	# others, which is right; a foreman reading the record still sees the gap.
 	detail.update(minors.describe(detail.get("date_of_birth"), frappe.utils.today()))
+
+	# v0.106.0. WHAT THIS PERSON'S ROLES SAY THEY MAY DO, so a picker can stop
+	# offering an approval task to somebody the server is about to refuse. Read
+	# through `user_id` — a role hangs off a LOGIN, not off an Employee — and
+	# `has_login` distinguishes "no roles" from "no account", which for most of a
+	# picking crew is the true answer and a different sentence to show a foreman.
+	#
+	# NOT `designation`. That is a job title beside this and not a weaker version
+	# of it: a Checker is a designation and carries no role at all, and a Foreman
+	# is a role that several designations hold. Both are returned; neither is
+	# derived from the other. See `roles.py`'s job-title table.
+	detail["capability"] = roles.capability_of(detail.get("user_id"))
+	# Flattened as well as nested, because `EmployeeDetail` decodes a flat struct
+	# and a nested object it does not declare is a key it silently drops.
+	detail["mobile_roles"] = detail["capability"]["mobile_roles"]
+	detail["can_dispatch"] = detail["capability"]["can_dispatch"]
 	return detail
 
 

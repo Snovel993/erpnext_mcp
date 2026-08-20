@@ -66,7 +66,7 @@ from dataclasses import dataclass
 import frappe
 
 from .. import training as regimes_vocabulary
-from ..compat import doctype_exists
+from ..compat import doctype_exists, has_field
 
 ALERT_DOCTYPE = "Compliance Alert"
 
@@ -294,6 +294,118 @@ def resolve_rules() -> tuple:
 
 def names() -> list:
 	return sorted(rule_map())
+
+# ── who an alert is about ───────────────────────────────────────────────────
+#: Source registers that name a person in FREE TEXT rather than by link, and the
+#: column the name is in. A CLOSED TABLE, and short on purpose: every entry is a
+#: place this app will match a typed string against the personnel register, which
+#: is the one derivation here that can be wrong about a human being.
+#:
+#: `Certification.holder` is a `Data` field — the certificate register was built
+#: to hold licences issued to the OPERATION as well as to people, and an
+#: applicator licence and a GlobalGAP certificate cannot share a Link to
+#: Employee. So the applicator-licence alert, which is the one this whole
+#: mechanism exists for, has to come through here.
+NAMED_IN_TEXT = (("Certification", "holder"),)
+
+#: Employee statuses a free-text name may resolve to. A person who has LEFT is
+#: still the subject of an alert about their lapsed licence, and excluding them
+#: would silently return "nobody" for exactly the rows an auditor asks about.
+#: Suspended and Inactive are included for the same reason.
+RESOLVABLE_STATUSES = ("Active", "Inactive", "Suspended", "Left")
+
+
+def subject_employee(source_doctype: str, source_docname: str, company: str = "") -> str:
+	"""The Employee one alert is about, or "". Never raises.
+
+	THREE DERIVATIONS, IN DESCENDING ORDER OF HOW MUCH THEY KNOW, and the order
+	matters because only the first two are facts:
+
+	  1. The alert points AT an Employee. The docname is the answer.
+	  2. The record it points at carries an `employee` Link. An I-9 Form and an
+	     Employee Training Record both do, and following a link somebody else drew
+	     is not a guess.
+	  3. The record names its subject in free text — see `NAMED_IN_TEXT` — and
+	     EXACTLY ONE employee at this company bears that name. Two matches is not
+	     a subject, it is two people, and this returns "" for it.
+
+	EMPTY IS A REAL ANSWER AND IS THE COMMON ONE. A stale water test, an
+	uninspected cabin and an overdue filing are about the OPERATION. The caller
+	must be able to tell "this alert is about nobody" from "this alert is about
+	somebody I could not work out", and both of those are "" here — which is why
+	nothing downstream is allowed to treat a blank as licence to guess. The phone
+	guessing from prose is precisely what this field exists to stop.
+
+	Never raises, because both callers are the nightly sweep: one writes the
+	column and one sends the alert up the shadow chain, and neither may take the
+	sweep down over a doctype a site has not got.
+	"""
+	try:
+		doctype = str(source_doctype or "").strip()
+		docname = str(source_docname or "").strip()
+		if not doctype or not docname or not doctype_exists("Employee"):
+			return ""
+
+		if doctype == "Employee":
+			return docname if frappe.db.exists("Employee", docname) else ""
+
+		if not doctype_exists(doctype):
+			return ""
+
+		if has_field(doctype, "employee"):
+			linked = str(frappe.db.get_value(doctype, docname, "employee") or "").strip()
+			if linked:
+				return linked
+
+		for named_doctype, column in NAMED_IN_TEXT:
+			if doctype != named_doctype or not has_field(doctype, column):
+				continue
+			return _by_name(str(frappe.db.get_value(doctype, docname, column) or ""), company)
+		return ""
+	except Exception:  # pragma: no cover - the sweep must survive anything
+		return ""
+
+
+def _by_name(full_name: str, company: str) -> str:
+	"""One employee whose name is exactly this, at this company, or "".
+
+	EXACT AND UNIQUE, BOTH REQUIRED. A substring match would make "Ana" the
+	subject of an alert about Ana Mendoza, and a first hit off an ambiguous match
+	would put one of two people called Juan Garcia on the other one's expired
+	licence — which on this field is not a cosmetic error: the app removes the
+	subject from the picker so nobody signs off their own gap, and removing the
+	wrong person hides the only worker qualified to do the job.
+
+	The company narrows it and is not optional in practice: a name is only ever
+	resolved within the entity whose alert this is, so a holder at one farm cannot
+	become a subject at another.
+
+	NOT `tools/evidence.py::_resolve_holder`, THOUGH IT READS THE SAME COLUMN.
+	That one answers "which register is this name in" for a display line, tries
+	Related Party and Family before Employee, and takes the first hit. This one
+	answers "may this person be removed from a picker", which is a control, so it
+	is Employee-only, company-scoped and refuses an ambiguous match. Collapsing
+	the two would make a licence held by a contractor who is also on the payroll
+	resolve differently depending on which question was being asked.
+	"""
+	name = " ".join(str(full_name or "").split())
+	if not name:
+		return ""
+	# The column is free text and sometimes holds the docname itself, which is
+	# not a guess at all and does not go through the name rules below.
+	if frappe.db.exists("Employee", name):
+		return name
+	if len(name) < 4 or " " not in name:
+		# One word is not a person on a certificate — it is an issuing body, a
+		# department, or the farm itself, all of which appear in this column.
+		return ""
+	filters = {"employee_name": name, "status": ("in", list(RESOLVABLE_STATUSES))}
+	if str(company or "").strip():
+		filters["company"] = str(company).strip()
+	matches = frappe.db.get_all("Employee", filters=filters, pluck="name", limit=2)
+	return str(matches[0]) if len(matches or []) == 1 else ""
+
+
 
 
 def alert_key(rule_key: str, source_doctype: str, source_docname: str) -> str:
@@ -646,6 +758,29 @@ def _write_regimes(doc, observation: Observation, rule: Rule) -> None:
 		pass
 
 
+def _write_subject(doc, observation: Observation) -> None:
+	"""Set the alert's `subject_employee`. Never raises.
+
+	Guarded on the column existing for the same reason `_write_regimes` is
+	guarded on its child doctype: a site running this release before
+	`bench migrate` still has to raise alerts, and one raised without a subject is
+	very much better than a sweep that stops raising them. The column fills on the
+	next run after the migrate, because the sweep refreshes every alert it
+	observes.
+	"""
+	try:
+		if not has_field(ALERT_DOCTYPE, "subject_employee"):
+			return
+		doc.subject_employee = (
+			subject_employee(
+				observation.source_doctype, observation.source_docname, observation.company
+			)
+			or None
+		)
+	except Exception:  # pragma: no cover - a site mid-migration
+		pass
+
+
 def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry_run: bool) -> str:
 	"""Create, refresh or reopen one alert. Returns which of the three it was."""
 	category = observation.category or rule.category
@@ -660,6 +795,7 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 			doc.company = observation.company or None
 			doc.source_doctype = observation.source_doctype
 			doc.source_docname = observation.source_docname
+			_write_subject(doc, observation)
 			doc.alert_message = observation.message
 			doc.due_date = observation.due_date or None
 			doc.first_seen = today
@@ -685,6 +821,13 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 	doc.alert_message = observation.message
 	doc.due_date = observation.due_date or None
 	doc.last_refreshed = frappe.utils.now()
+	# REWRITTEN ON EVERY REFRESH, for the reason the regime tags below are: it is
+	# DERIVED, nothing a person set is stored in it, and a site that migrates the
+	# column onto alerts it already has needs them filled without a backfill nobody
+	# runs. It also follows the record — a certificate reassigned to another holder
+	# is about somebody else from that night on, and an alert still naming the
+	# previous holder would remove the wrong person from the picker.
+	_write_subject(doc, observation)
 	# REWRITTEN ON EVERY REFRESH, not only on create. A rule retagged in a release
 	# has to reach the alerts already on the site, and the alternative — tags fixed
 	# at the moment an alert was first raised — would leave an operation's oldest
@@ -734,15 +877,13 @@ def _shadow_alert(doc) -> None:
 	try:
 		from ..tools import shadow_log
 
-		source_doctype = str(doc.source_doctype or "")
-		source_docname = str(doc.source_docname or "")
-		subject = ""
-		if source_doctype and source_docname and doctype_exists(source_doctype):
-			try:
-				row = frappe.db.get_value(source_doctype, source_docname, "*", as_dict=True) or {}
-			except Exception:  # pragma: no cover - a doctype with no such row
-				row = {}
-			subject = str(row.get("employee") or "").strip()
+		# THE SAME DERIVATION THE COLUMN HOLDS, and read off the column first: the
+		# alert was just written with it, so the chain this event walks and the
+		# person the calendar reports cannot come to disagree. `subject_employee`
+		# is the fallback for a site whose schema has not caught up.
+		subject = str(getattr(doc, "subject_employee", "") or "").strip() or subject_employee(
+			str(doc.source_doctype or ""), str(doc.source_docname or ""), str(doc.company or "")
+		)
 
 		shadow_log.propagate(
 			event_type=shadow_log.EVENT_ALERT_RAISED,

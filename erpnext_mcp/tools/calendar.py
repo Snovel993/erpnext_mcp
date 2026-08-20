@@ -67,6 +67,7 @@ _ALERT_FIELDS = (
 	"company",
 	"source_doctype",
 	"source_docname",
+	"subject_employee",
 	"alert_message",
 	"due_date",
 	"first_seen",
@@ -173,6 +174,18 @@ def _describe(row: dict, today: str, regimes: list | None = None) -> dict:
 		"company": row.get("company") or None,
 		"source_doctype": row.get("source_doctype") or None,
 		"source_docname": row.get("source_docname") or None,
+		# WHO IT IS ABOUT, WHEN IT IS ABOUT A PERSON. Derived by the sweep from the
+		# source record — see `alerts/base.py::subject_employee` — and reported here
+		# rather than left to be read out of the message, which is what a client
+		# with no such field is reduced to doing. `subject_employee_name` rides
+		# along because every screen that has one shows a name, and the alternative
+		# is a second call per row.
+		#
+		# `None` IS A REAL ANSWER AND IS THE COMMON ONE. Most alerts are about the
+		# operation, not about anybody, and a reader must not fill a blank here by
+		# looking for a name in the prose.
+		"subject_employee": row.get("subject_employee") or None,
+		"subject_employee_name": _employee_name(row.get("subject_employee")),
 		"message": row.get("alert_message"),
 		"due_date": due,
 		"days_until_due": remaining,
@@ -196,6 +209,21 @@ def _describe(row: dict, today: str, regimes: list | None = None) -> dict:
 		"can_dismiss": bool(frappe.utils.cint(row.get("can_dismiss"))),
 		"signature_request": _signature_request(row),
 	}
+
+
+def _employee_name(employee) -> str | None:
+	"""The display name of an alert's subject, or None. Never raises.
+
+	One `get_value` per row, and only for the rows that HAVE a subject — most
+	alerts are about the operation and pay nothing for this.
+	"""
+	name = str(employee or "").strip()
+	if not name or not compat.doctype_exists("Employee"):
+		return None
+	try:
+		return str(frappe.db.get_value("Employee", name, "employee_name") or "") or None
+	except Exception:  # pragma: no cover - a row that vanished between reads
+		return None
 
 
 def _signature_request(row: dict) -> dict | None:

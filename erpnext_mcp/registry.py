@@ -9848,9 +9848,25 @@ TOOLS = {
 		"generate_tasks_from_compliance_alerts reports in skipped_unmapped, because a single "
 		"caller has no batch report to read afterwards — the refusal is the report.\n\n"
 		"This is what a 'fix this' tap on one compliance alert calls: named work, for the "
-		"one thing that was tapped, nothing beside it.",
+		"one thing that was tapped, nothing beside it.\n\n"
+		"TWO OPTIONAL OVERRIDES, and the nightly sweep has neither. `urgency` and "
+		"`assigned_to` are what a person looking at one alert knows and a batch run does "
+		"not: who should hold this, and how soon. Everything else about the task — its "
+		"type, its evidence contract, what record closing it produces — is still the "
+		"rule's, because that is what the alert is FOR. The recipe's own routing is "
+		"reported in `routing_notes` when a caller overrides it.",
 		{
 			"alert": _field(_STRING, "The Compliance Alert docname. get_compliance_calendar lists them."),
+			"urgency": _field(
+				_STRING,
+				"Optional. Low, Normal, High or Critical. Defaults to what the alert's own "
+				"severity implies — Critical severity means High urgency.",
+			),
+			"assigned_to": _field(
+				_STRING,
+				"Optional Employee docname. Overrides the recipe's own routing and puts the "
+				"task straight into that person's list rather than into the pool.",
+			),
 		},
 		required=("alert",),
 		mutating=True,

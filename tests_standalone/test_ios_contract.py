@@ -4184,6 +4184,79 @@ class EveryMobileMethodDecodes(ContractTestCase):
 				self.assertTrue(row[key])
 
 
+	def test_57_materialize_task_for_alert(self):
+		"""THE APP DECODES A `FarmTask` FROM THIS, NOT A REPORT.
+
+		`ComplianceAPI.createTaskFromAlert` calls `client.call(MobileAPI.materializeTaskForAlert)`
+		with a `FarmTask` as the return type, and falls back to `create_farm_task`
+		on a 404 — which is what every farm answered until v0.106.0. The tool
+		behind this returns a REPORT (`{alert, task: "FT-…", task_type, …}`), so
+		the wrapper reads the task back and shapes it; a wrapper that renamed the
+		report's keys instead would decode here and be a second spelling of a
+		Farm Task for `completed_at` to go missing from all over again.
+		"""
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+
+		alert = next(
+			row
+			for row in self.wire("list_compliance_alerts")["alerts"]
+			if row["name"].startswith("housing_inspection_overdue")
+		)
+		row = self.wire("materialize_task_for_alert", alert=alert["name"], urgency="High")
+		FarmTaskModel.decode(row, "materialize_task_for_alert")
+
+		self.assertTrue(str(row["name"]).startswith("FT-"))
+		# THE EDGE THE FALLBACK CANNOT DRAW. `create_farm_task` does not declare
+		# `source_alert`, so a task raised the long way round is not linked to the
+		# alert it answers — nothing closes the alert and the sweep raises it
+		# again the same night beside the task somebody is holding.
+		self.assertEqual(row["source_alert"], alert["name"])
+		self.assertEqual(row["urgency"], "High", "the caller's urgency beat the severity's")
+		self.assertFalse(row["already_answered"])
+
+	def test_57_a_second_tap_returns_the_first_tap_s_task(self):
+		"""IDEMPOTENT, AND THE PHONE HAS TO BE ABLE TO SAY SO. A foreman who taps
+		twice on a slow connection must not raise two inspections of one cabin,
+		and a client that reported "created" both times would be lying to them."""
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		set_roles(WORKER, ["Field Worker", "Farm Manager"])
+		self.be()
+
+		alert = next(
+			row
+			for row in self.wire("list_compliance_alerts")["alerts"]
+			if row["name"].startswith("housing_inspection_overdue")
+		)
+		first = self.wire("materialize_task_for_alert", alert=alert["name"])
+		second = self.wire("materialize_task_for_alert", alert=alert["name"])
+
+		FarmTaskModel.decode(second, "materialize_task_for_alert")
+		self.assertEqual(second["name"], first["name"])
+		self.assertFalse(first["already_answered"])
+		self.assertTrue(second["already_answered"])
+
+	def test_57_a_field_worker_may_not_raise_one(self):
+		"""`guard.require_dispatch_role`, same as `create_farm_task`. Raising work
+		onto somebody else's list is a foreman's, and a route that let a picker do
+		it from an alert would be the dispatch gate with a second door in it."""
+		frappe.local.session.user = "Administrator"
+		self.tool_data("refresh_compliance_alerts", {"company": MAIN})
+		set_roles(WORKER, ["Field Worker"])
+		self.be()
+
+		alert = next(
+			row
+			for row in self.wire("list_compliance_alerts")["alerts"]
+			if row["name"].startswith("housing_inspection_overdue")
+		)
+		with self.assertRaises(frappe.PermissionError):
+			self.wire("materialize_task_for_alert", alert=alert["name"])
+
+
 # ── 2. the mirrors are strict enough to have caught the bugs ────────────────
 class TheMirrorsAreStrictEnough(ContractTestCase):
 	"""A transcription that accepts the broken payload proves nothing at all.
@@ -4375,6 +4448,11 @@ class TheContractIsComplete(ContractTestCase):
 		# see `FeedbackReceiptModel` for why that is the contract rather than a
 		# gap.
 		"submit_app_feedback": "test_56",
+		# v0.106.0 — the compliance-alert-to-task route the app has been calling
+		# and getting a 404 from since the feature shipped. `ComplianceAPI` reads
+		# a `FarmTask` out of it, so the mirror is `FarmTaskModel` and not a
+		# receipt shape.
+		"materialize_task_for_alert": "test_57",
 	}
 
 	def _published(self, module):

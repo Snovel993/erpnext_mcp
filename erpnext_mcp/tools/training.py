@@ -414,6 +414,57 @@ def get_training_compliance_report(args: dict) -> ToolResult:
 	`requirement_basis` rather than quietly presenting the over-report as a
 	finding. Narrowing by `regime` or `training_type` is how a caller asks the
 	question they actually mean.
+
+	────────────────────────────────────────────────────────────────────────
+	WHAT IT RETURNS, IN FULL, BECAUSE `requirements` MEANS TWO THINGS
+	────────────────────────────────────────────────────────────────────────
+
+	THE KEY IS SPELLED THE SAME AT TWO LEVELS AND HOLDS TWO DIFFERENT SHAPES,
+	which is how a client came to draw an empty grid for months. At the TOP LEVEL
+	`requirements` is the COLUMN AXIS — a list of curriculum objects. On a MATRIX
+	ROW it is the CELLS — an object keyed by curriculum name. Both spellings are
+	correct English for what they hold and neither can be renamed without
+	breaking a caller, so from v0.106.0 the row carries aliases and this block is
+	the contract:
+
+	  company, as_of_date, regime, training_type   — what was asked for
+	  requirements        list of {training_type, regimes, retention_years,
+	                      description} — THE COLUMNS
+	  requirement_count   len(requirements)
+	  matrix              one object per employee, below
+	  by_requirement      curriculum → {current, due_soon, expired, missing} counts
+	  summary             {total_employees, fully_compliant, partially_compliant,
+	                      non_compliant, without_requirements}
+	  expiring_window_days, status_vocabulary, requirement_basis, actor
+	  note, truncation_note   present only when there is one to make
+
+	A MATRIX ROW:
+
+	  employee, employee_name          docname and display name
+	  job_title / designation          THE SAME VALUE UNDER BOTH NAMES. `job_title`
+	                                   is what this report has sent since it
+	                                   shipped; `designation` is the Employee
+	                                   column's own name and what every other
+	                                   endpoint in this app calls it.
+	  department, date_of_joining
+	  standing                         fully_compliant | partially_compliant |
+	                                   non_compliant | no_requirements
+	  requirements / cells             THE SAME OBJECT UNDER BOTH NAMES: curriculum
+	                                   → {status, record, completed_date,
+	                                   expires_date, days_until_expiry}
+	  statuses                         curriculum → STATUS WORD only, flat, for a
+	                                   client that wants the grid without the
+	                                   provenance
+	  missing / expired / due_soon / current            sorted curriculum names
+	  missing_count / expired_count / due_soon_count / current_count
+
+	STATUS WORDS ARE LOWERCASE WITH UNDERSCORES — `current`, `due_soon`,
+	`expired`, `missing` — and `status_vocabulary` in the response defines each
+	one. They are NOT the `Training Type` doctype's own Select values and a
+	client matching on Title Case will match nothing.
+
+	THE ALIASES ARE ADDITIVE AND NOTHING WAS REMOVED. A caller written against
+	the v0.105.0 shape reads exactly what it read before.
 	"""
 	_require()
 	compat.require_doctype("Employee", "It comes with the Frappe HR (hrms) app.")
@@ -491,18 +542,45 @@ def get_training_compliance_report(args: dict) -> ToolResult:
 			standing = "non_compliant"
 			non += 1
 
+		by_status = {
+			status: sorted(name for name, cell in cells.items() if cell["status"] == status)
+			for status in (CELL_MISSING, CELL_EXPIRED, CELL_DUE_SOON, CELL_CURRENT)
+		}
 		matrix.append(
 			{
 				"employee": employee,
 				"employee_name": person.get("employee_name") or employee,
+				# BOTH SPELLINGS OF THE JOB TITLE. `job_title` is what this report
+				# has always sent and `designation` is the column's own name on
+				# Employee and the name every other endpoint in this app uses. See
+				# the block above `data` for why the aliases are here rather than
+				# one of them being a rename.
 				"job_title": person.get("designation") or None,
+				"designation": person.get("designation") or None,
 				"department": person.get("department") or None,
 				"date_of_joining": str(person.get("date_of_joining") or "") or None,
 				"standing": standing,
+				# THE SAME OBJECT UNDER THREE NAMES, AND ONE OF THEM IS FLAT.
+				# `requirements` and `cells` are the per-curriculum cell objects —
+				# status, the record behind it, the completion and expiry dates;
+				# `statuses` is curriculum → status WORD, for a client that wants
+				# the grid and not the provenance.
 				"requirements": cells,
-				"missing": sorted(name for name, cell in cells.items() if cell["status"] == CELL_MISSING),
-				"expired": sorted(name for name, cell in cells.items() if cell["status"] == CELL_EXPIRED),
-				"due_soon": sorted(name for name, cell in cells.items() if cell["status"] == CELL_DUE_SOON),
+				"cells": cells,
+				"statuses": {name: cell["status"] for name, cell in cells.items()},
+				"missing": by_status[CELL_MISSING],
+				"expired": by_status[CELL_EXPIRED],
+				"due_soon": by_status[CELL_DUE_SOON],
+				"current": by_status[CELL_CURRENT],
+				# The counts, because a row that is only ever rendered as
+				# "3 gaps" should not make every client re-derive them — and
+				# because a client whose cell map failed to decode falls back to
+				# these, which is the difference between a degraded row and a
+				# blank one.
+				"missing_count": len(by_status[CELL_MISSING]),
+				"expired_count": len(by_status[CELL_EXPIRED]),
+				"due_soon_count": len(by_status[CELL_DUE_SOON]),
+				"current_count": len(by_status[CELL_CURRENT]),
 			}
 		)
 
