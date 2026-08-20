@@ -945,14 +945,38 @@ class AHeatBreakCarriesTheHeat(Wave3TestCase):
 
 	def test_a_retyped_select_is_still_the_same_column(self):
 		"""An administrator who dropped the hyphen broke every heat break on the
-		farm and would never have connected the two."""
+		farm and would never have connected the two.
+
+		ASSERTED ON THE REGISTER AND NOT ONLY ON THE HELPER. What this claim is
+		about is breaks that failed to get logged, so the assertion that means
+		anything is on the rows the shift ends up holding.
+		"""
 		shift = self.a_hot_shift()
-		for sent in ("Cool Down", "cooldown", "COOL_DOWN", "water break"):
+		retyped = {
+			"Cool Down": "Cool-Down",
+			"cooldown": "Cool-Down",
+			"COOL_DOWN": "Cool-Down",
+			"water break": "Water Break",
+		}
+		for index, (sent, stored) in enumerate(retyped.items()):
 			with self.subTest(sent=sent):
-				self.assertEqual(
-					shift_tools.canonical_break_kind(sent),
-					"Cool-Down" if sent.lower().startswith("cool") else "Water Break",
+				self.assertEqual(shift_tools.canonical_break_kind(sent), stored)
+				self.tool_data(
+					"log_shift_break",
+					{
+						"shift": shift,
+						"break_kind": sent,
+						"started_at": self.at(9 + index),
+						"duration_minutes": 10,
+					},
 				)
+		rows = [row for row in shifts.events_of(shift) if row.get("break_kind")]
+		# FOUR SPELLINGS WENT UP AND THE REGISTER HOLDS TWO WORDS, both of them
+		# the Select's own. Four rows rather than three: the spelling is
+		# normalised, the break is not deduplicated.
+		self.assertEqual(len(rows), 4)
+		self.assertEqual({row["break_kind"] for row in rows}, {"Cool-Down", "Water Break"})
+		self.assertTrue(all(row["heat_obligation"] for row in rows))
 
 	def test_nothing_resolves_across_meanings(self):
 		"""THE ONE THAT MATTERS MOST. An unpaid meal must never become a paid
