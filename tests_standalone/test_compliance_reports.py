@@ -201,8 +201,16 @@ class TheRowSaysTheSameThingUnderEverySpelling(ReportTestCase):
 		self.a_training(training_type=WPS, regimes=["WPS"], expires_date=days_out(300))
 		data = self.matrix()
 		row = next(entry for entry in data["matrix"] if entry["employee"] == TRAINEE)
-		for key in ("employee", "employee_name", "job_title", "standing", "requirements",
-			"missing", "expired", "due_soon"):
+		for key in (
+			"employee",
+			"employee_name",
+			"job_title",
+			"standing",
+			"requirements",
+			"missing",
+			"expired",
+			"due_soon",
+		):
 			with self.subTest(key=key):
 				self.assertIn(key, row)
 		for key in ("requirements", "requirement_count", "matrix", "by_requirement", "summary"):

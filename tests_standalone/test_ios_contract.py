@@ -4183,7 +4183,6 @@ class EveryMobileMethodDecodes(ContractTestCase):
 				self.assertIsInstance(row[key], str)
 				self.assertTrue(row[key])
 
-
 	def test_57_materialize_task_for_alert(self):
 		"""THE APP DECODES A `FarmTask` FROM THIS, NOT A REPORT.
 

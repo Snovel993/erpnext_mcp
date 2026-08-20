@@ -295,6 +295,7 @@ def resolve_rules() -> tuple:
 def names() -> list:
 	return sorted(rule_map())
 
+
 # ── who an alert is about ───────────────────────────────────────────────────
 #: Source registers that name a person in FREE TEXT rather than by link, and the
 #: column the name is in. A CLOSED TABLE, and short on purpose: every entry is a
@@ -404,8 +405,6 @@ def _by_name(full_name: str, company: str) -> str:
 		filters["company"] = str(company).strip()
 	matches = frappe.db.get_all("Employee", filters=filters, pluck="name", limit=2)
 	return str(matches[0]) if len(matches or []) == 1 else ""
-
-
 
 
 def alert_key(rule_key: str, source_doctype: str, source_docname: str) -> str:
@@ -772,9 +771,7 @@ def _write_subject(doc, observation: Observation) -> None:
 		if not has_field(ALERT_DOCTYPE, "subject_employee"):
 			return
 		doc.subject_employee = (
-			subject_employee(
-				observation.source_doctype, observation.source_docname, observation.company
-			)
+			subject_employee(observation.source_doctype, observation.source_docname, observation.company)
 			or None
 		)
 	except Exception:  # pragma: no cover - a site mid-migration
