@@ -281,6 +281,7 @@ def state_note(work_state: str) -> str:
 		"the state's own ceiling is used instead."
 	)
 
+
 #: How close to a ceiling is close enough to say so. An hour of the day and four
 #: of the week — one more pick round and one more afternoon respectively, which
 #: is the granularity a foreman can actually act on. Warnings, never refusals.
