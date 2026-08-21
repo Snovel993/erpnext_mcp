@@ -409,3 +409,43 @@ class TheFormJSAsksTheServer(SeededTestCase):
 		"""`dry_run` is what puts "this switches 412 things off" in front of
 		somebody before the button that does it."""
 		self.assertIn("dry_run", self.js())
+
+	#: A `data-*` hook as it appears in MARKUP — deliberately not preceded by `[`,
+	#: which is what distinguishes `data-console="shown"` inside an element from
+	#: the `[data-console="shown"]` of a selector. Without that lookbehind every
+	#: selector also counts as markup, the two sets are trivially equal, and the
+	#: test passes on a file where the hook exists ONLY in the selector. It did,
+	#: until the mutation below was actually run.
+	DRAWN = r'(?<!\[)(data-(?:console|domain|bulk|profile|count-for)="[^"]*")'
+	QUERIED = r'\.find\(\s*[\'"`](\[data-[a-z-]+="[^"]*"\])'
+
+	def test_every_control_it_wires_up_is_a_control_it_drew(self):
+		"""The console builds its markup in one function and binds handlers in
+		another, keyed on `data-*` attributes. Nothing else checks that the two
+		agree, and the failure is silent in the worst way: a renamed hook leaves a
+		button that renders, looks enabled, and does nothing when clicked.
+
+		STATIC HOOKS ONLY. Several are built by interpolation — the markup writes
+		`data-count-for="${esc(domain.key)}"` and the selector reads
+		`[data-count-for="${domain.key}"]` — and comparing those as strings
+		compares two spellings of the same runtime value. They are excluded rather
+		than normalised, because a normaliser clever enough to equate them would
+		be clever enough to equate a genuine mismatch.
+		"""
+		import re
+
+		body = self.js()
+		static = lambda hooks: {hook for hook in hooks if "${" not in hook}  # noqa: E731
+		drawn = static(re.findall(self.DRAWN, body))
+		queried = static(re.findall(self.QUERIED, body))
+		missing = sorted(hook for hook in queried if hook.strip("[]") not in drawn)
+		self.assertEqual(
+			missing,
+			[],
+			f"the JS binds handlers to controls its own markup never draws: {missing}",
+		)
+		self.assertGreaterEqual(
+			len(queried),
+			4,
+			f"the hook regex has gone stale rather than green — it found {queried}",
+		)
