@@ -3,6 +3,97 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.107.0 — 2026-08-20 — the phone rings when somebody is sent to work, and when a cabin is unfit to sleep in
+
+The break horn reached the crew in v0.99.0 and nothing else on this server has
+rung a phone since. Two things that should have been doing so were not.
+
+**A dispatched task appeared in `list_my_tasks` and nowhere else.** A foreman
+sends somebody to a block, the assignment is written in a tenth of a second, and
+the worker finds out the next time they happen to open the app — which on a
+picking crew is at lunch. `assign_farm_task` now pushes to the assignee's own
+handsets and reports what happened in a `push` block on its answer, the same
+shape `log_shift_break` has carried since v0.99.0.
+
+`claim_farm_task` deliberately does NOT push: that is somebody taking work off
+the board with the app already open in their hand, and a notification for
+something they just did is noise. It rings the assignee and nobody else, because
+a crew buzzed about every job somebody else was sent to stops reading any of
+them. A reassignment says so on the lock screen — being sent to a job and having
+one taken off somebody and handed to you are the same row and different news, and
+the second means somebody may already be stood in front of it. The push is
+collapsed on the task docname, so a job dispatched, taken off somebody and given
+back is one lock-screen row rather than three.
+
+**It is sent last, after every write — and still inside the transaction**, which
+is worth stating exactly rather than comfortably. `assign_farm_task` has held a
+`SELECT … FOR UPDATE` on the task since v0.106.0 and Frappe keeps it until the
+request commits, so the send is inside the locked window. That is deliberate:
+closing the gap needs an after-commit hook this app uses nowhere — `log_shift_break`
+has pushed inline within its own transaction since v0.99.0 — and the race is the
+milliseconds to commit against push → APNs → handset → a person noticing → a tap.
+Ordering it last means no write can still fail after the send. If this ever moves
+to a queue, that reasoning stops holding and it belongs on a commit hook.
+
+**A Critical compliance alert sat on a calendar until somebody opened it.** The
+sweep runs while the farm is asleep. `refresh_compliance_alerts` now pushes each
+newly raised Critical to every supervisor and reports `pushed` beside the four
+counts it already had, because "were four alerts raised" and "did anybody's phone
+ring" are different questions and a site with no p8 key answers yes to the first
+and no to the second.
+
+**Only Critical, and only on `created` or `reopened`.** Warning and Info are the
+calendar working as designed — a certificate expiring in five weeks is exactly
+what a calendar is *for*. A full sweep on a real operation refreshes dozens of
+open items every night, and pushing all of them would train every supervisor on
+the farm to swipe these away without looking; the first thing lost when that
+habit sets in is the break horn. `refreshed` is excluded for the reason
+`_shadow_alert` excludes it — raising an alert is the event, noticing it is still
+true is not — and `reopened` is included because a condition that resolved and
+has come back is news by construction and rare by construction. A **human**
+dismissal is never pushed over.
+
+**At most ten notifications per sweep**, which is the sibling of `RULE_CAP` and
+carries the same promise: reported, never silent. It exists for the FIRST sweep
+on an established farm — an operation installs this app in August with four years
+of camp records and a legitimately Critical finding in every cabin, and a foreman
+whose phone buzzes ninety times at once turns the category off, taking the break
+horn with it. Every alert is still raised; `push_suppressed` says how many did
+not ring. A Warning never spends one of the ten, because the cap is checked
+outside the severity gate rather than inside it.
+
+**Delivered to supervisors, about a worker.** Recipients are everybody holding a
+role in `roles.DISPATCH_ROLES`, read off `Has Role` rows — the same frozenset
+`guard.require_dispatch_role` refuses on, so the people told about an alert are
+exactly the people who may raise a task for it. Two lists would drift within a
+release. The subject employee's NAME rides in the payload, off the
+`subject_employee` column v0.106.0 added rather than derived a second time; their
+handset is not addressed, because an expiring I-9 is a fact about a worker and an
+obligation of the employer. An alert with no company reaches every supervisor —
+Frappe's own convention, and most alerts are about the operation rather than a
+person.
+
+**Neither new push pierces Do Not Disturb, and that is the load-bearing
+decision.** `time-sensitive` stays the break horn's alone: a break earns it,
+because stopping work when relief is called is a safety obligation with a clock
+on it. Both new payloads use `active` and a compliance alert uses
+`apns-priority: 5`. A server that overrode a foreman's Focus nightly would be
+silenced within a fortnight and the break horn with it. Neither spends one of the
+two `.caf` files either — those are learned sounds meaning *stop work* and
+*resume*, and spending them on paperwork is how they stop meaning anything.
+
+**No new tools, no new routes, no new mobile surface.** `register_push_token` and
+`unregister_push_token` have been mounted since v0.99.0 and are what the iOS app
+already calls; this release is the two senders that were missing behind them.
+
+Also: `apns-collapse-id` is dropped rather than truncated when a docname would
+not fit Apple's 64-byte cap — two alerts sharing a 64-byte prefix would collapse
+onto each other and the second would silently replace the first, which is a
+notification that never appeared with nothing anywhere saying so. And the
+compliance payload's docname key is `compliance_alert`, not `alert`: Apple owns
+`aps.alert`, and two things called one thing in one payload is a bug waiting for
+whoever writes the Swift that reads it.
+
 ## 0.106.0 — 2026-08-20 — the compliance alert becomes a job, and the picker knows who may take it
 
 Five gaps the iOS Compliance→Task feature stopped at, and every one of them was

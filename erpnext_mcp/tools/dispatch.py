@@ -93,6 +93,7 @@ from ..erpnext_mcp.doctype.farm_task_assignment.farm_task_assignment import (
 )
 from ..errors import ToolError
 from ..result import ToolResult
+from ..services import push as push_service
 from . import inspections, shadow_log
 from .housing import EMPLOYEE, hr_installed
 
@@ -1437,6 +1438,68 @@ def _open_assignment(task_doc, worker: str, worker_name: str, dispatched: bool, 
 	return _describe_assignment(dict(assignment.as_dict()))
 
 
+def _push_assignment(task: dict, worker: str, reassigned: bool = False) -> dict:
+	"""Ring the phone of the person who has just been sent to this task. v0.107.0.
+
+	WHY THE DISPATCH PUSHES AND THE CLAIM DOES NOT. `claim_farm_task` is somebody
+	taking work off the board with the app already open in their hand; telling
+	their own handset about it is a notification for something they just did.
+	This is the other direction — a foreman sends somebody, and until now the
+	worker found out the next time they happened to open the app, which on a
+	picking crew is at lunch.
+
+	CALLED LAST, AFTER EVERY WRITE — BUT STILL INSIDE THE TRANSACTION, and it is
+	worth being exact about that rather than comfortable. `lock_task` takes a
+	`SELECT ... FOR UPDATE` at the top of `assign_farm_task` and Frappe holds it
+	until the REQUEST commits, which is after this tool returns. So this does fire
+	inside the locked window, and a reader arriving in the gap would not yet see
+	the row the notification describes.
+
+	That gap is left open on purpose. Closing it properly needs an after-commit
+	hook, which this app uses nowhere — `_push_break` pushes inline within its own
+	transaction too, and one path doing it differently would be a second mechanism
+	to reason about for a race whose window is the milliseconds between here and
+	the commit. The path that would lose is push → APNs → Apple → handset → a
+	person noticing → a tap → a fetch, and it is seconds at its very fastest.
+	Ordering it last means the only writes that could still fail after the send
+	are none, so the realistic worst case stays "a dispatch nobody was told about"
+	rather than "a phone pointed at a task that is not there".
+
+	If this ever moves to a queue or the transaction grows longer, that reasoning
+	stops holding and the send belongs on a commit hook.
+
+	NEVER RAISES, AND THE REPORT GOES ON THE ANSWER. Same contract the break horn
+	has: the assignment is the record, the push is a convenience on top of it, and
+	a site with no p8 key, no network or no enrolled handset must dispatch exactly
+	as it did before. The report is returned rather than swallowed so a foreman
+	who asks "did their phone buzz" gets `no_tokens` instead of silence.
+	"""
+	try:
+		return push_service.send_push_to_employees(
+			[worker],
+			push_service.task_payload(
+				task=str(task.get("name") or ""),
+				task_name=str(task.get("task_name") or ""),
+				location=str(task.get("location") or ""),
+				urgency=str(task.get("urgency") or ""),
+				reassigned=reassigned,
+			),
+			# The docname, so a task dispatched, taken off somebody and given
+			# back replaces its own notification on the lock screen rather than
+			# stacking three of them about one job.
+			collapse_id=str(task.get("name") or ""),
+		)
+	except Exception as error:  # pragma: no cover - send_push_to_employees is itself wrapped
+		return {
+			"employees": 0,
+			"tokens": 0,
+			"sent": 0,
+			"failed": 0,
+			"skipped": 0,
+			"reason": f"error: {error}",
+		}
+
+
 # ── 2. assign_farm_task ─────────────────────────────────────────────────────
 def assign_farm_task(args: dict) -> ToolResult:
 	"""Send one named person to one task. The foreman's half of the dual mode."""
@@ -1562,6 +1625,9 @@ def assign_farm_task(args: dict) -> ToolResult:
 			f"an override. Reason given: {phi_override['reason']}",
 		]
 		_record_override_on_task(row["name"], phi_override)
+
+	# LAST, after every write this call makes. See `_push_assignment`.
+	data["push"] = _push_assignment(dict(task_doc.as_dict()), worker, reassigned=bool(reassigned_from))
 
 	return ToolResult(
 		data=data,

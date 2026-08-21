@@ -17259,6 +17259,112 @@ somebody needs when a worker reports that the horn never reaches them.
 
 `SERVER_CHANGES.md` item 16.
 
+### A dispatch reaches the worker's phone, not just their task list (v0.107.0)
+
+A task a foreman dispatched appeared in `list_my_tasks` and nowhere else, so the
+foreman's half of the dispatch was instant and the worker's half was whenever
+they next happened to open the app — which on a picking crew is at lunch.
+
+`assign_farm_task` now pushes to the assignee's own handsets and answers with a
+`push` block in the same shape the break horn uses:
+
+```json
+{"employees": 1, "tokens": 1, "sent": 1, "failed": 0,
+ "skipped": 0, "deactivated": 0, "reason": "sent"}
+```
+
+```json
+{"aps": {"alert": {"title": "New task", "body": "Habitability walk — MC-Cabin-01 at MC-Cabin-01 — Urgent"},
+         "sound": "default",
+         "interruption-level": "active",
+         "category": "FARM_TASK"},
+ "task": "TASK-2026-0007", "task_name": "…", "location": "MC-Cabin-01",
+ "urgency": "Urgent", "phase": "assigned"}
+```
+
+- **`claim_farm_task` does not push.** That is somebody taking work off the board
+  with the app already open in their hand; a notification for something they just
+  did is noise.
+- **It rings the assignee and nobody else.** A crew buzzed about every job
+  somebody else was sent to stops reading any of them.
+- **A reassignment says so** — `"title": "Task reassigned to you"` and
+  `"reassigned": true` — because being sent to a job and having one taken off
+  somebody and handed to you are the same row and different news.
+- **It is sent last, after every write — but still inside the transaction.**
+  `assign_farm_task` holds a `SELECT … FOR UPDATE` from its first line and Frappe
+  keeps it until the request commits, so the send does happen inside the locked
+  window. That gap is left open deliberately: closing it needs an after-commit
+  hook this app uses nowhere (`log_shift_break` pushes inline too), and the race
+  is the milliseconds to commit against push → APNs → handset → a person noticing
+  → a tap. Ordering it last means no write can still fail after the send.
+- **`apns-collapse-id` is the task docname**, so a job dispatched, taken off
+  somebody and given back is one lock-screen row rather than three.
+- **A worker with no handset is still dispatched.** `reason: "no_tokens"` rather
+  than silence — "they never enrolled a phone" is fixable once somebody sees it.
+
+### A Critical compliance alert reaches the people who can act on it (v0.107.0)
+
+Alerts were raised by a sweep that runs while the farm is asleep and sat on a
+calendar until somebody opened it. `refresh_compliance_alerts` now pushes each
+newly **raised** alert to every supervisor, and reports how many phones rang:
+
+```json
+{"created": 3, "refreshed": 41, "reopened": 0, "auto_dismissed": 2,
+ "pushed": 1, "pushed_alerts": 1, "push_suppressed": 0, "push_notes": ["no_tokens"]}
+```
+
+`pushed` (handsets rung), `pushed_alerts` (Criticals notified about) and
+`push_suppressed` (Criticals past the cap) are three separate numbers because
+none is derivable from the others: a bench with no p8 key raises every alert and
+rings nothing, so `pushed` can be `0` while `pushed_alerts` is not.
+
+- **Only `Critical`.** `Warning` and `Info` are the calendar working as designed —
+  a certificate expiring in five weeks is exactly what a calendar is *for*. A
+  full sweep on a real operation refreshes dozens of open items every night, and
+  pushing all of them would train every supervisor to swipe erpnext_mcp
+  notifications away without looking. The first thing lost when that habit sets
+  in is the break horn.
+- **On `created` and on `reopened`, never on `refreshed`.** Raising an alert is
+  the event; noticing it is still true is not. A reopen means the condition
+  resolved and has come back, which is news by construction and rare by
+  construction — it takes an auto-dismissal and a recurrence. A **human**
+  dismissal is never pushed over.
+- **To supervisors, about a worker.** Recipients are everybody holding a role in
+  `roles.DISPATCH_ROLES` — the same frozenset `guard.require_dispatch_role`
+  refuses on, so the people told about an alert are exactly the people who may
+  raise a task for it. The subject employee's *name* rides in the payload
+  (`"title": "Critical: Ada Orchard"`) because an expiring I-9 is a fact about a
+  worker and an obligation of the employer: the worker cannot act on it and the
+  foreman can. Their handset is not addressed.
+- **An alert with no company reaches every supervisor.** Frappe's own convention,
+  the one `roles.companies_for` states in the same words: an empty scope is every
+  company, not none. Most alerts are about the operation rather than a person.
+- **At most `MAX_PUSHES_PER_SWEEP` (10) notifications per sweep.** The sibling of
+  `RULE_CAP`, for the first sweep on an established farm: an operation installing
+  this app in August with four years of camp records has a legitimately Critical
+  finding in every cabin, and a foreman whose phone buzzes ninety times at once
+  turns the category off — taking the break horn with it. Every alert is still
+  **raised**; `push_suppressed` says how many did not ring, so the backlog is
+  visible rather than inferred from silence. A Warning never spends one of the
+  ten: the cap is checked outside the severity gate, not inside it.
+- **The calendar is never at risk.** A sweep survives a push that explodes, a
+  bench with no p8 key, and a farm with no enrolled foreman.
+
+### Neither of the two new pushes pierces Do Not Disturb
+
+`interruption-level: time-sensitive` stays the break horn's alone. A break earns
+it: stopping work when relief is called is a safety obligation with a clock on
+it. A task dispatched for tomorrow morning and an alert raised at two in the
+morning do not. Both use `active`, which lights the screen and sounds when the
+phone is not silenced and stays quiet in the list until morning when it is — and
+a compliance alert uses `apns-priority: 5`, letting Apple pick a moment that
+conserves the handset's battery.
+
+A server that overrode a foreman's Focus nightly would be silenced within a
+fortnight, and the break horn with it. Neither payload spends one of the two
+`.caf` files either: those are learned sounds meaning *stop work* and *resume*,
+and spending them on paperwork is how they stop meaning anything.
+
 ## The in-app feedback bubble drains (v0.105.0)
 
 A bubble on every screen of the handset app, a form that captures the screen, the

@@ -312,7 +312,7 @@ def send_test_push(args: dict) -> ToolResult:
 			"alert": {"title": "FarmOps test", "body": message},
 			"sound": push_service.SOUND_BREAK_START,
 			"interruption-level": push_service.INTERRUPTION_LEVEL,
-			"category": "FARM_TEST",
+			"category": push_service.CATEGORY_TEST,
 		},
 		"phase": "test",
 	}

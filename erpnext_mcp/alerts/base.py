@@ -90,6 +90,35 @@ MAX_KEY = 140
 #: with it would bury the twelve that matter. The cap is reported, never silent.
 RULE_CAP = 500
 
+#: v0.107.0. THE SEVERITIES A PHONE IS RUNG FOR, AND THE ONLY ONES. `Critical`
+#: means an obligation is already breached or expires today — a lapsed applicator
+#: licence, an uninspected cabin, a detector that was never tested. `Warning` and
+#: `Info` are the calendar working as designed: a certificate expiring in five
+#: weeks is exactly what the calendar is FOR, and it is not worth a notification
+#: on a Sunday.
+#:
+#: This is the whole difference between a feed foremen read and one they turn
+#: off. A full sweep on a real operation refreshes dozens of open items every
+#: night; pushing all of them would train every supervisor on the farm to swipe
+#: erpnext_mcp notifications away without looking, and the first thing lost when
+#: that habit sets in is the break horn.
+PUSH_SEVERITIES = frozenset({SEVERITY_CRITICAL})
+
+#: v0.107.0. MOST PHONES-RINGING EVENTS ONE SWEEP WILL PRODUCE. The sibling of
+#: `RULE_CAP`, for the same failure in a different place and with the same
+#: promise: it is REPORTED, never silent.
+#:
+#: The case this exists for is the FIRST sweep on an established farm — an
+#: operation installs this app in August with four years of camp records, no
+#: detector tests on file and thirty expired certificates, and every one of those
+#: is legitimately Critical on the night the calendar first runs. Without a cap
+#: that is one notification per alert per supervisor, delivered at once, and the
+#: foreman's response to a phone that buzzes ninety times is to turn the whole
+#: category off. The alerts are all still RAISED — nothing here touches the
+#: calendar — and `push_suppressed` says how many did not ring, so the operator
+#: reading the report can see the backlog rather than infer it from silence.
+MAX_PUSHES_PER_SWEEP = 10
+
 
 @dataclass
 class Observation:
@@ -537,6 +566,15 @@ def refresh_compliance_alerts(
 		"refreshed": 0,
 		"auto_dismissed": 0,
 		"reopened": 0,
+		# v0.107.0. NONE OF THESE THREE IS DERIVABLE FROM THE FOUR COUNTS ABOVE,
+		# which is why they are separate numbers. Only Critical alerts push, so
+		# `pushed_alerts` <= `created` + `reopened`; a site with no APNs key
+		# raises every alert and rings nothing, so `pushed` can be 0 while
+		# `pushed_alerts` is not; and `push_suppressed` is the backlog past
+		# `MAX_PUSHES_PER_SWEEP`. See `_note_push` and `_push_and_note`.
+		"pushed": 0,
+		"pushed_alerts": 0,
+		"push_suppressed": 0,
 		"rules_run": [],
 		"rules_skipped": [],
 		"rules_failed": [],
@@ -662,7 +700,7 @@ def _run_rule(rule: Rule, context: dict, report: dict, dry_run: bool) -> None:
 
 	for key, observation in sorted(observed.items()):
 		row = existing.get(key)
-		outcome = _upsert(rule, key, observation, row, context["today"], dry_run)
+		outcome = _upsert(rule, key, observation, row, context["today"], dry_run, report)
 		report[outcome] += 1
 		report["alerts"].append(
 			{
@@ -778,7 +816,55 @@ def _write_subject(doc, observation: Observation) -> None:
 		pass
 
 
-def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry_run: bool) -> str:
+def _note_push(report, answer: dict) -> None:
+	"""Put one push's outcome on the sweep report. Never raises.
+
+	`report` is optional so the only caller that has one passes it and any other
+	caller — a test, a future single-alert path — does not have to invent one.
+	The counts are what an operator reads to answer "did anybody's phone ring
+	last night", which is a different question from "was the alert raised" and
+	has to be answerable separately: a sweep that raised four Criticals and
+	pushed none of them is a farm with no p8 key or no enrolled foreman, and
+	both are fixable once somebody can see them.
+	"""
+	if report is None or not isinstance(answer, dict):
+		return
+	try:
+		report["pushed"] = report.get("pushed", 0) + int(answer.get("sent") or 0)
+		reason = str(answer.get("reason") or "")
+		if reason and reason not in ("sent", "severity_below_threshold"):
+			notes = report.setdefault("push_notes", [])
+			if reason not in notes:
+				notes.append(reason)
+	except Exception:  # pragma: no cover - a report is a plain dict
+		pass
+
+
+def _push_and_note(report, doc, phase: str) -> None:
+	"""Ring the supervisors about one raised alert, up to the sweep's cap.
+
+	The cap is checked HERE rather than inside `_push_alert` so that the severity
+	gate stays the only thing `_push_alert` decides, and so that a Warning does
+	not consume one of the ten — an alert that was never going to ring a phone
+	must not push a Critical out of the budget. See `MAX_PUSHES_PER_SWEEP`.
+
+	Never raises: `_push_alert` and `_note_push` each hold that contract, and this
+	function only counts.
+	"""
+	if report is not None and int(report.get("pushed_alerts") or 0) >= MAX_PUSHES_PER_SWEEP:
+		if str(getattr(doc, "severity", "") or "") in PUSH_SEVERITIES:
+			report["push_suppressed"] = int(report.get("push_suppressed") or 0) + 1
+		return
+
+	answer = _push_alert(doc, phase)
+	if report is not None and str(answer.get("reason") or "") != "severity_below_threshold":
+		report["pushed_alerts"] = int(report.get("pushed_alerts") or 0) + 1
+	_note_push(report, answer)
+
+
+def _upsert(
+	rule: Rule, key: str, observation: Observation, row, today: str, dry_run: bool, report=None
+) -> str:
 	"""Create, refresh or reopen one alert. Returns which of the three it was."""
 	category = observation.category or rule.category
 
@@ -805,6 +891,10 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 			# a feed nobody opens. Raising an alert is the event; noticing it is
 			# still true is not.
 			_shadow_alert(doc)
+			# v0.107.0, and on the same "created" branch and for the same reason.
+			# See `_push_alert` for why it also fires on a reopen and the shadow
+			# log does not.
+			_push_and_note(report, doc, "created")
 		return "created"
 
 	reopening = bool(frappe.utils.cint(row.get("auto_dismissed")))
@@ -844,6 +934,8 @@ def _upsert(rule: Rule, key: str, observation: Observation, row, today: str, dry
 		doc.dismissed_on = None
 		doc.dismissed_reason = None
 	doc.save(ignore_permissions=True)
+	if reopening:
+		_push_and_note(report, doc, "reopened")
 	return "reopened" if reopening else "refreshed"
 
 
@@ -896,6 +988,89 @@ def _shadow_alert(doc) -> None:
 		)
 	except Exception:  # pragma: no cover - the sweep must survive anything
 		pass
+
+
+def _subject_name(doc) -> str:
+	"""The subject Employee's display name, for a lock screen. "" when there is none.
+
+	Reads the column `_write_subject` filled rather than re-deriving it — see
+	`subject_employee`, which is the one place that answers "who is this alert
+	about" and must stay the one place. Most alerts have no subject at all; that
+	is the ordinary case and not a gap to fill with a guess.
+	"""
+	subject = str(getattr(doc, "subject_employee", "") or "").strip()
+	if not subject:
+		return ""
+	try:
+		return str(frappe.db.get_value("Employee", subject, "employee_name") or "")
+	except Exception:  # pragma: no cover - a site without HRMS
+		return ""
+
+
+def _push_alert(doc, phase: str) -> dict:
+	"""Tell the people who can act on this alert that it exists. v0.107.0. Never raises.
+
+	WHO. `push.supervisor_employees` — everybody holding a role in
+	`roles.DISPATCH_ROLES` at this alert's company. Deliberately NOT the subject
+	employee: an expiring I-9 is a fact about a worker and an obligation of the
+	employer, the worker cannot act on it and the foreman can. The subject's NAME
+	rides along in the payload so the notification is actionable without opening
+	anything; their handset is not addressed.
+
+	WHEN. `created` and `reopened`, never `refreshed`. This is the same rule
+	`_shadow_alert` states — raising an alert is the event, noticing it is still
+	true is not — with one deliberate difference: the shadow log is created-only
+	and this is not. A reopen means the condition RESOLVED and HAS COME BACK,
+	which is news by construction and rare by construction: it takes an
+	auto-dismissal and a recurrence, so it cannot become the nightly noise the
+	created-only rule exists to prevent. A cabin that passed inspection in June
+	and has failed again is exactly the thing a foreman wants a phone to say.
+
+	A HUMAN DISMISSAL IS NEVER PUSHED OVER. `_upsert` only reopens an
+	`auto_dismissed` row; somebody who looked at an alert and dismissed it does
+	not get rung about it again, for the same reason the sweep does not un-dismiss
+	it.
+
+	IMPORTED INSIDE THE FUNCTION, like `_shadow_alert` beside it, but for a
+	different reason: `services/__init__.py` states that nothing in that package
+	is imported at app load, and `alerts` is. The one call is not worth breaking
+	that.
+
+	Never raises. This runs inside the nightly sweep with nobody watching, and an
+	exception here would take the rest of the sweep's alerts down with it.
+	"""
+	try:
+		severity = str(getattr(doc, "severity", "") or "")
+		if severity not in PUSH_SEVERITIES:
+			return {"reason": "severity_below_threshold", "severity": severity, "sent": 0}
+
+		from ..services import push as push_service
+
+		company = str(getattr(doc, "company", "") or "")
+		recipients = push_service.supervisor_employees(company)
+		payload = push_service.alert_payload(
+			alert=str(doc.name or ""),
+			severity=severity,
+			message=str(getattr(doc, "alert_message", "") or ""),
+			due_date=str(getattr(doc, "due_date", "") or ""),
+			alert_type=str(getattr(doc, "alert_type", "") or ""),
+			subject_name=_subject_name(doc),
+		)
+		report = push_service.send_push_to_employees(
+			recipients,
+			payload,
+			# See `push.PRIORITY_CONSIDERATE`: this is news for the morning, and
+			# the sweep that raises it runs while the farm is asleep.
+			priority=push_service.PRIORITY_CONSIDERATE,
+			# The alert docname, so a Critical that resolves and returns replaces
+			# its own notification rather than stacking a season of them.
+			collapse_id=str(doc.name or ""),
+		)
+		report["phase"] = phase
+		report["severity"] = severity
+		return report
+	except Exception:  # pragma: no cover - the sweep must survive anything
+		return {"reason": "error", "sent": 0}
 
 
 def regimes_for_alerts(names) -> dict:

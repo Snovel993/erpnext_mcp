@@ -65,10 +65,12 @@ import time
 
 import frappe
 
-from .. import compat
+from .. import compat, roles
 
 TOKEN_DOCTYPE = "Mobile Push Token"
 SHIFT_DOCTYPE = "Farm Shift"
+EMPLOYEE_DOCTYPE = "Employee"
+ROLE_ROW_DOCTYPE = "Has Role"
 
 #: Apple's two hosts. `sandbox` is what a development build's tokens are minted
 #: against, and a token from one host is meaningless on the other — a push to
@@ -98,6 +100,48 @@ SOUND_BREAK_END = "break_end.caf"
 #: interruption level Apple provides for exactly this case. It requires the
 #: entitlement on the app side, which the handset already ships.
 INTERRUPTION_LEVEL = "time-sensitive"
+
+#: v0.107.0. THE LEVEL FOR EVERYTHING THAT IS NOT A BREAK HORN, and the choice is
+#: deliberate rather than a default nobody thought about. `time-sensitive` pierces
+#: Focus and Do Not Disturb; a break horn earns that because stopping work when
+#: relief is called is a safety obligation with a clock on it. A task dispatched
+#: for tomorrow morning and a compliance alert raised by a sweep that runs at two
+#: in the morning do not. `active` still lights the screen and makes a sound when
+#: the phone is not silenced — and stays quiet, in the list, until morning when it
+#: is. A server that overrode a foreman's Do Not Disturb nightly would be trained
+#: out of by the second week, and then the break horn would be ignored too.
+INTERRUPTION_ACTIVE = "active"
+
+#: The system sound. A task and an alert do NOT get one of the two break tones:
+#: those two are learned sounds that mean "stop work" and "resume", and spending
+#: them on a notification about paperwork is how they stop meaning anything.
+SOUND_DEFAULT = "default"
+
+#: `apns-priority`. 10 is "deliver immediately"; 5 lets Apple hold delivery to a
+#: moment that conserves the handset's power. A break and a dispatch are worth 10
+#: — somebody is being asked to do something now. A compliance alert raised by the
+#: nightly sweep is worth 5: it is news for the morning, and a battery spent
+#: waking a phone at 02:00 to say a certificate expires in a fortnight is spent
+#: badly.
+PRIORITY_IMMEDIATE = "10"
+PRIORITY_CONSIDERATE = "5"
+
+#: The `aps.category` values, which are what the handset switches on to decide
+#: which notification actions to offer and which code path to play the payload
+#: through. Named here rather than spelled at each call site so the server and
+#: `fafo_ios` have one list to disagree about instead of four.
+CATEGORY_BREAK = "FARM_BREAK"
+CATEGORY_TEST = "FARM_TEST"
+CATEGORY_TASK = "FARM_TASK"
+CATEGORY_COMPLIANCE = "FARM_COMPLIANCE"
+
+#: How much prose survives into a notification body. An APNs payload is capped at
+#: 4KB and a `Compliance Alert.alert_message` has no such cap — the rules compose
+#: whole sentences with record names in them. Trimming here rather than letting
+#: Apple reject the whole push is the difference between a shortened alert and no
+#: alert; the full text is one tap away in the app, which is where the docname in
+#: the payload sends it.
+MAX_BODY = 240
 
 #: What Apple answers when the token is dead. BOTH DEACTIVATE THE ROW and
 #: nothing else does: `Unregistered` means the app was deleted, `BadDeviceToken`
@@ -317,7 +361,7 @@ def break_payload(
 			# A break horn is worth exactly one badge-free alert. `content-available`
 			# is deliberately absent: this is a user-facing interruption, not a
 			# background fetch, and mixing the two makes Apple throttle it.
-			"category": "FARM_BREAK",
+			"category": CATEGORY_BREAK,
 		},
 		"break_kind": kind,
 		"phase": "end" if ending else "start",
@@ -328,6 +372,122 @@ def break_payload(
 		payload["shift"] = shift
 	if event:
 		payload["event"] = event
+	return payload
+
+
+def _trim(text, limit: int = MAX_BODY) -> str:
+	"""One line of prose, short enough to survive Apple's 4KB payload cap."""
+	line = " ".join(str(text or "").split())
+	return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def task_payload(
+	task: str,
+	task_name: str = "",
+	location: str = "",
+	urgency: str = "",
+	reassigned: bool = False,
+) -> dict:
+	"""The APNs payload for work a foreman has just sent somebody to. v0.107.0.
+
+	WHY THIS EXISTS AT ALL. A dispatched task appeared in `list_my_tasks` and
+	nowhere else, so a worker learned they had been sent somewhere the next time
+	they happened to open the app — which on a picking crew is at lunch. The
+	foreman's half of the dispatch was instant and the worker's half was whenever.
+
+	`task` IS THE DOCNAME AND IT IS THE POINT OF THE PAYLOAD. The body is a
+	sentence a person reads on a lock screen; the docname is what the handset
+	opens when they tap it, and without it the notification is an instruction to
+	go and find the thing it is about.
+
+	REASSIGNMENT SAYS SO. Being sent to a job and having a job taken off somebody
+	else and given to you are the same row and different news, and a worker who
+	reads "task reassigned to you" knows to expect that somebody else may already
+	be stood in front of it. `assign_farm_task` refuses a reassignment without a
+	reason for the same reason this reports one.
+	"""
+	name = _trim(task_name or task, 80)
+	title = "Task reassigned to you" if reassigned else "New task"
+	sentence = [name]
+	if location:
+		sentence.append(f"at {_trim(location, 60)}")
+	# URGENCY IS IN THE BODY AND NOT ONLY IN THE CUSTOM KEYS, because the lock
+	# screen is where the decision "do I walk over there now" is actually made,
+	# and a key the app has to be opened to read is not on the lock screen.
+	if urgency and urgency.strip().lower() not in ("", "normal"):
+		sentence.append(f"— {_trim(urgency, 30)}")
+	payload = {
+		"aps": {
+			"alert": {"title": title, "body": _trim(" ".join(sentence))},
+			"sound": SOUND_DEFAULT,
+			"interruption-level": INTERRUPTION_ACTIVE,
+			"category": CATEGORY_TASK,
+		},
+		# Beside `aps` and not inside it, for the reason `break_payload` argues:
+		# Apple owns that dictionary and will one day add a key this app already
+		# uses for something else.
+		"task": task,
+		"phase": "assigned",
+	}
+	if task_name:
+		payload["task_name"] = task_name
+	if location:
+		payload["location"] = location
+	if urgency:
+		payload["urgency"] = urgency
+	if reassigned:
+		payload["reassigned"] = True
+	return payload
+
+
+def alert_payload(
+	alert: str,
+	severity: str = "",
+	message: str = "",
+	due_date: str = "",
+	alert_type: str = "",
+	subject_name: str = "",
+) -> dict:
+	"""The APNs payload for a compliance alert that has just been raised. v0.107.0.
+
+	ADDRESSED TO A SUPERVISOR AND NOT TO THE PERSON IT IS ABOUT. An expiring I-9
+	is a fact about a worker and an obligation of the employer; the worker cannot
+	act on it and the foreman can. `subject_name` is carried so the notification
+	names them — "Ada Orchard" on the lock screen is what makes it actionable
+	without opening anything — but who it is DELIVERED to is decided by
+	`supervisor_employees`, not by this.
+
+	`active` AND NOT `time-sensitive`, and priority 5 rather than 10: see
+	`INTERRUPTION_ACTIVE`. The nightly sweep runs while the farm is asleep.
+	"""
+	label = str(severity or "").strip() or "Compliance"
+	who = _trim(subject_name, 60)
+	title = f"{label}: {who}" if who else f"{label} compliance alert"
+	body = _trim(message)
+	if due_date:
+		body = _trim(f"{body} (due {due_date})") if body else f"Due {due_date}"
+	payload = {
+		"aps": {
+			"alert": {"title": title, "body": body},
+			"sound": SOUND_DEFAULT,
+			"interruption-level": INTERRUPTION_ACTIVE,
+			"category": CATEGORY_COMPLIANCE,
+		},
+		# `compliance_alert` AND NOT `alert`. Apple's own `aps.alert` is the
+		# title/body dictionary, and a top-level key of the same name meaning "the
+		# docname" is two things called one thing in one payload — which is a bug
+		# waiting for whoever writes the Swift that reads `userInfo["alert"]`.
+		"compliance_alert": alert,
+		"phase": "alert",
+	}
+	if severity:
+		payload["severity"] = severity
+	if alert_type:
+		payload["alert_type"] = alert_type
+	if due_date:
+		payload["due_date"] = due_date
+	if subject_name:
+		payload["subject_name"] = subject_name
 	return payload
 
 
@@ -355,6 +515,77 @@ def active_tokens_for_employees(employees) -> list:
 		)
 		or []
 	)
+
+
+def supervisor_logins() -> list:
+	"""Every login holding a role that may dispatch. Sorted; never raises.
+
+	READ OFF `Has Role` ROWS, which is where a real bench keeps them and what
+	`roles.roles_of` reads — deliberately not `frappe.get_roles`, which answers
+	for the SESSION user and is therefore the wrong question entirely when the
+	caller is a scheduler running as Administrator at two in the morning.
+	"""
+	if not compat.doctype_exists(ROLE_ROW_DOCTYPE):
+		return []
+	try:
+		rows = (
+			frappe.db.get_all(
+				ROLE_ROW_DOCTYPE,
+				filters={"role": ["in", sorted(roles.DISPATCH_ROLES)], "parenttype": "User"},
+				fields=["parent"],
+				limit_page_length=0,
+			)
+			or []
+		)
+	except Exception:  # pragma: no cover - a site without the table
+		return []
+	return sorted({str(row.get("parent") or "").strip() for row in rows if row.get("parent")})
+
+
+def supervisor_employees(company: str = "") -> list:
+	"""The Employees who should hear about a compliance alert. v0.107.0.
+
+	WHY THIS IS A ROLE QUESTION AND NOT A JOB-TITLE ONE. `designation` is what
+	somebody is called and `Has Role` is what they may do, and this app has
+	already had that argument once — `roles.capability_of` exists because a mobile
+	picker filtering by designation offered the wrong people. The set is
+	`roles.DISPATCH_ROLES`, the same frozenset `guard.require_dispatch_role`
+	refuses on, so the people who are told about an alert are exactly the people
+	who may raise a task for it. Two lists would drift within a release.
+
+	AN EMPTY `company` MEANS EVERY COMPANY, and that is Frappe's convention rather
+	than a shortcut: `roles.companies_for` documents the same rule. A Compliance
+	Alert with no company on it is about the operation as a whole — the sweep
+	writes `None` when the source record carries none — and there is no honest way
+	to narrow it. Silently sending to nobody would be the worse failure: the alert
+	would be raised, the report would say so, and no phone would ring.
+
+	A WORKER WITH NO LOGIN IS NOT HERE AND CANNOT BE. Most of a picking crew has
+	no `user_id`, which is exactly right — they hold no dispatch role either.
+
+	Never raises. This is called from inside the nightly sweep.
+	"""
+	if not compat.doctype_exists(EMPLOYEE_DOCTYPE) or not compat.has_field(EMPLOYEE_DOCTYPE, "user_id"):
+		return []
+	logins = supervisor_logins()
+	if not logins:
+		return []
+
+	filters = {"user_id": ["in", logins]}
+	# Guarded per column rather than assumed: selecting a field a site has not got
+	# is a hard SQL error, and this app supports benches without HRMS's full
+	# Employee. See CONTRIBUTING.md on `compat.existing_fields`.
+	if company and compat.has_field(EMPLOYEE_DOCTYPE, "company"):
+		filters["company"] = company
+	if compat.has_field(EMPLOYEE_DOCTYPE, "status"):
+		filters["status"] = "Active"
+	try:
+		rows = (
+			frappe.db.get_all(EMPLOYEE_DOCTYPE, filters=filters, fields=["name"], limit_page_length=0) or []
+		)
+	except Exception:  # pragma: no cover - a bench mid-migration
+		return []
+	return [str(row["name"]) for row in rows if row.get("name")]
 
 
 def shift_crew_employees(shift_name: str, include_departed: bool = False) -> list:
@@ -439,7 +670,35 @@ def _deactivate(token_name: str, reason: str) -> None:
 		pass
 
 
-def send_push(tokens, payload: dict, transport=None, conf=None) -> dict:
+#: Apple's cap on `apns-collapse-id`, in bytes. A longer one is not truncated by
+#: Apple, it is a 400 — so an over-long id would turn every push it was attached
+#: to into a failure, which is the opposite of what a collapse id is for.
+MAX_COLLAPSE_ID = 64
+
+
+def _collapse_header(collapse_id: str) -> dict:
+	"""`apns-collapse-id`, or nothing at all if it would not fit.
+
+	DROPPED RATHER THAN TRUNCATED. Two different alerts whose docnames share a
+	64-byte prefix would collapse onto each other and the second would silently
+	replace the first on the lock screen — a notification that never appeared,
+	with nothing anywhere saying so. An uncollapsed pair of notifications is a
+	much smaller problem than a disappeared one.
+	"""
+	value = str(collapse_id or "").strip()
+	if not value or len(value.encode("utf-8")) > MAX_COLLAPSE_ID:
+		return {}
+	return {"apns-collapse-id": value}
+
+
+def send_push(
+	tokens,
+	payload: dict,
+	transport=None,
+	conf=None,
+	priority: str = PRIORITY_IMMEDIATE,
+	collapse_id: str = "",
+) -> dict:
 	"""Deliver one payload to a list of token rows. Returns a report; never raises.
 
 	A row Apple rejects as `Unregistered` or `BadDeviceToken` is deactivated here
@@ -495,8 +754,10 @@ def send_push(tokens, payload: dict, transport=None, conf=None) -> dict:
 			"apns-topic": config["topic"],
 			"apns-push-type": "alert",
 			# 10 is "deliver now". A break horn that arrives when the phone next
-			# wakes up is not a break horn.
-			"apns-priority": "10",
+			# wakes up is not a break horn — so that is the default, and the two
+			# callers who mean something less urgent say so. See PRIORITY_*.
+			"apns-priority": str(priority or PRIORITY_IMMEDIATE),
+			**_collapse_header(collapse_id),
 		}
 		try:
 			answer = send(f"{config['host']}/3/device/{device_token}", headers, body) or {}
@@ -519,6 +780,73 @@ def send_push(tokens, payload: dict, transport=None, conf=None) -> dict:
 		report["reason"] = "sent"
 	elif not report["reason"]:
 		report["reason"] = "all_failed"
+	return report
+
+
+def send_push_to_employees(
+	employees,
+	payload: dict,
+	transport=None,
+	conf=None,
+	priority: str = PRIORITY_IMMEDIATE,
+	collapse_id: str = "",
+) -> dict:
+	"""Push one payload to every handset belonging to any of these Employees. v0.107.0.
+
+	The entry point `assign_farm_task` and the compliance sweep call, and the
+	sibling of `send_push_to_shift_crew` — which addresses a SHIFT and is left
+	alone because the crew it resolves, and the `crew`/`tokens` pair it reports,
+	are a break horn's question and not this one's.
+
+	`no_recipients` AND `no_tokens` ARE DIFFERENT ANSWERS AND BOTH ARE REPORTED.
+	"This alert reached nobody because the farm has no foreman with a login" and
+	"it reached nobody because the two foremen who have one never enrolled a
+	handset" are different problems with different people to go and see, and a
+	single zero would hide which one this was. Same argument the crew reporter
+	makes; same reason.
+
+	Never raises. Every caller is a path whose real work — a dispatch, a raised
+	alert — has already been written by the time this runs, and a notification
+	that could not be sent must never be able to undo it.
+	"""
+	report = {
+		"employees": 0,
+		"tokens": 0,
+		"sent": 0,
+		"failed": 0,
+		"skipped": 0,
+		"deactivated": 0,
+		"reason": "",
+	}
+	try:
+		names = []
+		for value in employees or []:
+			name = str(value or "").strip()
+			if name and name not in names:
+				names.append(name)
+		report["employees"] = len(names)
+		if not names:
+			report["reason"] = "no_recipients"
+			return report
+
+		tokens = active_tokens_for_employees(names)
+		report["tokens"] = len(tokens)
+		if not tokens:
+			report["reason"] = "no_tokens"
+			return report
+
+		report.update(
+			{
+				key: value
+				for key, value in send_push(
+					tokens, payload, transport, conf, priority=priority, collapse_id=collapse_id
+				).items()
+				if key in ("sent", "failed", "skipped", "deactivated", "reason")
+			}
+		)
+	except Exception as error:  # pragma: no cover - the whole point of the wrapper
+		report["reason"] = f"error: {error}"
+		_log(f"push to {list(employees or [])!r} failed: {error}")
 	return report
 
 
