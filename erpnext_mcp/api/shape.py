@@ -491,6 +491,16 @@ def user_context(data: dict, user: str) -> dict:
 		"employee": data.get("employee"),
 		"roles": data.get("all_roles") or role_lib.all_roles_of(user),
 		"mobile_roles": data.get("mobile_roles") or [],
+		# v0.108.0, S11. THE BADGE, WORKED OUT ON THE SERVER. `roles` above is
+		# every role the account holds and the app was intersecting it with a
+		# hardcoded Swift list to decide what one word to draw next to somebody's
+		# name — a copy of this app's role vocabulary compiled into a binary,
+		# stale the release a role is added or renamed. `roles.role_indicator`
+		# picks it here, from the table that defines the roles, and states its own
+		# precedence rule. See `roles.ROLE_INDICATORS`; it is a DISPLAY fact and
+		# not a permission, and `can_dispatch` inside it is the same courtesy
+		# `capability_of` documents at length.
+		"role_indicator": role_lib.role_indicator(data.get("user") or user),
 		"companies": [{"name": name, "abbr": company_abbr(name)} for name in companies],
 		"default_company": data.get("preferred_company") or (companies[0] if companies else None),
 		"skills": skills_of(data.get("employee")),

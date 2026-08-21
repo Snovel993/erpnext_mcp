@@ -10,6 +10,7 @@ frappe.ui.form.on("ERPNext MCP Settings", {
 		frm.add_custom_button(__("Test Configuration"), () => show_selftest(frm));
 		set_headline(frm);
 		render_connect_panel(frm);
+		render_tool_console(frm);
 
 		frm.set_df_property(
 			"generate_token",
@@ -356,4 +357,351 @@ function copy_text(text) {
 		frappe.msgprint(__("Could not copy automatically. Select the text above and copy it."));
 	}
 	document.body.removeChild(area);
+}
+
+// ── The tool console ────────────────────────────────────────────────────────
+//
+// This form carries one checkbox per tool and there are now seven hundred and
+// fifty-seven of them. Every one is a real control with a real reason to exist,
+// and a page of seven hundred and fifty-seven checkboxes is still a page nobody
+// configures — an operator scrolls to the section whose name they recognise,
+// ticks two boxes and leaves the rest at whatever the release shipped.
+//
+// So this adds four things and removes nothing: a SUMMARY that says what is
+// actually on before anybody scrolls, DOMAIN chips that narrow the form to one
+// part of the operation, a SEARCH box, and PRESET PROFILES that set a whole
+// working configuration at once.
+//
+// NOTHING HERE KEEPS ITS OWN COPY OF THE CATALOGUE. The domains, the profiles
+// and every tool's domain and write-ness come from
+// `erpnext_mcp.tool_groups.console`, for the same reason the write-tool banner
+// above asks the server: a list transcribed into JavaScript is a list that goes
+// stale the next release, and this form's whole job is to tell the truth about
+// what an AI client can reach.
+
+const CONSOLE_FIELD = "tool_console_html";
+
+//: Fetched once per page load. The payload is the tool→domain map and the
+//: profile table, around thirty kilobytes, on a page an operator opens on
+//: purpose.
+let CONSOLE = null;
+
+//: What the operator is currently looking at. Kept outside the render so a
+//: redraw (after a save, after applying a profile) does not silently reset the
+//: filter somebody is halfway through using.
+const VIEW = { query: "", domain: "", only: "all" };
+
+function render_tool_console(frm) {
+	const field = frm.get_field(CONSOLE_FIELD);
+	if (!field || !field.$wrapper) return;
+
+	if (CONSOLE) {
+		draw_tool_console(frm);
+		return;
+	}
+	frappe.call({ method: "erpnext_mcp.tool_groups.console" }).then((r) => {
+		if (!r || !r.message) return;
+		CONSOLE = r.message;
+		draw_tool_console(frm);
+	});
+}
+
+function draw_tool_console(frm) {
+	const wrapper = frm.get_field(CONSOLE_FIELD).$wrapper;
+	wrapper.empty().append(tool_console_html());
+	wire_tool_console(frm, wrapper);
+	refresh_tool_counts(frm, wrapper);
+	apply_tool_filter(frm, wrapper);
+}
+
+function tool_console_html() {
+	const esc = frappe.utils.escape_html;
+
+	const chips = [
+		`<button class="btn btn-xs btn-default erpnext-mcp-chip" data-domain="" title="${__(
+			"Every domain"
+		)}">${__("All")} <span class="text-muted" data-count-for=""></span></button>`,
+	]
+		.concat(
+			(CONSOLE.domains || []).map(
+				(domain) =>
+					`<button class="btn btn-xs btn-default erpnext-mcp-chip" data-domain="${esc(
+						domain.key
+					)}" title="${esc(domain.description)}">${esc(domain.label)}
+					<span class="text-muted" data-count-for="${esc(domain.key)}"></span></button>`
+			)
+		)
+		.join(" ");
+
+	const presets = (CONSOLE.profiles || [])
+		.map(
+			(profile) =>
+				`<button class="btn btn-xs btn-default" data-profile="${esc(profile.key)}"
+					title="${esc(profile.summary)}">${esc(profile.label)}</button>`
+		)
+		.join(" ");
+
+	return `
+<div class="erpnext-mcp-tool-console">
+	<div class="form-message blue" data-console="summary" style="margin-bottom:10px"></div>
+
+	<div style="margin-bottom:8px">
+		<input type="search" class="form-control input-sm" data-console="search" style="max-width:340px;display:inline-block"
+			placeholder="${__("Search tools — name or label")}">
+		<select class="form-control input-sm" data-console="only" style="max-width:180px;display:inline-block;margin-left:6px">
+			<option value="all">${__("All tools")}</option>
+			<option value="enabled">${__("Enabled only")}</option>
+			<option value="disabled">${__("Disabled only")}</option>
+			<option value="write">${__("Write tools only")}</option>
+		</select>
+		<span class="text-muted small" data-console="shown" style="margin-left:8px"></span>
+	</div>
+
+	<div style="margin-bottom:8px">${chips}</div>
+
+	<div style="margin-bottom:8px">
+		<button class="btn btn-xs btn-default" data-bulk="on">${__("Enable everything shown")}</button>
+		<button class="btn btn-xs btn-default" data-bulk="off">${__("Disable everything shown")}</button>
+		<span class="text-muted small" style="margin-left:8px">${__(
+			"Applies to the tools the filter is currently showing. Not saved until you save the form."
+		)}</span>
+	</div>
+
+	<div>
+		<span class="text-muted small">${__("Presets")}:</span> ${presets}
+		<div class="text-muted small" style="margin-top:4px">${__(
+			"A preset writes every tool switch at once and saves immediately. It never changes the master switch, the token, the allowlist or the packet types."
+		)}</div>
+	</div>
+</div>`;
+}
+
+function wire_tool_console(frm, wrapper) {
+	wrapper.find('[data-console="search"]').val(VIEW.query);
+	wrapper.find('[data-console="only"]').val(VIEW.only);
+
+	wrapper.find('[data-console="search"]').on("input", function () {
+		VIEW.query = $(this).val() || "";
+		apply_tool_filter(frm, wrapper);
+	});
+	wrapper.find('[data-console="only"]').on("change", function () {
+		VIEW.only = $(this).val() || "all";
+		apply_tool_filter(frm, wrapper);
+	});
+	wrapper.find("[data-domain]").on("click", function () {
+		VIEW.domain = $(this).attr("data-domain") || "";
+		apply_tool_filter(frm, wrapper);
+	});
+	wrapper.find("[data-bulk]").on("click", function () {
+		bulk_set(frm, wrapper, $(this).attr("data-bulk") === "on");
+	});
+	wrapper.find("[data-profile]").on("click", function () {
+		preview_profile(frm, $(this).attr("data-profile"));
+	});
+
+	// The counts have to move when a checkbox does, and there is no per-field
+	// event to bind seven hundred handlers to — nor any reason to. One delegated
+	// listener on the form recomputes from `frm.doc`, which is what the form has
+	// already updated by the time the event reaches here.
+	frm.$wrapper.off("change.mcpconsole").on("change.mcpconsole", "input[type=checkbox]", () => {
+		refresh_tool_counts(frm, wrapper);
+	});
+}
+
+function tool_switches(frm) {
+	return frm.$wrapper.find('.frappe-control[data-fieldname^="allow_"]');
+}
+
+function apply_tool_filter(frm, wrapper) {
+	const query = (VIEW.query || "").toLowerCase().trim();
+	let shown = 0;
+
+	tool_switches(frm).each(function () {
+		const control = $(this);
+		const fieldname = control.attr("data-fieldname");
+		const tool = fieldname.slice("allow_".length);
+		// The two compliance packet types carry an `allow_` switch and are not
+		// tools, so they live in their own small map. Filed under a domain like
+		// everything else — a chip that hid them would be a chip that hid part
+		// of the form for no reason an operator could see.
+		const info = (CONSOLE.tools || {})[tool] || (CONSOLE.switches || {})[tool];
+		let visible = true;
+
+		if (VIEW.domain) visible = !!info && info.domain === VIEW.domain;
+		if (visible && VIEW.only === "enabled") visible = !!frm.doc[fieldname];
+		if (visible && VIEW.only === "disabled") visible = !frm.doc[fieldname];
+		if (visible && VIEW.only === "write") visible = !!info && !!info.mutating;
+		if (visible && query) {
+			const haystack = (tool + " " + control.find(".label-area").text()).toLowerCase();
+			visible = haystack.indexOf(query) !== -1;
+		}
+
+		control.toggle(visible);
+		if (visible) shown += 1;
+	});
+
+	// A section whose every switch is filtered out is a heading over nothing, and
+	// a page of ninety empty headings is worse than the unfiltered form. Sections
+	// with no tool switches at all — Connection, Network, Attribution — are left
+	// exactly as they are: the filter is about tools and must not hide the
+	// endpoint's own configuration.
+	frm.$wrapper.find(".form-section").each(function () {
+		const section = $(this);
+		const switches = section.find('.frappe-control[data-fieldname^="allow_"]');
+		if (!switches.length) return;
+		section.toggle(switches.filter(":visible").length > 0);
+	});
+
+	wrapper
+		.find('[data-console="shown"]')
+		.text(__("Showing {0} of {1} switches", [shown, tool_switches(frm).length]));
+	wrapper.find("[data-domain]").removeClass("btn-primary").addClass("btn-default");
+	wrapper
+		.find(`[data-domain="${VIEW.domain}"]`)
+		.removeClass("btn-default")
+		.addClass("btn-primary");
+}
+
+function refresh_tool_counts(frm, wrapper) {
+	const per_domain = {};
+	let total = 0;
+	let enabled = 0;
+	let writes_live = 0;
+
+	Object.keys(CONSOLE.tools || {}).forEach((tool) => {
+		const info = CONSOLE.tools[tool];
+		const on = !!frm.doc[`allow_${tool}`];
+		const bucket = (per_domain[info.domain] = per_domain[info.domain] || { total: 0, on: 0 });
+		bucket.total += 1;
+		total += 1;
+		if (on) {
+			bucket.on += 1;
+			enabled += 1;
+			if (info.mutating) writes_live += 1;
+		}
+	});
+
+	wrapper.find('[data-count-for=""]').text(`${enabled}/${total}`);
+	(CONSOLE.domains || []).forEach((domain) => {
+		const bucket = per_domain[domain.key] || { total: 0, on: 0 };
+		wrapper.find(`[data-count-for="${domain.key}"]`).text(`${bucket.on}/${bucket.total}`);
+	});
+
+	const writes = writes_live
+		? `<span class="text-danger">${__("{0} write tool(s) enabled", [writes_live])}</span>`
+		: `<span class="text-success">${__("no write tools enabled")}</span>`;
+	wrapper
+		.find('[data-console="summary"]')
+		.html(`<b>${__("{0} of {1} tools enabled", [enabled, total])}</b> — ${writes}`);
+}
+
+function bulk_set(frm, wrapper, value) {
+	const visible = tool_switches(frm).filter(":visible");
+	if (!visible.length) {
+		frappe.show_alert({ message: __("Nothing is showing to change."), indicator: "orange" });
+		return;
+	}
+	const apply = () => {
+		visible.each(function () {
+			frm.set_value($(this).attr("data-fieldname"), value ? 1 : 0);
+		});
+		refresh_tool_counts(frm, wrapper);
+		apply_tool_filter(frm, wrapper);
+	};
+	if (!value) {
+		apply();
+		return;
+	}
+	// Turning things ON in bulk can turn write tools on in bulk, which is the one
+	// direction worth stopping to read a sentence about.
+	frappe.confirm(
+		__("Enable all {0} switches currently showing? Save the form to make it take effect.", [
+			visible.length,
+		]),
+		apply
+	);
+}
+
+function preview_profile(frm, key) {
+	if (frm.is_dirty()) {
+		frappe.msgprint({
+			title: __("Unsaved Changes"),
+			indicator: "orange",
+			message: __(
+				"A preset saves the whole form. Save or reload your current changes first, so they are not written under a different name."
+			),
+		});
+		return;
+	}
+	frappe
+		.call({
+			method: "erpnext_mcp.tool_groups.apply_profile",
+			args: { profile: key, dry_run: 1 },
+			freeze: true,
+		})
+		.then((r) => r && r.message && show_profile_dialog(frm, r.message));
+}
+
+function show_profile_dialog(frm, plan) {
+	const esc = frappe.utils.escape_html;
+	const profile = plan.profile || {};
+	const writes = plan.write_tools_enabled || [];
+	const names = (list) =>
+		list.length ? list.map(esc).join(", ") : `<span class="text-muted">${__("none")}</span>`;
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Apply preset: {0}", [profile.label || ""]),
+		size: "large",
+		fields: [
+			{
+				fieldtype: "HTML",
+				options: `
+<p>${esc(profile.summary || "")}</p>
+<table class="table table-bordered" style="margin-bottom:8px">
+	<tr><td class="text-muted">${__("Domains it can read")}</td><td>${names(
+					profile.read_domain_labels || []
+				)}</td></tr>
+	<tr><td class="text-muted">${__("Domains it can write")}</td><td>${names(
+					profile.write_domain_labels || []
+				)}</td></tr>
+	<tr><td class="text-muted">${__("Tools enabled afterwards")}</td><td><b>${
+					plan.will_be_enabled
+				}</b> ${__("of")} ${plan.total}</td></tr>
+	<tr><td class="text-muted">${__("Switching on")}</td><td>${plan.enabling.length}</td></tr>
+	<tr><td class="text-muted">${__("Switching off")}</td><td>${plan.disabling.length}</td></tr>
+	<tr><td class="text-muted">${__("Write tools this enables")}</td><td>${
+					writes.length
+						? `<span class="text-danger">${writes.length}</span>: ${esc(writes.join(", "))}`
+						: `<span class="text-success">${__("none")}</span>`
+				}</td></tr>
+</table>
+<div class="form-message ${plan.disabling.length ? "orange" : "blue"}">${__(
+					"This writes every tool switch and saves immediately. It does not change the master switch, the token, the allowed CIDRs or the packet types. The change is recorded as one Version entry you can read afterwards."
+				)}</div>`,
+			},
+		],
+		primary_action_label: __("Apply preset"),
+		primary_action() {
+			dialog.hide();
+			frappe
+				.call({
+					method: "erpnext_mcp.tool_groups.apply_profile",
+					args: { profile: profile.key },
+					freeze: true,
+					freeze_message: __("Writing tool switches..."),
+				})
+				.then((r) => {
+					if (!r || !r.message) return;
+					frappe.show_alert({
+						message: __("{0} applied — {1} tools enabled", [
+							profile.label,
+							r.message.summary.enabled,
+						]),
+						indicator: "green",
+					});
+					frm.reload_doc();
+				});
+		},
+	});
+	dialog.show();
 }

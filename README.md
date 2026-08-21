@@ -317,6 +317,31 @@ mutating tool ships OFF — so a write tool you cannot see is one nobody has tic
 yet. Tick it in **ERPNext MCP Settings**; the refusal message names the exact
 switch if you call the tool anyway.
 
+### Finding a switch among seven hundred
+
+Every tool has its own checkbox on **ERPNext MCP Settings**, which is the point
+— and it means the page carries 759 of them. From v0.108.0 a console sits above
+the first tool section:
+
+* **A summary**, live as you tick: `412 of 757 tools enabled — no write tools
+  enabled`. The write count is always its own clause.
+* **Seven domain chips** — Farm Operations, HR & Payroll, Compliance & Safety,
+  Accounting & Finance, Buying/Selling/Inventory, Assets/Property/Governance,
+  Platform & Administration — each with its own `on/total`. Clicking one narrows
+  the form to it.
+* **Search**, over the tool name and the switch's label. Try `spray`, `i9`,
+  `garnish`.
+* **Eight presets** — Farm Manager, Foreman, Field Worker, Bookkeeper,
+  Compliance Officer, Owner/Family, Read Only, Nothing Enabled — each of which
+  writes every tool switch at once, shows you what it will change first, and
+  saves as one Version row you can read afterwards.
+
+A preset **disables as well as enables**, so applying one replaces the last
+rather than accumulating; and it touches **only** `allow_<tool>` — never the
+master switch, the token, the allowed CIDRs, the attribution user or the packet
+types. Two of the eight enable write tools, and both name every one they turn on
+before they run.
+
 ### Read-only — 104, all ON by default, each individually switchable
 
 **Accounting** — the v0.1.0 surface
@@ -1922,6 +1947,34 @@ The two headline separations are asserted in both directions in
 and a Compliance Officer can; a Compliance Officer cannot dispatch and a Foreman
 can. Asserting only one half of a separation proves nothing — a role that could
 read *nothing* would pass the first test.
+
+### The role badge
+
+`get_current_user_context` — the call the app makes at login and on every manual
+refresh — carries a `role_indicator` block from v0.108.0, and so does every row
+`search_employees` returns:
+
+```json
+"role_indicator": {
+  "key": "foreman", "label": "Foreman", "short_label": "FRM", "precedence": 4,
+  "has_login": true, "is_administrator": false, "can_dispatch": true
+}
+```
+
+It exists so a client stops deriving the badge itself from the raw `roles` array
+against a list of role names compiled into it. The precedence is stated in
+`roles.ROLE_INDICATORS` and answers one question — *of everything this person
+holds, which one word describes them on a screen this size?* — so a Foreman who
+is also a Field Worker reads as a Foreman, and a System Manager on a handset
+reads as an Administrator rather than as whatever farm role they also carry.
+
+`has_login` is false for anyone with no `user_id`, which is most of a picking
+crew: "nobody has given this person an account" and "this person's account holds
+no role" send a foreman to two different places. And the badge is a **display
+fact, not a boundary** — `guard.require_dispatch_role` still runs on every
+dispatching call, and `can_dispatch` here is computed off the same frozenset it
+refuses on, so a picker can grey a row out instead of letting somebody discover
+the refusal after they have chosen.
 
 ### Creating an account
 

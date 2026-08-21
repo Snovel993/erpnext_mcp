@@ -3,6 +3,98 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.108.0 — 2026-08-20 — seven hundred switches you can find, and a badge the phone stops guessing
+
+Contract items S9 and S11. No new tools: `registry.TOOLS` stays at 757 and every
+count assertion in the suite is untouched. Full note: [RELEASES/v0.108.0.md](RELEASES/v0.108.0.md).
+
+**S9 — "ERPNext MCP Settings" carries 759 checkboxes, and a form with 759
+checkboxes is a form nobody configures.** Every switch is a real control with a
+real reason to exist — that is the promise this app makes about what an AI client
+can reach — and the honest consequence is a page an operator scrolls, recognises
+two section names in, ticks two boxes and abandons. The other seven hundred and
+fifty-five stay at whatever the release shipped, so the switches have stopped
+being a decision and become a default.
+
+A console now sits above the first tool section, and removes nothing:
+
+* **A summary** — `412 of 757 tools enabled — no write tools enabled`, live as
+  you tick. The write count is always its own clause, because "412 enabled" and
+  "412 enabled, 3 of them write" are different sentences and only the second one
+  lets an operator stop reading.
+* **Seven domain chips** — Farm Operations, HR & Payroll, Compliance & Safety,
+  Accounting & Finance, Buying/Selling/Inventory, Assets/Property/Governance,
+  Platform & Administration — each with its own count. Clicking one narrows the
+  form to it and hides the sections left empty.
+* **Search**, over both the tool name and the switch's label.
+* **Eight preset profiles** — Farm Manager, Foreman, Field Worker, Bookkeeper,
+  Compliance Officer, Owner/Family, Read Only, Nothing Enabled.
+
+**A preset writes the whole surface and nothing else.** It DISABLES as well as
+enables, because a preset that only ever added would be a ratchet — three clicks
+and an operator holds the union of three profiles with no idea what is live. And
+it touches only `allow_<tool>`: not the master switch, not the token, not the
+allowed CIDRs, not the attribution user, not the two packet types. That document
+is the entire security surface of the endpoint, and all thirteen of those fields
+are asserted unchanged before and after.
+
+**Write domains are sparse on purpose.** "Mutating tools ship off" is one of this
+app's load-bearing promises, and a preset that quietly handed a client three
+hundred write tools would end it while looking like a convenience. Two profiles
+carry a write domain; `apply_profile` names every mutating tool it enabled, in
+the confirmation dialog before it runs and in its answer afterwards.
+
+**What is derived and what is declared.** Which section each tool sits in is read
+out of the shipped DocType JSON's `field_order`, so a tool added to a section is
+filed on the same commit with nothing to update — there is no second copy of the
+catalogue. Which of the seven domains each of the 105 sections rolls up into is a
+table, because no rule turns "Kairotic Compliance Calendar" into "Compliance",
+and the build fails if a section holding a tool switch is missing from it.
+
+It reads the JSON rather than `frappe.get_meta`, and that is not incidental: real
+Frappe orders `meta.fields` by `idx` (which follows `field_order`), the standalone
+double orders them by the JSON's `fields` array, and those are different orders.
+Grouping off meta would have filed tools one way in the suite and another on the
+bench with every test green.
+
+The browser keeps no copy of any of it. Domains, profiles and every tool's domain
+and write-ness come from `erpnext_mcp.tool_groups.console`, exactly as the
+write-tool banner has asked the server since v0.1.0 and for the same reason.
+
+**S11 — the phone was working out its own role badge, out of an array.**
+`get_current_user_context` returns `roles`, every role the account holds, and the
+app intersected it with a list of role names compiled into Swift and took
+whichever came out first. That is this app's role vocabulary living in a binary
+that ships through App Store review: a role added or renamed here does not exist
+there until the next build, and the order the app picks in is its own invention.
+
+`get_current_user_context` and every roster row `search_employees` returns now
+carry a `role_indicator` block — `key`, `label`, `short_label`, `precedence`,
+`description`, `has_login`, `is_administrator`, `can_dispatch` — so a picker and
+the account screen draw the same word for the same person. Additive: `roles` and
+`mobile_roles` are untouched and an app build that has not been updated keeps
+working.
+
+**Neither `primary_role` nor `senior_role` could have been that word**, which is
+why the badge has its own precedence table. `primary_role` is `held[0]` in
+`ROLE_SPECS` order — the LEAST of what somebody holds, so every Foreman enrolled
+through `create_mobile_user` badges "Field Worker". `senior_role` is `held[-1]`,
+and `ROLE_SPECS` is ordered by when each role was written: Advisor sits last and
+is documented in the same file as "the narrowest role in the app", and Crew
+Leader sits after Foreman while being the board-less half of one. Both inversions
+are now pinned by negative-control tests, along with the spec order they rest on.
+`capability_of` itself is unchanged — it has other callers, and the fix is a
+decision for whoever owns it.
+
+**The badge is a display fact and not a permission.**
+`guard.require_dispatch_role` still runs on every dispatching call and is
+unchanged; `can_dispatch` inside the badge is computed off the same frozenset
+that gate refuses on, so a picker can grey a row out instead of letting somebody
+discover the refusal after they have chosen. And `has_login` is the field a
+foreman actually needs: most of a picking crew has no `user_id`, and "nobody has
+given this person an account" and "this person's account holds no role" send a
+foreman to two different places.
+
 ## 0.107.0 — 2026-08-20 — the phone rings when somebody is sent to work, and when a cabin is unfit to sleep in
 
 The break horn reached the crew in v0.99.0 and nothing else on this server has

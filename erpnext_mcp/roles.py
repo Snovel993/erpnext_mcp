@@ -1252,6 +1252,186 @@ def capability_of(user_id: str) -> dict:
 	}
 
 
+class RoleIndicator:
+	"""One badge: the high-level category a person falls into, and how to draw it.
+
+	`precedence` IS NOT SENIORITY AND MUST NOT BE READ AS IT. It is the order the
+	badge is PICKED in when somebody holds several roles, and it is chosen for
+	what a field app should show — see `ROLE_INDICATORS`.
+	"""
+
+	__slots__ = ("description", "key", "label", "precedence", "role", "short_label")
+
+	def __init__(self, key: str, label: str, short_label: str, role: str, precedence: int, description: str):
+		self.key = key
+		self.label = label
+		self.short_label = short_label
+		self.role = role
+		self.precedence = precedence
+		self.description = description
+
+
+#: The badge vocabulary, in the order a badge is chosen when somebody holds more
+#: than one role. v0.108.0.
+#:
+#: WHY THIS IS A SEPARATE TABLE FROM `ROLE_SPECS` AND NOT ITS ORDER. The handset
+#: has been drawing its own badge out of the raw `roles` array
+#: `get_current_user_context` returns — intersecting it with a hardcoded Swift
+#: list and taking whatever came first — which is a copy of this app's role
+#: vocabulary living in a compiled binary, and it goes stale the release a role
+#: is added or renamed. The obvious fix was to send `capability_of`'s
+#: `senior_role`, and that would have been WRONG: `senior_role` is `held[-1]` in
+#: `ROLE_SPECS` order, and `ROLE_SPECS` is ordered by when each role was written
+#: and what it can touch — which puts `Advisor`, the narrowest role in the app,
+#: last. A Farm Manager who also advises an entity would have badged "Advisor".
+#:
+#: So the badge order is stated here, once, explicitly, and it answers exactly
+#: one question: **of everything this person holds, which one word describes them
+#: on a screen the size of a phone?** Two consequences follow, and both are
+#: deliberate:
+#:
+#:   * `Administrator` outranks every farm role. Somebody carrying System Manager
+#:     on a handset is the operator, and a badge saying "Field Worker" over an
+#:     account that can do anything is the badge lying.
+#:   * `Family Member` and `Advisor` come LAST, below `Field Worker`, because they
+#:     are not on the operational ladder at all. Somebody who holds one of them
+#:     AND an operational role is holding a phone in an orchard, and the
+#:     operational word is the useful one. Somebody who holds only one of them
+#:     badges as it, which is the case that made them worth listing.
+#:
+#: IT IS A DISPLAY FACT AND NOT A PERMISSION, and every caller has to be told so
+#: in as many words. `can_dispatch` beside it is the same courtesy
+#: `capability_of` already documents: `guard.require_dispatch_role` still runs on
+#: every call, and a client that trusted the badge instead of the server would be
+#: a sign on a door with no lock.
+ROLE_INDICATORS = (
+	RoleIndicator(
+		"administrator",
+		"Administrator",
+		"ADM",
+		"System Manager",
+		1,
+		"Holds System Manager on this site — the operator's own account, not a farm role.",
+	),
+	RoleIndicator(
+		"farm_manager",
+		"Farm Manager",
+		"MGR",
+		"Farm Manager",
+		2,
+		"Runs the operation: the work, the compliance behind it, and the ground it happens on.",
+	),
+	RoleIndicator(
+		"compliance_officer",
+		"Compliance Officer",
+		"CMP",
+		"Compliance Officer",
+		3,
+		"Keeps the registers an audit asks for, and builds the packet that answers it.",
+	),
+	RoleIndicator(
+		"foreman",
+		"Foreman",
+		"FRM",
+		"Foreman",
+		4,
+		"Runs the board: what needs doing, who is doing it, and what came back.",
+	),
+	RoleIndicator(
+		"crew_leader",
+		"Crew Leader",
+		"CRW",
+		"Crew Leader",
+		5,
+		"Runs the crew in front of them: the shift, the breaks called, and what the day turned in.",
+	),
+	RoleIndicator(
+		"field_worker",
+		"Field Worker",
+		"FLD",
+		"Field Worker",
+		6,
+		"Takes work from the pool and files the evidence that closes it.",
+	),
+	RoleIndicator(
+		"family_member",
+		"Family Member",
+		"FAM",
+		"Family Member",
+		7,
+		"Sees what the family owns, who owns it, and the paper that says so.",
+	),
+	RoleIndicator(
+		"advisor",
+		"Advisor",
+		"ADV",
+		"Advisor",
+		8,
+		"Reads the documents for the entity they advise, and nothing else.",
+	),
+)
+
+#: What somebody with a login and none of the roles above badges as. A REAL
+#: ANSWER RATHER THAN A NULL, because the phone has to draw something and "no
+#: role on this system" is a different sentence from "we could not work it out"
+#: — the first sends somebody to an operator, the second sends them to support.
+NO_ROLE_INDICATOR = RoleIndicator(
+	"none",
+	"No Role",
+	"—",
+	"",
+	99,
+	"Has a login but holds none of this app's roles. An operator has to grant one.",
+)
+
+INDICATOR_BY_ROLE = {item.role: item for item in ROLE_INDICATORS}
+
+
+def role_indicator(user_id: str) -> dict:
+	"""The badge for ONE person: which high-level category they fall into. v0.108.0.
+
+	Never raises, for the same reason `capability_of` does not: it is folded into
+	`get_current_user_context`, which doubles as credential validation, and a
+	failure here would read on the handset as "this token is dead, sign out".
+
+	`has_login` IS FALSE FOR MOST OF A PICKING CREW. A worker with no `user_id`
+	holds no roles because there is no account for a role to hang off, and
+	"nobody has given this person an account" is a different fact from "this
+	person's account may not dispatch". The badge is `none` either way; only
+	`has_login` tells the two apart.
+	"""
+	login = str(user_id or "").strip()
+	if not login:
+		return _indicator_payload(NO_ROLE_INDICATOR, held=[], has_login=False, is_admin=False)
+	held = roles_of(login)
+	try:
+		is_admin = "System Manager" in set(all_roles_of(login))
+	except Exception:  # pragma: no cover - no Has Role table
+		is_admin = False
+	candidates = [INDICATOR_BY_ROLE[name] for name in held if name in INDICATOR_BY_ROLE]
+	if is_admin:
+		candidates.append(INDICATOR_BY_ROLE["System Manager"])
+	chosen = min(candidates, key=lambda item: item.precedence) if candidates else NO_ROLE_INDICATOR
+	return _indicator_payload(chosen, held=held, has_login=True, is_admin=is_admin)
+
+
+def _indicator_payload(indicator: RoleIndicator, held: list, has_login: bool, is_admin: bool) -> dict:
+	return {
+		"key": indicator.key,
+		"label": indicator.label,
+		"short_label": indicator.short_label,
+		"precedence": indicator.precedence,
+		"description": indicator.description,
+		"has_login": has_login,
+		"is_administrator": is_admin,
+		# Repeated inside the badge rather than only beside it, so a client can
+		# decode this one object and have everything a row needs. It is the same
+		# value `capability_of` reports and is computed the same way, off the
+		# frozenset `guard.require_dispatch_role` refuses on.
+		"can_dispatch": bool(set(held) & DISPATCH_ROLES),
+	}
+
+
 def all_roles_of(user: str) -> list:
 	"""Every role on a user, this app's and everybody else's. Sorted."""
 	try:

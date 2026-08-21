@@ -25,6 +25,8 @@
   "attribution_section",
   "require_user_context",
   "mcp_system_user",
+  "tool_console_section",
+  "tool_console_html",
   "read_tools_section",
   "allow_get_company_topology",
   "allow_get_account_balance",
@@ -1076,6 +1078,17 @@
    "fieldtype": "Link",
    "label": "MCP System User",
    "options": "User"
+  },
+  {
+   "description": "Search, group and bulk-set the tool switches below. Every switch is still here and still individual — this only makes the seven hundred of them navigable. A preset writes every tool switch at once and touches nothing else on this form.",
+   "fieldname": "tool_console_section",
+   "fieldtype": "Section Break",
+   "label": "Tool Permissions"
+  },
+  {
+   "fieldname": "tool_console_html",
+   "fieldtype": "HTML",
+   "label": "Tool Console"
   },
   {
    "description": "All on by default; none of these can change data. Turning one off removes it from the catalogue entirely, so a client cannot see it. Use this to keep an AI's view down to the job it is doing.",

@@ -272,6 +272,14 @@ def _capability(user_id) -> dict:
 		"mobile_roles": answer["mobile_roles"],
 		"primary_role": answer["primary_role"],
 		"can_dispatch": answer["can_dispatch"],
+		# v0.108.0, S11. THE SAME BADGE THE CALLER GETS FOR THEMSELVES in
+		# `get_current_user_context`, so a roster row and the account screen draw
+		# the same word for the same person. `primary_role` above is NOT that
+		# word and cannot be made into it: it is `held[0]` in `ROLE_SPECS` order,
+		# which is the LEAST of what somebody holds, so a foreman who is also a
+		# field worker reads as "Field Worker" on a picker. See
+		# `roles.ROLE_INDICATORS` for why the badge needs its own precedence.
+		"role_indicator": role_lib.role_indicator(user_id),
 	}
 
 
