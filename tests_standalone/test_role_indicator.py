@@ -10,19 +10,23 @@ added here does not exist there until the next build, and the ORDER the app
 picks in is its own invention.
 
 WHY THE OBVIOUS FIX WAS WRONG, which is the whole reason this file has a
-precedence class in it. `capability_of` already reports `primary_role` and
-`senior_role`, and sending one of those looks like the answer. Neither is:
+precedence class in it. `capability_of` reported two fields that looked like the
+answer and neither was:
 
   * `primary_role` is `held[0]` in `ROLE_SPECS` order, the LEAST of what
     somebody holds. A foreman who is also a field worker — which every foreman
-    enrolled through `create_mobile_user` is — badges "Field Worker".
-  * `senior_role` is `held[-1]`, and `ROLE_SPECS` ends with `Family Member` and
-    `Advisor` because that is the order they were written in, not a ranking.
-    `Advisor` is documented in `roles.py` as "the narrowest role in the app". A
-    Farm Manager who also advises an entity badges "Advisor".
+    enrolled through `create_mobile_user` is — badges "Field Worker". It is
+    still reported, because it predates all of this by ninety releases, and it
+    is asserted below as the negative control it is.
+  * `senior_role` was `held[-1]`, and `ROLE_SPECS` ends with `Family Member` and
+    `Advisor` because that is the order they were written in, not a ranking. It
+    was DELETED in v0.109.0 — nothing server-side or in the iOS client ever read
+    it, and a field whose only test was a warning not to use it should not be a
+    field. The two cases it got wrong are still pinned below, on
+    `role_indicator`, which is what a caller reaching for it would reach for now.
 
-Both are asserted below as the negative controls they are, because a badge that
-is right for the single-role accounts in a fixture and wrong for the people who
+The surviving control matters because a badge that is right for the
+single-role accounts in a fixture and wrong for the people who
 actually hold two is exactly the bug that ships.
 """
 
@@ -62,13 +66,13 @@ class TheBadgePicksOneRole(SeededTestCase):
 		self.assertEqual(self.badge("Field Worker", "Foreman")["key"], "foreman")
 
 	def test_a_farm_manager_who_also_advises_badges_as_a_farm_manager(self):
-		"""THE CASE `senior_role` GETS WRONG. `ROLE_SPECS` ends with Advisor
+		"""THE CASE THE DELETED `senior_role` GOT WRONG. `ROLE_SPECS` ends with Advisor
 		because that is when it was written, and `roles.py` calls Advisor the
 		narrowest role in the app."""
 		self.assertEqual(self.badge("Farm Manager", "Advisor")["key"], "farm_manager")
 
 	def test_a_foreman_who_also_leads_a_crew_badges_as_a_foreman(self):
-		"""THE SECOND CASE `senior_role` GETS WRONG, and it is not about the
+		"""THE SECOND CASE IT GOT WRONG, and it is not about the
 		holding roles at all. `Crew Leader` was added after `Foreman` and sits
 		after it in `ROLE_SPECS`, so it reads as the more senior of the two —
 		while `roles.py` describes it as the board-less half of a Foreman that
@@ -80,21 +84,22 @@ class TheBadgePicksOneRole(SeededTestCase):
 		pass on any implementation that happens to agree today.
 
 		BOTH `ROLE_SPECS` INVERSIONS ARE PINNED, not just the one that prompted
-		this. The comment above `senior_role` calls its ordering "ascending
-		capability", which is what makes it a trap rather than a wart: it reads
-		as a deliberate invariant, so the next person builds on it. Nothing
-		server-side consumes `senior_role` today and it still ships in the
-		user-context payload, so a client branching on it would be wrong with
-		nothing here failing. These assertions are what make that visible.
+		this. v0.106.0's comment on these fields called the ordering "ascending
+		capability", which is what made it a trap rather than a wart: it read as
+		a deliberate invariant, so the next person builds on it — and the next
+		person did, which is how `senior_role` came to exist at all. That field
+		is gone; `primary_role` stays and is asserted here, because it predates
+		the false claim and removing it would be a wider change than the defect
+		justified. `role_indicator` is checked beside it every time, so the wrong
+		answer and the right one are pinned against each other rather than the
+		wrong one merely being described.
 		"""
 		login = a_user("both@example.test", "Field Worker", "Foreman", "Advisor")
 		capability = roles.capability_of(login)
 		self.assertEqual(capability["primary_role"], "Field Worker")
-		self.assertEqual(capability["senior_role"], "Advisor")
 		self.assertEqual(roles.role_indicator(login)["key"], "foreman")
 
 		crew = a_user("crew@example.test", "Foreman", "Crew Leader")
-		self.assertEqual(roles.capability_of(crew)["senior_role"], "Crew Leader")
 		self.assertEqual(roles.role_indicator(crew)["key"], "foreman")
 
 	def test_the_spec_order_really_is_the_order_those_claims_rest_on(self):

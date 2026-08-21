@@ -1242,12 +1242,25 @@ def capability_of(user_id: str) -> dict:
 	return {
 		"has_login": True,
 		"mobile_roles": held,
-		# Spec order, which is ascending capability — see `ROLE_SPECS`. The
-		# FIRST is the least; a display wanting "Foreman" out of somebody who is
-		# also a Field Worker wants the last, so both are reported rather than
-		# this picking one and being wrong for half the callers.
+		# `held[0]` — THE FIRST ROLE IN `ROLE_SPECS` THAT THIS PERSON HOLDS, AND
+		# NOTHING MORE. `ROLE_SPECS` is in the order roles were ADDED to this app,
+		# not in order of capability, and v0.106.0 shipped a comment here claiming
+		# the opposite. It was false in both directions: Crew Leader sits after
+		# Foreman while its own spec says "Not the dispatch board", and Advisor
+		# sits last while its own spec calls it "the narrowest role in the app".
+		#
+		# THE KEY PREDATES THAT COMMENT BY NINETY RELEASES — `tools/mobile.py`'s
+		# `get_current_user_context` has reported `held[0]` since v0.17.0 — which
+		# is why it is still here rather than deleted with the false claim. What
+		# was removed is `senior_role`, `held[-1]`, added in v0.106.0 on the same
+		# bad premise and read by nothing: no caller in this app and no field in
+		# the iOS client ever decoded it.
+		#
+		# DO NOT BUILD A BADGE ON THIS. `role_indicator` below is the answer to
+		# "what word describes this person", and `ROLE_INDICATORS` states its own
+		# precedence and says in as many words that precedence is not seniority.
+		# `test_role_indicator.py` holds the counterexamples as negative controls.
 		"primary_role": held[0] if held else None,
-		"senior_role": held[-1] if held else None,
 		"can_dispatch": bool(set(held) & DISPATCH_ROLES),
 	}
 
@@ -1280,10 +1293,13 @@ class RoleIndicator:
 #: list and taking whatever came first — which is a copy of this app's role
 #: vocabulary living in a compiled binary, and it goes stale the release a role
 #: is added or renamed. The obvious fix was to send `capability_of`'s
-#: `senior_role`, and that would have been WRONG: `senior_role` is `held[-1]` in
-#: `ROLE_SPECS` order, and `ROLE_SPECS` is ordered by when each role was written
-#: and what it can touch — which puts `Advisor`, the narrowest role in the app,
-#: last. A Farm Manager who also advises an entity would have badged "Advisor".
+#: `senior_role` — `held[-1]` in `ROLE_SPECS` order — and that would have been
+#: WRONG, because `ROLE_SPECS` is ordered by when each role was WRITTEN, not by
+#: capability: it puts `Advisor`, the narrowest role in the app, last, so a Farm
+#: Manager who also advises an entity would have badged "Advisor". That field was
+#: deleted in v0.109.0 rather than left as a trap; `primary_role` remains, is
+#: `held[0]`, is equally not a ranking, and is documented as such at its own
+#: definition. Neither has ever been a badge.
 #:
 #: So the badge order is stated here, once, explicitly, and it answers exactly
 #: one question: **of everything this person holds, which one word describes them

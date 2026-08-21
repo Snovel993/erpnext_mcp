@@ -3,6 +3,47 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.109.0 — 2026-08-20 — a field whose only test was a warning not to use it
+
+`roles.capability_of` reported `senior_role` as "the most capable role this
+person holds", computed as `held[-1]` in `ROLE_SPECS` order, above a comment
+asserting that spec order is ascending capability. **It is not.** `ROLE_SPECS` is
+in the order roles were ADDED, and the file contradicts the claim twice over:
+`Crew Leader` sits after `Foreman` while its own spec says "Not the dispatch
+board", and `Advisor` sits last while its own spec calls it "the narrowest role
+in the app". A Foreman who also leads a crew reported `Crew Leader`; a Farm
+Manager who also advises an entity reported `Advisor`. Both the lesser of the two.
+
+**The field is deleted rather than fixed.** Nothing read it — no caller in this
+app, and no field in the iOS client, which computes its own answer in
+`MobileRole.primary(of:)`. Its only test was a negative control saying don't use
+this, and a field whose test exists to warn people off it should not be a field.
+It reached a handset through `get_employee` only, inside `employee_detail`'s
+`capability` object.
+
+**`primary_role` stays, with a comment that is true.** It is `held[0]` — the
+first role in `ROLE_SPECS` that somebody holds, and nothing more — and it is not
+new: `get_current_user_context` has reported it since **v0.17.0**, ninety
+releases before the comment that made it look like a deliberate invariant.
+Removing it would be a wider change than this defect justifies. What was actually
+introduced in v0.106.0 was the false claim, and the claim is what did the damage:
+it is what made an old unexamined idiom read as a rule, which is how
+`senior_role` came to be built on top of it.
+
+**No capability rank was added, and that is a deliberate refusal.** Four
+orderings of "what is this person" already exist across the two repos — this
+file's `ROLE_INDICATORS` (v0.108.0), `capability_of`, and in `fafo_ios` both
+`MobileRole.hierarchy` and a second independent list inside
+`AppFeedback.primaryRole`. The two client-side tables are genuine capability
+orders and they disagree with each other. A fifth would be the point at which
+nobody can say which is authoritative. `role_indicator` is the answer to "what
+word describes this person"; `ROLE_INDICATORS` states its own precedence and says
+in as many words that precedence is not seniority.
+
+Found by `erpnext-mcp-d8` while building the badge in v0.108.0, who left it alone
+rather than fixing it in passing, and confirmed independently by a third session
+before anything was changed.
+
 ## 0.108.0 — 2026-08-20 — seven hundred switches you can find, and a badge the phone stops guessing
 
 Contract items S9 and S11. No new tools: `registry.TOOLS` stays at 757 and every
