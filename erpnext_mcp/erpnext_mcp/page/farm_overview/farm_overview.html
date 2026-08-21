@@ -1,0 +1,78 @@
+<div class="fo-wrap">
+	<!-- SPDX-License-Identifier: MIT
+
+		The shell of /app/farm-overview. Markup only: every value on this page
+		arrives from `erpnext_mcp.farm_overview.farm_overview`, and
+		farm_overview.js fills the placeholders in. Nothing here is rendered
+		server-side, so there is no Jinja in it and no jinja marker asking Frappe
+		to look for any.
+
+		THE COMMENTS AND THE STYLE BLOCK LIVE INSIDE THE ROOT ELEMENT ON PURPOSE,
+		which is the rule mobile_onboarding.html states at length and the reason
+		it is worth repeating rather than looking up: the JS does
+		`$(frappe.render_template("farm_overview"))`, and jQuery turns a leading
+		comment into a node of its own — so a file that opened with one would hand
+		back a collection rather than the single wrapper every `.find()` assumes.
+
+		EVERY APOSTROPHE IN THE VISIBLE TEXT IS &#39; AND NOT ONE. Frappe compiles
+		this file into `frappe.templates["farm_overview"] = &#39;...&#39;;` — a
+		SINGLE-quoted JS string — in `build.html_to_js_template`, and what stands
+		between a straight apostrophe and a syntax error that takes the whole page
+		script down is one `str.replace` in `scrub_html_template`. Not depending on
+		it costs two entities.
+
+		THE MAP CANVAS IS SIZED IN CSS AND NOT BY LEAFLET. A container with no
+		height is the oldest bug in embedding Leaflet: the library measures what it
+		is given, gets nought, and draws a single tile in the corner — which looks
+		like a broken map rather than a layout problem.
+	-->
+	<style>
+		.fo-wrap { padding-bottom: 30px; }
+		.fo-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+			margin-bottom: 14px; }
+		.fo-bar label { display: block; font-size: 11px; text-transform: uppercase;
+			letter-spacing: .08em; color: var(--text-muted, #8d99a6); margin: 0 0 4px; }
+		.fo-company-row { min-width: 220px; }
+		.fo-summary { flex: 1 1 auto; font-size: 12px; color: var(--text-muted, #8d99a6);
+			text-align: right; }
+		.fo-panel { border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+			background: var(--card-bg, #fff); margin-bottom: 16px; overflow: hidden; }
+		.fo-map { height: 620px; width: 100%; }
+		.fo-legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 12px 16px;
+			border-top: 1px solid var(--border-color, #e2e8f0); font-size: 12px; }
+		.fo-legend-entry { display: flex; align-items: center; gap: 8px; }
+		.fo-swatch { width: 22px; height: 12px; border-radius: 3px; display: inline-block; }
+		.fo-legend-count { color: var(--text-muted, #8d99a6); }
+		.fo-notices { margin-bottom: 16px; }
+		.fo-note { border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; }
+		.fo-note-warn { border: 1px solid #e6d5a8; background: #fdfaf1; color: #6b5410; }
+		.fo-note-bad { border: 1px solid #e0b4b4; background: #fdf6f6; color: #7a2626; }
+		.fo-note p { margin: 0 0 6px; }
+		.fo-note p:last-child { margin-bottom: 0; }
+		.fo-note ul { margin: 6px 0 0; padding-left: 20px; }
+		.fo-fallback { padding: 20px; font-size: 13px; }
+		.fo-fallback table { width: 100%; font-size: 12px; margin-top: 10px; }
+		.fo-fallback th { text-align: left; font-weight: 600; padding: 4px 8px 4px 0;
+			color: var(--text-muted, #8d99a6); }
+		.fo-fallback td { padding: 3px 8px 3px 0; font-family: monospace; }
+		.fo-popup-title { font-weight: 600; margin-bottom: 2px; }
+		.fo-popup-detail { color: #57606a; margin-bottom: 4px; }
+		.fo-popup-figures { font-size: 11px; color: #57606a; margin-bottom: 6px; }
+		.fo-empty { padding: 30px; text-align: center; color: var(--text-muted, #8d99a6); }
+	</style>
+
+	<div class="fo-bar">
+		<div class="fo-company-row" style="display:none">
+			<label for="fo-company">Entity</label>
+			<select id="fo-company" class="form-control input-sm"></select>
+		</div>
+		<div class="fo-summary"></div>
+	</div>
+
+	<div class="fo-notices"></div>
+
+	<div class="fo-panel">
+		<div class="fo-map"></div>
+		<div class="fo-legend"></div>
+	</div>
+</div>

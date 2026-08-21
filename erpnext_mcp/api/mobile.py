@@ -7905,6 +7905,186 @@ def create_housing_unit(
 	)
 
 
+#: Which tool sets which register's shape, and what that tool calls the record.
+#:
+#: THE SAME THREE `api/gis.SAVEABLE` NAMES, REACHED THE SAME WAY. That table is
+#: the Desk map's allowlist and this one is the phone's; both resolve a closed
+#: set of registers to the three tools the AI also calls, and neither takes a
+#: method name from a caller. Two tables rather than one import because the two
+#: transports hold DIFFERENT things: `SAVEABLE` carries the callables because its
+#: gate is `frappe.has_permission` on a Desk session, and this one carries the
+#: module and the tool NAME because `test_wave2_mobile_surface` reads the source
+#: of the wrapper to prove which gate ran.
+BOUNDARY_REGISTERS = {
+	"Field": {"module": farm_tools, "tool": "set_field_boundary", "argument": "field"},
+	"Irrigation Zone": {"module": farm_tools, "tool": "set_zone_boundary", "argument": "zone"},
+	"Parcel": {"module": realestate_tools, "tool": "set_parcel_boundary", "argument": "parcel"},
+}
+
+
+def _set_one_boundary(user: str, register: str, name, geojson, dry_run) -> dict:
+	"""The one write behind all three boundary routes. Gate, scope, delegate.
+
+	v0.110.0, and it REVERSES A SENTENCE THIS SURFACE HAS BEEN CARRYING SINCE
+	v0.98.0: "`set_field_boundary`, `set_zone_boundary`, `set_parcel_boundary` …
+	are DELIBERATELY ABSENT. Drawing a boundary … is a desk act with a document
+	open." That was true of drawing one with a mouse on satellite imagery, which
+	is the only way it could be done when it was written.
+
+	IT IS NOT TRUE OF WALKING ONE. A boundary recorded by carrying a phone round
+	the edge of a block is a ring of GPS fixes, and the person holding the phone
+	is standing on the corner rather than guessing at it from an image taken in a
+	different season. That is a BETTER boundary than a traced one for exactly the
+	ground this app is about: an orchard block's corner is a change in canopy, and
+	the difference between where the canopy looks like it ends and where the last
+	row actually is comes to acres over a farm.
+
+	EVERY CHECK THE DESK MAP GETS, THIS GETS, because it is the same three tools.
+	The polygon is parsed, a self-intersection is refused, the enclosed area is
+	compared against the recorded acreage and a disagreement past a quarter is
+	REFUSED outright, containment against the shape above and below is reported,
+	and every derived field — centroid, bounding box, H3 coverage, computed acres
+	— is recomputed from the polygon rather than typed. Nothing is reimplemented
+	here and no check is relaxed for a phone.
+
+	THE AREA CHECK IS WHAT MAKES A WALKED BOUNDARY SAFE, and it is worth saying
+	which failure it catches: a walk that cut a corner, stopped early, or was
+	recorded with the phone in a pocket losing fixes produces a polygon that is
+	perfectly valid, is on Earth, and encloses noticeably less ground than the
+	block is recorded as. That is refused with both figures named. A walk that
+	came out within a few percent is a walk that agrees with the deed.
+
+	THE GATE IS `require_location_role` — Farm Manager — WHICH IS THE SAME GATE
+	AS THE CREATES ABOVE AND NOT AN ACCIDENT OF COPYING. A register entry is
+	permanent in a way a task is not, and a boundary is the more consequential
+	half of it: every geofence answer, every "was the crew in an authorised
+	area", every acre of cost allocation and every Worker Protection Standard
+	answer about which block was sprayed resolves through this polygon. A
+	plausible-but-wrong shape passes every validation the tool makes. The refusal
+	names the alternative, as `guard.require_location_role` always does: the walk
+	can be recorded and somebody at a desk can apply it.
+
+	THE OWNING ENTITY IS READ OFF THE RECORD AND NEVER TAKEN FROM THE BODY. The
+	three tools resolve a company when they are not given one, and on a
+	multi-entity site that is a refusal rather than a guess — so the entity is
+	read from the document the caller already proved they may reach, which is the
+	same call `api/gis._save_boundary` makes for the Desk. A phone that could name
+	the entity could file a shape against a register it was not scoped to.
+
+	`dry_run` GOES STRAIGHT THROUGH, because the tools already have it and a
+	handset has the most obvious use for it in the app: the walk is finished, the
+	operator is still standing in the block, and "what would this shape do" before
+	"do it" is the difference between a correction that takes thirty seconds and
+	one that takes a drive back out.
+	"""
+	guard.require_location_role(user, f"Setting the boundary of a {register}")
+	allowed = guard.require_scope(user)
+	spec = BOUNDARY_REGISTERS[register]
+
+	# `guard.require_scoped_doc` CANNOT DO THIS JOB AND WOULD PASS EVERYTHING —
+	# it reads a column called `company` and all three of these registers call
+	# theirs `owning_entity`. `_scoped_location` is the hand-made check that
+	# exists for exactly that trap, and it answers NOT FOUND rather than refused
+	# so a caller cannot map another entity's docnames by watching which error
+	# comes back.
+	docname = _scoped_location(register, name, spec["argument"], allowed)
+
+	shape = geojson
+	if shape in (None, ""):
+		frappe.throw(
+			f"boundary_geojson is required — a {register} boundary with no polygon in it is not "
+			"a boundary. Send the walk as a GeoJSON Polygon or MultiPolygon in [longitude, "
+			"latitude] degrees. Nothing was changed.",
+			frappe.ValidationError,
+		)
+	if not isinstance(shape, str):
+		# `frappe.call` posts a JS object as JSON and Frappe hands some bodies
+		# back already decoded, so the polygon arrives as a dict about as often as
+		# it arrives as a string. `geo.parse` reads a string; re-encoding here is
+		# one line and saves a refusal that would read as "your polygon is
+		# invalid" about a polygon that is perfectly fine.
+		shape = json.dumps(shape)
+
+	inner = {spec["argument"]: docname, "boundary_geojson": shape}
+	owner = str(frappe.db.get_value(register, docname, "owning_entity") or "")
+	if owner:
+		inner["owning_entity"] = owner
+	if dry_run not in (None, ""):
+		inner["dry_run"] = 1 if str(dry_run).strip().lower() in ("1", "true", "yes") else 0
+
+	result = getattr(spec["module"], spec["tool"])(inner)
+	data = dict(result.data)
+	# THE ANSWER CARRIES THE PAIR THE HANDSET SENDS BACK, the same shape
+	# `_create_one_location` returns and for the same reason: the screen that
+	# posted this walk is a location screen, and the next thing it does is name
+	# the place it just measured.
+	return {
+		**data,
+		"doctype": register,
+		"location_type": register,
+		"location": docname,
+	}
+
+
+# ── 71h. set_field_boundary ──────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_field_boundary", mutating=True, limit=guard.WRITE_LIMIT)
+def set_field_boundary(user: str, field=None, name=None, boundary_geojson=None, dry_run=None) -> dict:
+	"""Record the shape of one planted block, from a walk round its edge.
+
+	`field` IS THE REGISTER'S WORD AND `name` IS THE HANDSET'S, both accepted for
+	the same reason `create_field` takes both: `routes.bind` drops what a
+	signature does not name, and a method that took one of them would 404 the
+	argument for whichever caller guessed the other.
+
+	`owning_entity` AND `company` ARE ABSENT FROM THIS SIGNATURE, so `bind` drops
+	them and no body can file a polygon against an entity this account is not
+	scoped to. The entity is read off the block itself — see `_set_one_boundary`.
+	"""
+	return _set_one_boundary(user, "Field", field or name, boundary_geojson, dry_run)
+
+
+# ── 71i. set_zone_boundary ───────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_zone_boundary", mutating=True, limit=guard.WRITE_LIMIT)
+def set_zone_boundary(user: str, zone=None, name=None, boundary_geojson=None, dry_run=None) -> dict:
+	"""Record the shape of one irrigation zone.
+
+	THE ONE THAT REPORTS RATHER THAN REFUSES. `set_zone_boundary` answers whether
+	the zone sits inside the block it waters and never enforces it, because a
+	shared water line crosses a boundary, a pump house sits on the headland and a
+	mainline runs down a road easement. `boundary_contained_in_field` comes back
+	true, false, or null when the block has no boundary of its own to check
+	against — and null is a different answer from false, which is why the walk
+	that recorded the block should be the one done first.
+	"""
+	return _set_one_boundary(user, "Irrigation Zone", zone or name, boundary_geojson, dry_run)
+
+
+# ── 71j. set_parcel_boundary ─────────────────────────────────────────────────
+@frappe.whitelist(methods=["POST"])
+@guard.endpoint("set_parcel_boundary", mutating=True, limit=guard.WRITE_LIMIT)
+def set_parcel_boundary(user: str, parcel=None, name=None, boundary_geojson=None, dry_run=None) -> dict:
+	"""Record the shape of one parcel: the outer line the deed describes.
+
+	THE ONE A PHONE IS LEAST OFTEN THE RIGHT INSTRUMENT FOR, and it is published
+	anyway rather than withheld. A parcel line is what an assessor surveyed, and
+	`api/gis.query_county_parcels` imports Wasco County's own polygon on the Desk
+	— which is a better source than anybody walking a fence. But a farm outside
+	Wasco County has no such import, several deed lines on any farm run down the
+	middle of a creek nobody can survey by eye off imagery, and a walked outline
+	that agrees with the deeded acreage to a few percent is a great deal better
+	than no outline at all. The tool's own area check is what decides which of
+	those a given walk was.
+
+	SETTING IT REPORTS WHAT NOW FALLS OUTSIDE — every block, zone and cabin
+	registered on the parcel that has a position and is no longer inside it. That
+	is the answer worth having on the phone rather than in an email later, since
+	the person holding it is standing on the line in question.
+	"""
+	return _set_one_boundary(user, "Parcel", parcel or name, boundary_geojson, dry_run)
+
+
 # ── 72. list_cost_centers ───────────────────────────────────────────────────
 @frappe.whitelist(methods=["POST", "GET"])
 @guard.endpoint("list_cost_centers", limit=guard.READ_LIMIT)

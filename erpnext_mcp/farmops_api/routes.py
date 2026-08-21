@@ -485,17 +485,47 @@ ROUTES = (
 	# `api/mobile.py`, exactly as `attach_file_to_document` matches its allowlist
 	# of parents.
 	#
-	# `set_field_boundary`, `set_zone_boundary`, `set_parcel_boundary`,
 	# `convey_parcel`, `link_parcel_to_asset` and the three `update_*` tools are
-	# DELIBERATELY ABSENT. Drawing a boundary, moving a title and repointing an
-	# asset are desk acts with a document open, and a method with no route 404s
-	# — which is the whole design of this table.
+	# DELIBERATELY ABSENT. Moving a title and repointing an asset are desk acts
+	# with a document open, and a method with no route 404s — which is the whole
+	# design of this table.
 	Route("/mobile", mobile_api.list_farm_locations),
 	Route("/mobile", mobile_api.create_farm_location),
 	Route("/mobile", mobile_api.create_field),
 	Route("/mobile", mobile_api.create_irrigation_zone),
 	Route("/mobile", mobile_api.create_parcel),
 	Route("/mobile", mobile_api.create_housing_unit),
+	# v0.110.0. THE THREE BOUNDARY WRITES, WHICH THE PARAGRAPH ABOVE LISTED AS
+	# DELIBERATELY ABSENT UNTIL THIS RELEASE. The sentence it gave was "drawing a
+	# boundary … is a desk act with a document open", and that was true of the
+	# only way of producing one that existed when it was written: a mouse, on
+	# satellite imagery, on a Desk form.
+	#
+	# WALKING ONE IS NOT A DESK ACT. A boundary recorded by carrying a phone round
+	# the edge of a block is a ring of GPS fixes taken by somebody standing on the
+	# corner, rather than a guess at where the canopy ends in an image shot in a
+	# different season — and over a farm the difference between those two comes to
+	# acres. A block's shape is what every geofence answer, every "was the crew in
+	# an authorised area" and every Worker Protection Standard answer about which
+	# block was sprayed resolves through, so a better shape is worth a route.
+	#
+	# NOTHING IS RELAXED FOR THE PHONE. All three go through the same three tools
+	# the AI and the Desk map call, with every check they have always made: a
+	# self-intersection is refused, the enclosed area is compared against the
+	# recorded acreage and a disagreement past a quarter is REFUSED, containment
+	# is reported both ways, and every derived field is recomputed from the
+	# polygon. The area check is the one that earns this route: a walk that cut a
+	# corner or lost fixes in a pocket produces a valid polygon enclosing
+	# noticeably less ground, and it is refused with both figures named.
+	#
+	# THE GATE IS `guard.require_location_role` — Farm Manager, the same gate as
+	# the five creates above and narrower than dispatch. `owning_entity` and
+	# `company` are ABSENT FROM ALL THREE SIGNATURES, so `bind` drops them and no
+	# body can file a polygon against an entity the account is not scoped to; the
+	# entity is read off the record the caller already proved they may reach.
+	Route("/mobile", mobile_api.set_field_boundary),
+	Route("/mobile", mobile_api.set_zone_boundary),
+	Route("/mobile", mobile_api.set_parcel_boundary),
 	# Sprint 8 (v0.78.0): field asset registration, three routes. The iOS
 	# screens are built and the flow they perform — photograph the plate,
 	# register the asset, print the tag, file the photograph — stopped at step

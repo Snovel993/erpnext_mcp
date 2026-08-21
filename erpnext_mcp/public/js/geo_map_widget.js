@@ -1510,4 +1510,31 @@ frappe.provide("erpnext_mcp.geo_map");
 	erpnext_mcp.geo_map.parse_gps_string = parse_gps_string;
 	erpnext_mcp.geo_map.fetch_boundary = fetch_boundary;
 	erpnext_mcp.geo_map.current_geometry = current_geometry;
+
+	//: v0.110.0. THE BOOTSTRAP AND THE BASE LAYERS, EXPORTED FOR THE ONE MAP IN
+	//: THIS APP THAT IS NOT ON A FORM.
+	//:
+	//: `/app/farm-overview` draws every boundary the farm has on one map, and it
+	//: is a Page rather than a doctype form — so `render` above, which starts by
+	//: asking a `frm` for its dashboard section, is not the function it can call.
+	//: What it needs is the two things this file exists to keep in ONE place: the
+	//: CDN the library comes from, and the tile URLs, attributions and zoom
+	//: defaults of the two base layers.
+	//:
+	//: EXPORTING THEM IS THE WHOLE POINT OF THE MODULE DOCSTRING'S FIRST CLAIM.
+	//: "Seven copies of a Leaflet bootstrap is seven places for the CDN URL, the
+	//: tile attribution and the zoom defaults to drift apart, and the first
+	//: symptom of the drift is one form that mysteriously has no map." An eighth
+	//: caller that pasted the constants would be that drift, and the tile
+	//: attributions are a CONDITION OF USE for both providers rather than a
+	//: courtesy — a second copy is a second place for one to be dropped.
+	//:
+	//: NOTHING WAS MOVED TO ADD THEM. `load_leaflet` and `add_base_layers` are
+	//: the same two functions the seven forms have used since v0.32.0, named on
+	//: the namespace as well as in the closure.
+	erpnext_mcp.geo_map.load_leaflet = load_leaflet;
+	erpnext_mcp.geo_map.add_base_layers = add_base_layers;
+	erpnext_mcp.geo_map.MAX_FIT_ZOOM = MAX_FIT_ZOOM;
+	erpnext_mcp.geo_map.POINT_ZOOM = POINT_ZOOM;
+	erpnext_mcp.geo_map.HOME_VIEW = HOME_VIEW;
 })();

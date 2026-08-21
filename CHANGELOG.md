@@ -3,6 +3,94 @@
 All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org).
 
+## 0.110.0 — 2026-08-20 — the whole farm on one map, and a boundary you can walk
+
+**`/app/farm-overview`.** Every parcel, block and irrigation zone this app knows
+the shape of, drawn on one satellite map, with every cabin, barn and shop that
+has a position as a pin on it. The question was asked in plain words — "is there
+a place we can go to see the Fields and zones for the whole farm?" — and until
+now the answer was no.
+
+**The mistakes this makes visible are the ones a form cannot.** Boundaries have
+been stored since v0.12.0 and drawn since v0.32.0, always one record at a time,
+on the form of that record. A block traced twice under two names, a zone drawn on
+the neighbour's ground, two parcels overlapping by four acres, a cabin whose GPS
+was typed with the longitude positive — every one of those is invisible on a form
+and obvious on a map of the farm. That is the argument `geo_map_widget.js` has
+always made for drawing a single boundary, applied to the set rather than to the
+record.
+
+**It reads and it writes nothing, and that is not a phase one.**
+`api/gis.save_boundary` compares a polygon against ONE record's recorded acreage
+before it commits — that is the whole point of it — and a map of forty blocks has
+no record in front of it. So there is no draw tool here. Every popup carries a
+link to the form, which is where the boundary editor already lives.
+
+**Nothing about the map is copied.** The Leaflet CDN URL, both tile URLs, both
+attributions and the zoom defaults stay in `geo_map_widget.js`, whose own
+docstring warned that "seven copies of a Leaflet bootstrap is seven places for
+the CDN URL, the tile attribution and the zoom defaults to drift apart". This
+page is the eighth caller; `load_leaflet` and `add_base_layers` are exported on
+`erpnext_mcp.geo_map` for it, and a test asserts the page holds no tile URL of
+its own. The Esri and OpenStreetMap attributions are a CONDITION OF USE rather
+than a courtesy, and a second copy is a second place for one to be dropped.
+
+**It needs neither shapely nor h3.** The stored text is read with `json.loads` and
+bounded by walking the coordinates, so a bench that cannot compute an area can
+still look at the boundaries it already has. **A row whose stored text will not
+parse is REPORTED, with the docname and the reason** — a boundary that silently
+does not draw looks exactly like a block that was never traced, and those are
+opposite problems with opposite fixes. So are "forty blocks" and "forty blocks,
+nine of them never traced": both counts are on the legend.
+
+**The gate is Frappe's own read permission, asked per register.** A register this
+login may not read is NAMED and its layer is left off, rather than the page
+refusing to open. The entity picker is filtered by permission on the Company
+itself, and an entity that is not offered is not reachable by naming it in the
+request either.
+
+────────────────────────────────────────────────────────────────────────────
+
+**`set_field_boundary`, `set_zone_boundary` and `set_parcel_boundary` are on the
+mobile surface.** `routes.py` has said since v0.98.0 that all three were
+"DELIBERATELY ABSENT — drawing a boundary … is a desk act with a document open",
+and that was true of the only way of producing one that existed when it was
+written: a mouse, on satellite imagery, on a Desk form.
+
+**Walking one is not a desk act.** A boundary recorded by carrying a phone round
+the edge of a block is a ring of GPS fixes taken by somebody standing on the
+corner, rather than a guess at where the canopy ends in an image shot in another
+season — and over a farm the difference comes to acres. A block's shape is what
+every geofence answer, every "was the crew in an authorised area" and every
+Worker Protection Standard answer about which block was sprayed resolves through.
+
+**Nothing is relaxed for the phone.** All three run the same three tools the AI
+and the Desk map call: a self-intersection is refused, containment is reported
+both ways and never enforced, every derived field is recomputed from the polygon,
+and **the enclosed area is compared against the recorded acreage with a
+disagreement past a quarter REFUSED outright**. That last check is what earns the
+route — a walk that cut a corner, stopped early, or lost fixes in a pocket
+produces a polygon that is valid, on Earth, and about noticeably less ground than
+the block is recorded as, and nothing about the shape itself says so. `dry_run`
+goes straight through, which on a handset is the difference between a correction
+that takes thirty seconds and one that takes a drive back out.
+
+**The gate is `guard.require_location_role` — Farm Manager**, the same gate as the
+five location creates and narrower than dispatch. `owning_entity` and `company`
+are absent from all three signatures, so `bind` drops them and no body can file a
+polygon against an entity the account is not scoped to; the entity is read off
+the record the caller has already proved they may reach. The docname is scoped by
+`_scoped_location` and not by `guard.require_scoped_doc`, which reads a column
+called `company` that none of these three registers has.
+
+`MobileAPI.swift` names none of the three yet, so they sit in
+`PENDING_IOS_INTEGRATION`: the server half ships first and the iOS half is a
+client change rather than a release of both, which is the order item 11's
+location routes landed in.
+
+Operator guide: [docs/farm-overview.md](docs/farm-overview.md). Release notes:
+[RELEASES/v0.110.0.md](RELEASES/v0.110.0.md).
+
 ## 0.109.0 — 2026-08-20 — a field whose only test was a warning not to use it
 
 `roles.capability_of` reported `senior_role` as "the most capable role this

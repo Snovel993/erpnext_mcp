@@ -392,6 +392,15 @@ class TheSurfaceIsClosed(MobileAPITestCase):
 		"list_certifications",
 		"get_certification",
 		"create_farm_location",
+		# v0.110.0. The three boundary writes. HERE RATHER THAN IN `MOBILE`
+		# because `MobileAPI.swift` names none of them yet: the server half is
+		# published first so the iOS half is a client change rather than a
+		# release of both, which is the same order item 11's location routes
+		# landed in. A walked boundary is a ring of GPS fixes the handset already
+		# knows how to collect; what it had nowhere to send them.
+		"set_field_boundary",
+		"set_zone_boundary",
+		"set_parcel_boundary",
 		"universal_scan",
 		"classify_receipt",
 		"create_expense_receipt",

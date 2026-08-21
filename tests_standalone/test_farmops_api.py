@@ -557,6 +557,15 @@ class TheSurfaceIsClosed(FarmOpsAPITestCase):
 		"/mobile/create_irrigation_zone",
 		"/mobile/create_parcel",
 		"/mobile/create_housing_unit",
+		# v0.110.0. The three boundary writes, which the location block above
+		# listed as deliberately absent until this release — see `routes.py` for
+		# why walking a boundary is not the desk act that drawing one is. All
+		# three carry `guard.require_location_role`, and `owning_entity` and
+		# `company` are ABSENT from every one of the three signatures, so `bind`
+		# drops them and no body can file a polygon against another entity.
+		"/mobile/set_field_boundary",
+		"/mobile/set_zone_boundary",
+		"/mobile/set_parcel_boundary",
 		"/mobile/list_payroll_deductions",
 		"/mobile/get_payroll_deduction",
 		"/mobile/list_employee_deductions",
