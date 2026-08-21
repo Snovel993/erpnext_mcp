@@ -499,10 +499,19 @@ function wire_tool_console(frm, wrapper) {
 		preview_profile(frm, $(this).attr("data-profile"));
 	});
 
-	// The counts have to move when a checkbox does, and there is no per-field
-	// event to bind seven hundred handlers to — nor any reason to. One delegated
-	// listener on the form recomputes from `frm.doc`, which is what the form has
-	// already updated by the time the event reaches here.
+	wire_count_listener(frm, wrapper);
+}
+
+// The counts have to move when a checkbox does, and there is no per-field event
+// to bind seven hundred handlers to — nor any reason to. One delegated listener
+// on the form recomputes from `frm.doc`, which is what the form has already
+// updated by the time the event reaches here.
+//
+// Its own function because `bulk_set` DETACHES it for the duration of a batch:
+// this handler walks the whole catalogue, so leaving it on during a set of
+// seven hundred switches would run it seven hundred times over seven hundred
+// entries. Namespaced so `off` cannot take anybody else's handler with it.
+function wire_count_listener(frm, wrapper) {
 	frm.$wrapper.off("change.mcpconsole").on("change.mcpconsole", "input[type=checkbox]", () => {
 		refresh_tool_counts(frm, wrapper);
 	});
@@ -602,11 +611,27 @@ function bulk_set(frm, wrapper, value) {
 		return;
 	}
 	const apply = () => {
+		// ONE `set_value` WITH A DICT, NOT 759 CALLS. With no filter active this
+		// touches every switch on the form, and `set_value` re-renders the field
+		// and re-runs the form's own change handling per call — seven hundred of
+		// those in a loop locks the tab up for seconds on a laptop, which reads as
+		// the page having crashed rather than as it working. The dict form is
+		// Frappe's own batch API and does the render pass once.
+		//
+		// The count listener comes off first for the same reason: it recomputes
+		// over the whole catalogue on every checkbox event, and leaving it
+		// attached makes a bulk set quadratic. Counts and filter are refreshed
+		// once, at the end, from `frm.doc`.
+		const patch = {};
 		visible.each(function () {
-			frm.set_value($(this).attr("data-fieldname"), value ? 1 : 0);
+			patch[$(this).attr("data-fieldname")] = value ? 1 : 0;
 		});
-		refresh_tool_counts(frm, wrapper);
-		apply_tool_filter(frm, wrapper);
+		frm.$wrapper.off("change.mcpconsole");
+		Promise.resolve(frm.set_value(patch)).then(() => {
+			wire_count_listener(frm, wrapper);
+			refresh_tool_counts(frm, wrapper);
+			apply_tool_filter(frm, wrapper);
+		});
 	};
 	if (!value) {
 		apply();
