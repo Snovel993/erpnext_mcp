@@ -102,6 +102,12 @@ RULE_CAP = 500
 #: night; pushing all of them would train every supervisor on the farm to swipe
 #: erpnext_mcp notifications away without looking, and the first thing lost when
 #: that habit sets in is the break horn.
+#:
+#: ADDING A SEVERITY HERE BREAKS `MAX_PUSHES_PER_SWEEP` BELOW, which is not
+#: obvious from this line and is the reason this sentence exists. That cap takes
+#: the first ten candidates, which is only safe while every candidate is equally
+#: urgent — i.e. while this set holds exactly one severity. Read its comment
+#: before widening this.
 PUSH_SEVERITIES = frozenset({SEVERITY_CRITICAL})
 
 #: v0.107.0. MOST PHONES-RINGING EVENTS ONE SWEEP WILL PRODUCE. The sibling of
@@ -117,6 +123,20 @@ PUSH_SEVERITIES = frozenset({SEVERITY_CRITICAL})
 #: category off. The alerts are all still RAISED — nothing here touches the
 #: calendar — and `push_suppressed` says how many did not ring, so the operator
 #: reading the report can see the backlog rather than infer it from silence.
+#:
+#: THIS CAP IS ONLY SAFE BECAUSE `PUSH_SEVERITIES` IS CRITICAL-ONLY, and that
+#: coupling is invisible from either constant on its own — which is why it is
+#: written here rather than left to be rediscovered. Every candidate for the ten
+#: slots is already Critical, so taking the first ten cannot silently outrank the
+#: most urgent: there is nothing more urgent among them to outrank. Widen
+#: `PUSH_SEVERITIES` to include `Warning` and that stops being true the same day.
+#: A sweep would then spend its whole budget on ten certificates expiring in five
+#: weeks, drop a cabin nobody may sleep in, and report `push_suppressed: 1` —
+#: which reads as a small backlog and is in fact the one alert that mattered.
+#:
+#: So: anybody adding a severity here has to make the cap severity-aware in the
+#: same commit — order the candidates worst-first, or give Critical its own
+#: budget. `_push_and_note` is where that would go.
 MAX_PUSHES_PER_SWEEP = 10
 
 
